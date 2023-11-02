@@ -80,13 +80,15 @@ mask = load();
 %% Select ROI
 % with or wihout Mask and Map
 
-[rois, traces] = select_ROI(intensity_time_series,nrows,ncols,t, colors, mask, map);
+[rois, traces] = select_ROI(intensity_time_series, nrows, ncols, t, colors, mask, map);
 
 fig_filename = fullfile(save_path, '1_raw_trace.fig');
 png_filename = fullfile(save_path, '1_raw_trace.png');
+roi_filename = fullfile(save_path, '1_raw_roi.png');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
+save(roi_filename, 'rois');
 
 %% Photobleaching correction
 traces_highpassfilted = highpassfilter(traces, freq);
