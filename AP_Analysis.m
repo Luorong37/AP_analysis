@@ -53,9 +53,10 @@ t1 = tic; % Start a timer
 
 % if SNR is low, please large the bin.
 bin = 2;
-Map = [];
+map = [];
+mask = [];
 [quick_map] = quick_find_cell(intensity_time_series, nrows, ncols, bin, freq);
-Map = quick_map;
+map = quick_map;
 
 % Visualize correlation coefficients as heatmap
 figure()
@@ -73,22 +74,13 @@ save(mat_filename, 'Map');
 
 t2 = toc(t1); % Get the elapsed time
 fprintf('Finished mask creating after %d s\n',round(t2))
+%% Load selected Mask
+mask = load();
 
 %% Select ROI
 % with or wihout Mask and Map
-mask_map = [];
-% if isempty(Cn)
-%     Map = [];
-% else
-%     Map = Cn;
-% end
-if isempty(Mask) && isempty(Map)
-    [rois, traces] = select_ROI_v2(intensity_time_series, nrows,ncols,t, colors);
-elseif ~isempty(Mask)
-    [rois, traces] = selected_ROI_v2(intensity_time_series,nrows,ncols,t, colors, mask_map);
-elseif ~isempty(Map)
-    [rois, traces] = select_ROI_with_map_v2(intensity_time_series,nrows,ncols,t, colors, Map);
-end
+
+[rois, traces] = selected_ROI_v2(intensity_time_series,nrows,ncols,t, colors, mask, map);
 
 fig_filename = fullfile(save_path, '1_raw_trace.fig');
 png_filename = fullfile(save_path, '1_raw_trace.png');
