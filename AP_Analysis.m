@@ -80,7 +80,7 @@ mask = load();
 %% Select ROI
 % with or wihout Mask and Map
 
-[rois, traces] = selected_ROI_v2(intensity_time_series,nrows,ncols,t, colors, mask, map);
+[rois, traces] = select_ROI(intensity_time_series,nrows,ncols,t, colors, mask, map);
 
 fig_filename = fullfile(save_path, '1_raw_trace.fig');
 png_filename = fullfile(save_path, '1_raw_trace.png');

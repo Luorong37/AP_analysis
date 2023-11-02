@@ -1,11 +1,10 @@
-%% Find Cell Mask by sensitivity map
-%v2.0
-% 2.0 update: can input ROI or input without ROI
+%% Select ROI
+
 
 function  [rois, traces] = select_ROI(intensity_time_series, num_rows,num_cols,t, colors, mask, map)
 % -----------------------------with Mask-----------------------------
 
-if isempty(mask) && isempty(Map)
+if isempty(mask) && isempty(map)
    rois = {}; % Initialize cell array to store the ROIs
     traces = [];
     fig = gcf;
@@ -191,7 +190,7 @@ elseif ~isempty(Map)
             waitfor(fig, 'UserData');
             if strcmp(fig.UserData, 'stop')
                 break;
-            elseif strcmp(fig.UserData, 'spacePressed');
+            elseif strcmp(fig.UserData, 'spacePressed')
                 break;
             end
         end
@@ -205,22 +204,3 @@ elseif ~isempty(Map)
     fprintf('Finished ROI selection\n')
 end
 end
-%     % Allow the user to select an ROI or finish
-%     % Wait for a button press or a click
-%     t1 = tic; % Start a timer
-%     waitforbuttonpress;
-%     t2 = toc(t1); % Get the elapsed time
-%     waitforbuttonpress;
-%     % Check if the button press was a double-click
-%     t3 = toc(t1); % Get the elapsed time again
-%     % If it's a double-click, exit the loop
-%     if t3 -t2 < tolerance
-%         break;
-%     end
-
-
-%     %Select ROI in Sensitivity Map before matlab2017b
-%     h = impoly(map_axe);
-%     setColor(h, colors{mod(length(rois), length(colors))+1});
-%     setPositionConstraintFcn(h, @getPositionConstraint);
-%     mask = createMask(h);
