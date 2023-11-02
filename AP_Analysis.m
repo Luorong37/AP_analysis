@@ -55,7 +55,7 @@ t1 = tic; % Start a timer
 bin = 2;
 map = [];
 mask = [];
-[quick_map] = quick_find_cell(intensity_time_series, nrows, ncols, bin, freq);
+[quick_map] = create_map(intensity_time_series, nrows, ncols, bin);
 map = quick_map;
 
 % Visualize correlation coefficients as heatmap

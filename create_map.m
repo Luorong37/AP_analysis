@@ -1,7 +1,7 @@
-%% Find Cell Mask
-% find cell mask according to plot the min SNR(minus) of each pixel.
+%% Creat cell mask
+% find cell mask according to plot the extreme SNR(minus) of each pixel.
 
-function [quick_map] = quick_find_cell(intensity_time_series, num_rows, num_cols, bin, Hz)
+function [quick_map] = create_map(intensity_time_series, num_rows, num_cols, bin)
 
 % Design high-pass filter
 % dt = 1 / Hz;
