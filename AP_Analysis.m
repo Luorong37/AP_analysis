@@ -38,11 +38,6 @@ dt = 1 / freq;
 % Load image file
 [intensity_time_series, ncols, nrows, nframes] = load_movie(file_path,file_extension);
 t = (1:nframes) * dt;
-Map = [];
-% im = cell(num_frames, 1);
-% for i = 1:num_frames
-%     im{i} = reshape(uint16(intensity_time_series(:,i)), num_rows, num_cols);
-% end
 
 fprintf('Finished loading movie\n')
 %% Save loaded movie (optional)
@@ -58,6 +53,7 @@ t1 = tic; % Start a timer
 
 % if SNR is low, please large the bin.
 bin = 2;
+Map = [];
 [quick_map] = quick_find_cell(intensity_time_series, nrows, ncols, bin, freq);
 Map = quick_map;
 
