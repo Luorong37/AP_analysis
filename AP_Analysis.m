@@ -45,7 +45,7 @@ Map = [];
 % end
 
 fprintf('Finished loading movie\n')
-%% Save loaded movie
+%% Save loaded movie (optional)
 t1 = tic; % Start a timer
 fprintf('Saving...\n')
 save([save_path '0_Raw_data'],"intensity_time_series",'ncols','nrows','nframes','freq');
