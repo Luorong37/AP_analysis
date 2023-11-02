@@ -12,7 +12,7 @@ clc;
 fprintf('Loading...\n')
 
 % Define folder path and file extension
-folder_path = 'D:\Temple\20230810-170226recordPVH_2000'; 
+folder_path = 'D:\Temple\20230810-170226recordPVH_2000';
 file_name = '\'; % start with '\' if do not save at same folder
 % colors = {'r', 'g', 'b', 'm', 'c', 'y', 'k'}; % Define a set of colors
 colors = lines;
@@ -70,12 +70,13 @@ mat_filename = fullfile(save_path, '0_Sensitivity_Map.mat');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-save(mat_filename, 'Map');
+save(mat_filename, 'map');
 
 t2 = toc(t1); % Get the elapsed time
 fprintf('Finished mask creating after %d s\n',round(t2))
 %% Load selected Mask
 mask = load();
+mask = mask.map;
 
 %% Select ROI
 % with or wihout Mask and Map
@@ -119,8 +120,8 @@ hold on;
 for i = 1:length(rois)
     plot(t, traces_highpassfilted(:,i) * polarity ,'Color',colors(i,:));
     if i < length(rois)
-    [~,peak_min_height(i)] = ginput(1);
-    plot(t,ones(1,length(t)).*peak_min_height(i),'Color',colors(i,:),'LineWidth',2);
+        [~,peak_min_height(i)] = ginput(1);
+        plot(t,ones(1,length(t)).*peak_min_height(i),'Color',colors(i,:),'LineWidth',2);
     end
 end
 hold off;
@@ -167,12 +168,12 @@ for i = 1:length(rois)
         % set Prominence
         MinPeakProminence = max(trace)*0.3;
 
-%         findpeaks(trace,t, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_min_height(i)); 
-%         [peaks_amplitude{i}, peaks_index{i}] =  findpeaks(trace, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_min_height(i));
-        findpeaks(trace,t, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_min_height(i)); 
+        %         findpeaks(trace,t, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_min_height(i));
+        %         [peaks_amplitude{i}, peaks_index{i}] =  findpeaks(trace, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_min_height(i));
+        findpeaks(trace,t, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_min_height(i));
         [peaks_amplitude{i}, peaks_index{i}] =  findpeaks(trace, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_min_height(i));
 
-        
+
         hold on;
     else
         plot(t, traces_highpassfilted(:,i) * polarity ,'Color',colors(i,:));
@@ -255,7 +256,7 @@ saveas(gcf, png_filename, 'png');
 AP_list = cell(1, length(rois)-1);
 each_AP = struct('Trace', [], 'AP_number', [], 'AP_index',[],'AP_amp',[], ...
     'Amplitude', [],'FWHM',[], 'AP_sensitivity',[],'Sensitivity',[], ...
-            'AP_SNR', [], 'SNR', []);
+    'AP_SNR', [], 'SNR', []);
 % each trace
 for i = 1:length(rois)-1 % i for trace
     peaks_num = length(peaks_index{i});
@@ -266,10 +267,10 @@ for i = 1:length(rois)-1 % i for trace
     each_trace_SNR = SNR_trace(:,i);
 
     AP_list{i} = cell(1, length(peaks_index{i}));
-    
+
     % each peak
     for j = 1:peaks_num % j for peak
-        peak_index_ij = peaks_index_i(j); 
+        peak_index_ij = peaks_index_i(j);
         peak_amp_ij = peaks_amp_i(j);
 
         % 防止出边缘
@@ -294,10 +295,10 @@ for i = 1:length(rois)-1 % i for trace
             AP_sensitivity = [AP_sensitivity, NaN(1,peak_index_ij + AP_window_size - nframes)];
             AP_SNR = [AP_SNR NaN(1,peak_index_ij + AP_window_size - nframes)];
         end
-           
+
         AP_base = mean(AP_amp,'omitnan');
         HM = 0.5 * (AP_base + peak_amp_ij);
-        
+
         % Calculate FWHM
         % 在峰左侧找到半最大值的位置
         [left_below_idx, left_above_idx] = deal([], []);
@@ -307,7 +308,7 @@ for i = 1:length(rois)-1 % i for trace
         if any(AP_amp(1:AP_window_size + 1) > HM)
             left_above_idx = left_below_idx - 1 + find(AP_amp(left_below_idx:AP_window_size+1) > HM, 1, 'first');
         end
-        
+
         % 在峰右侧找到半最大值的位置
         [right_above_idx, right_below_idx] = deal([], []);
         if any(AP_amp(AP_window_size + 1 :end) < HM)
@@ -317,25 +318,25 @@ for i = 1:length(rois)-1 % i for trace
             right_above_idx = find(AP_amp(AP_window_size+1:right_below_idx) > HM, 1, 'last') + AP_window_size;
         end
 
-        
+
         % 使用线性插值估算精确的半最大值位置
         if ~isempty(left_below_idx) && ~isempty(left_above_idx)
             idx_left_exact = left_below_idx + (HM - AP_amp(left_below_idx)) / (AP_amp(left_above_idx) - AP_amp(left_below_idx));
         else
             idx_left_exact = [];
         end
-        
+
         if ~isempty(right_above_idx) && ~isempty(right_below_idx)
             idx_right_exact = right_below_idx - (AP_amp(right_above_idx) - HM) / (AP_amp(right_above_idx) - AP_amp(right_below_idx));
         else
             idx_right_exact = [];
         end
-        
+
         % 计算FWHM
         if isempty(idx_left_exact) || isempty(idx_right_exact)
             FWHM = NaN; % 或者可以设定为某个默认值
         else
-            FWHM = (idx_right_exact - idx_left_exact) * dt; 
+            FWHM = (idx_right_exact - idx_left_exact) * dt;
         end
 
         % Amplitude = abs(AP_base - peak_amp_ij);
@@ -400,7 +401,7 @@ for i = 1:length(AP_list)
 end
 
 T_ave = table(ROI_number, AP_number, avg_amp, avg_FWHM, avg_sensitivity, avg_SNR, ...
-        'VariableNames', {'ROI Number','AP Number', 'Average Amplitude', 'Average FWHM (ms)', 'Average Sensitivity', 'Average SNR'});
+    'VariableNames', {'ROI Number','AP Number', 'Average Amplitude', 'Average FWHM (ms)', 'Average Sensitivity', 'Average SNR'});
 writetable(T_ave, [save_path '\AP_data.xlsx'], 'Sheet', 'Average');
 
 fprintf('Finished statistic AP\n')
@@ -417,7 +418,7 @@ plot_col = 0;
 subplot(1,plot_cols,plot_cols);
 title('All Average');
 if polarity == -1
-    set(gca,'YDir','reverse') 
+    set(gca,'YDir','reverse')
 end
 hold on;
 
@@ -441,9 +442,9 @@ for i = 1:length(rois)-1
             subplot(1,plot_cols,plot_col);
             plot([1:AP_window_size*2+1]*dt, each_AP.AP_sensitivity','Color',[0.8 0.8 0.8]);
             hold on;
-%             subplot(1,plot_cols,plot_cols);
-%             plot([1:AP_window_size*2+1]*dt, each_AP.AP_sensitivity','Color',[0.8 0.8 0.8]);
-%             hold on;
+            %             subplot(1,plot_cols,plot_cols);
+            %             plot([1:AP_window_size*2+1]*dt, each_AP.AP_sensitivity','Color',[0.8 0.8 0.8]);
+            %             hold on;
         end
         %plot average AP
         subplot(1,plot_cols,plot_col);
@@ -473,7 +474,7 @@ plot_col = 0;
 subplot(1,plot_cols,plot_cols);
 title('All Average SNR');
 if polarity == -1
-    set(gca,'YDir','reverse') 
+    set(gca,'YDir','reverse')
 end
 hold on;
 
@@ -497,9 +498,9 @@ for i = 1:length(rois)-1
             subplot(1,plot_cols,plot_col);
             plot([1:AP_window_size*2+1]*dt, each_AP.AP_SNR','Color',[0.8 0.8 0.8]);
             hold on;
-%             subplot(1,plot_cols,plot_cols);
-%             plot([1:AP_window_size*2+1]*dt, each_AP.AP_SNR','Color',[0.8 0.8 0.8]);
-%             hold on;
+            %             subplot(1,plot_cols,plot_cols);
+            %             plot([1:AP_window_size*2+1]*dt, each_AP.AP_SNR','Color',[0.8 0.8 0.8]);
+            %             hold on;
         end
         %plot average AP
         subplot(1,plot_cols,plot_col);
@@ -518,56 +519,7 @@ png_filename = fullfile(save_path, '6_average_AP_SNR.png');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 
-% %%  SNR calcuation
-% 
-% % Calculate SNR-time trace for each ROI
-% traces_snr = zeros(size(traces_filt));
-% shift = zeros(size(rois)); % plot shift
-% for i = 1:size(traces_filt, 2)
-%     std_dev = std(traces_filt(:,i));
-%     % Calculate SNR for each time point
-%     traces_snr(:,i) = traces_filt(:,i) ./ std_dev;
-%     if i > 1
-%         shift(i) = max(traces_snr(:,i))-min(traces_snr(:,i));
-%     else
-%         shift(i) = 0;
-%     end
-% end
-% % Plot SNR-time trace for each ROI
-% figure();
-% subplot(1,2,2);
-% hold on;
-% for i = 1:length(rois)
-%     plot(t, traces_snr(:,i) + sum(shift(1:i)), 'Color', colors(mod(i-1, length(colors))+1,:));
-% end
-% hold off;
-% xlabel('Time (s)');
-% ylabel('SNR');
-% title('SNR of selected ROIs over time');
-% 
-% % Create a legend label for each ROI
-% legend_labels = cell(1, length(rois));
-% for i = 1:length(rois)
-%     legend_labels{i} = sprintf('ROI %d', i);
-% end
-% legend(legend_labels);
-% 
-% % Display ROI selection figure in the same figure
-% subplot(1,2,1);
-% imshow(imadjust(im{1}));
-% title('Selected ROIs');
-% hold on;
-% for i = 1:length(rois)
-%     boundary = bwboundaries(rois{i});
-%     plot(boundary{1}(:,2), boundary{1}(:,1),'Color', colors(mod(i-1, length(colors))+1,:), 'LineWidth', 1.5);
-% end
-% hold off;
-% 
-% fig_filename = fullfile(save_path, '3_SNR_trace.fig');
-% png_filename = fullfile(save_path, '3_SNR_trace.png');
-% 
-% saveas(gcf, fig_filename, 'fig');
-% saveas(gcf, png_filename, 'png');
+
 
 
 
