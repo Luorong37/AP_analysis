@@ -9,6 +9,8 @@ clc;
 % Need Toolbox:
 % Image Processing Toolbox, Curve Fitting Toolbox, Signal Processing Toolbox
 
+fprintf('Loading...\n')
+
 % Define folder path and file extension
 folder_path = 'D:\Temple\20230810-170226recordPVH_2000'; 
 file_name = '\'; % start with '\' if do not save at same folder
@@ -45,6 +47,7 @@ Map = [];
 fprintf('Finished loading movie\n')
 %% Save loaded movie
 t1 = tic; % Start a timer
+fprintf('Saving...\n')
 save([save_path '0_Raw_data'],"intensity_time_series",'ncols','nrows','nframes','freq');
 t2 = toc(t1); % Get the elapsed time
 fprintf('Finished saving movie after %d s\n',round(t2))
