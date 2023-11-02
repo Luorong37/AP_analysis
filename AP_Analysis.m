@@ -43,6 +43,7 @@ Map = [];
 
 fprintf('Finished loading movie\n')
 %% Save loaded movie
+
 save([save_path '0_Raw_data'],"intensity_time_series",'num_cols','num_rows','num_frames','Hz');
 fprintf('Finished saving movie\n')
 
@@ -50,7 +51,7 @@ fprintf('Finished saving movie\n')
 t1 = tic; % Start a timer
 
 % if SNR is low, large the bin.
-bin = 1;
+bin = 2;
 [quick_map] = quick_find_cell(intensity_time_series, num_rows, num_cols, bin, Hz);
 Map = quick_map;
 
