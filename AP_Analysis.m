@@ -2,6 +2,7 @@ clear all;
 clc;
 
 %% Loading
+
 % Need Functions:
 % load_tif_movie, readBinMov,select_ROI_and_draw_trace, find_cell
 
@@ -9,12 +10,12 @@ clc;
 % Image Processing Toolbox, Curve Fitting Toolbox, Signal Processing Toolbox
 
 % Define folder path and file extension
-folder_path = 'E:\20231025 zsy\JF552\cell2\CQ1'; 
-file_name = '\movie.bin'; % start with '\' if do not save at same folder
+folder_path = 'D:\Temple\20230810-170226recordPVH_2000'; 
+file_name = '\'; % start with '\' if do not save at same folder
 % colors = {'r', 'g', 'b', 'm', 'c', 'y', 'k'}; % Define a set of colors
 colors = lines;
 % Prompt user for frame rate in Hz
-Hz = 400;
+freq = 400;
 
 % read file
 file_path = [folder_path file_name];
@@ -30,11 +31,11 @@ format =string(cell2mat(split_path(end))) ;
 mkdir(save_path);
 
 % Calculate time axis
-dt = 1 / Hz;
+dt = 1 / freq;
 
 % Load image file
-[intensity_time_series,  num_cols,num_rows,num_frames] = load_movie(file_path,file_extension);
-t = (1:num_frames) * dt;
+[intensity_time_series, ncols, nrows, nframes] = load_movie(file_path,file_extension);
+t = (1:nframes) * dt;
 Map = [];
 % im = cell(num_frames, 1);
 % for i = 1:num_frames
@@ -44,7 +45,7 @@ Map = [];
 fprintf('Finished loading movie\n')
 %% Save loaded movie
 
-save([save_path '0_Raw_data'],"intensity_time_series",'num_cols','num_rows','num_frames','Hz');
+save([save_path '0_Raw_data'],"intensity_time_series",'ncols','nrows','nframes','freq');
 fprintf('Finished saving movie\n')
 
 %% Create a map quickly (optional)
@@ -52,7 +53,7 @@ t1 = tic; % Start a timer
 
 % if SNR is low, large the bin.
 bin = 2;
-[quick_map] = quick_find_cell(intensity_time_series, num_rows, num_cols, bin, Hz);
+[quick_map] = quick_find_cell(intensity_time_series, nrows, ncols, bin, freq);
 Map = quick_map;
 
 % Visualize correlation coefficients as heatmap
@@ -80,11 +81,11 @@ fprintf('Finished mask creating after %d s\n',round(t2))
 %     Map = Cn;
 % end
 if isempty(Mask) && isempty(Map)
-    [rois, traces] = select_ROI_v2(intensity_time_series, num_rows,num_cols,t, colors);
+    [rois, traces] = select_ROI_v2(intensity_time_series, nrows,ncols,t, colors);
 elseif ~isempty(Mask)
-    [rois, traces] = selected_ROI_v2(intensity_time_series,num_rows,num_cols,t, colors, mask_map);
+    [rois, traces] = selected_ROI_v2(intensity_time_series,nrows,ncols,t, colors, mask_map);
 elseif ~isempty(Map)
-    [rois, traces] = select_ROI_with_map_v2(intensity_time_series,num_rows,num_cols,t, colors, Map);
+    [rois, traces] = select_ROI_with_map_v2(intensity_time_series,nrows,ncols,t, colors, Map);
 end
 
 fig_filename = fullfile(save_path, '1_raw_trace.fig');
@@ -94,7 +95,7 @@ saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 
 %% Photobleaching correction
-traces_highpassfilted = highpassfilter(traces, Hz);
+traces_highpassfilted = highpassfilter(traces, freq);
 
 % polarity judge:
 polarity = -1;
@@ -106,7 +107,7 @@ fig = figure();
 set(fig,'Position',get(0,'Screensize'));
 % Display ROI selection figure in the same figure
 subplot(1,2,1);
-imshow(imadjust(uint16(mean(reshape(intensity_time_series, num_cols,num_rows,[]),3))));
+imshow(imadjust(uint16(mean(reshape(intensity_time_series, ncols,nrows,[]),3))));
 hold on;
 title(sprintf('Selected ROIs'));
 for i = 1:length(rois)
@@ -195,7 +196,7 @@ saveas(gcf, png_filename, 'png');
 figure();
 subplot(1,3,1);
 title(sprintf('Selected ROIs'));
-imshow(imadjust(uint16(mean(reshape(intensity_time_series, num_cols,num_rows,[]),3))));
+imshow(imadjust(uint16(mean(reshape(intensity_time_series, ncols,nrows,[]),3))));
 hold on;
 title(sprintf('Selected ROIs'));
 
@@ -205,9 +206,9 @@ for i = 1:length(rois)
 end
 
 % plot and calculate
-intensity_trace = zeros(num_frames,length(rois));
-sentivity_trace = zeros(num_frames,length(rois));
-SNR_trace = zeros(num_frames,length(rois));
+intensity_trace = zeros(nframes,length(rois));
+sentivity_trace = zeros(nframes,length(rois));
+SNR_trace = zeros(nframes,length(rois));
 
 subplot(1,3,2);
 title('Sensitivity');
@@ -277,7 +278,7 @@ for i = 1:length(rois)-1 % i for trace
 
         % 防止出边缘
         AP_start_index = max(1, peak_index_ij - AP_window_size);
-        AP_end_index = min(num_frames, peak_index_ij + AP_window_size);
+        AP_end_index = min(nframes, peak_index_ij + AP_window_size);
         AP_index = AP_start_index : AP_end_index;
 
         % 检索强度，灵敏度，SNR
@@ -292,10 +293,10 @@ for i = 1:length(rois)-1 % i for trace
             AP_amp = [NaN(1,0 - (peak_index_ij - AP_window_size)+1), AP_amp];
             AP_sensitivity = [NaN(1,0 - (peak_index_ij - AP_window_size)+1),AP_sensitivity];
             AP_SNR = [NaN(1,0 - (peak_index_ij - AP_window_size)+1),AP_SNR];
-        elseif num_frames < peak_index_ij + AP_window_size
-            AP_amp = [AP_amp, NaN(1,peak_index_ij + AP_window_size - num_frames)];
-            AP_sensitivity = [AP_sensitivity, NaN(1,peak_index_ij + AP_window_size - num_frames)];
-            AP_SNR = [AP_SNR NaN(1,peak_index_ij + AP_window_size - num_frames)];
+        elseif nframes < peak_index_ij + AP_window_size
+            AP_amp = [AP_amp, NaN(1,peak_index_ij + AP_window_size - nframes)];
+            AP_sensitivity = [AP_sensitivity, NaN(1,peak_index_ij + AP_window_size - nframes)];
+            AP_SNR = [AP_SNR NaN(1,peak_index_ij + AP_window_size - nframes)];
         end
            
         AP_base = mean(AP_amp,'omitnan');
