@@ -48,14 +48,15 @@ fprintf('Finished loading movie\n')
 %% Save loaded movie (optional)
 t1 = tic; % Start a timer
 fprintf('Saving...\n')
-save([save_path '0_Raw_data'],"intensity_time_series",'ncols','nrows','nframes','freq');
+raw_filename = fullfile(save_path, '0_Raw_data.mat');
+save(raw_filename,"intensity_time_series",'ncols','nrows','nframes','freq');
 t2 = toc(t1); % Get the elapsed time
 fprintf('Finished saving movie after %d s\n',round(t2))
 
 %% Create a map quickly (optional)
 t1 = tic; % Start a timer
 
-% if SNR is low, large the bin.
+% if SNR is low, please large the bin.
 bin = 2;
 [quick_map] = quick_find_cell(intensity_time_series, nrows, ncols, bin, freq);
 Map = quick_map;
@@ -68,17 +69,18 @@ axis image;
 colorbar;
 fig_filename = fullfile(save_path, '0_Sensitivity_Map.fig');
 png_filename = fullfile(save_path, '0_Sensitivity_Map.png');
+mat_filename = fullfile(save_path, '0_Sensitivity_Map.mat');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
+save(mat_filename, 'Map');
 
 t2 = toc(t1); % Get the elapsed time
 fprintf('Finished mask creating after %d s\n',round(t2))
 
 %% Select ROI
 % with or wihout Mask and Map
-% Mask = load('E:\20231025 zsy\JF552\cell2\qucik_map.mat');
-% mask_map = {Mask.quick_map};
+mask_map = [];
 % if isempty(Cn)
 %     Map = [];
 % else
