@@ -29,7 +29,6 @@ end
 its_size = size(intensity_time_series);
 nframe = its_size(end);
 % Initialize matrix to store cell labels
-[ncol,nrow]
 quick_map = zeros(ncol/bin * nrow/bin,1);
 
 % change the Image to bin16
