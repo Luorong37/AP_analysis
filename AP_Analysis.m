@@ -44,9 +44,10 @@ Map = [];
 
 fprintf('Finished loading movie\n')
 %% Save loaded movie
-
+t1 = tic; % Start a timer
 save([save_path '0_Raw_data'],"intensity_time_series",'ncols','nrows','nframes','freq');
-fprintf('Finished saving movie\n')
+t2 = toc(t1); % Get the elapsed time
+fprintf('Finished saving movie after %d s\n',round(t2))
 
 %% Create a map quickly (optional)
 t1 = tic; % Start a timer
