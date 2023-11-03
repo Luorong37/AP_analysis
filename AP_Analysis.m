@@ -41,9 +41,12 @@ mkdir(save_path);
 % Load image file
 [intensity_time_series, ncols, nrows, nframes] = load_movie(file_path,file_extension);
 
+% Define parameters
 dt = 1 / freq; % Calculate time axis
 colors = jet(20); % Define a set of colors.change the number to extend
 t = (1:nframes) * dt;
+map = [];
+mask = [];
 
 t2 = toc(t1); % Get the elapsed time
 fprintf('Finished loading movie after %d s\n',round(t2))
@@ -54,14 +57,12 @@ raw_filename = fullfile(save_path, '0_Raw_data.mat');
 save(raw_filename,"intensity_time_series",'ncols','nrows','nframes','freq');
 t2 = toc(t1); % Get the elapsed time
 fprintf('Finished saving movie after %d s\n',round(t2))
-
 %% Create a map quickly (optional)
 t1 = tic; % Start a timer
 
 % if SNR is low, please large the bin.
 bin = 2;
-map = [];
-mask = [];
+
 [quick_map] = create_map(intensity_time_series, nrows, ncols, bin);
 map = quick_map;
 
@@ -81,10 +82,10 @@ save(mat_filename, 'map');
 
 t2 = toc(t1); % Get the elapsed time
 fprintf('Finished mask creating after %d s\n',round(t2))
-%% Load selected Mask
-mask = load();
+%% Load selected Mask (optional)
+mask_filename = fullfile(folder_path, '0_Sensitivity_Map.mat');
+mask = load(mask_filename);
 mask = mask.map;
-
 %% Select ROI
 % with or wihout Mask and Map
 
