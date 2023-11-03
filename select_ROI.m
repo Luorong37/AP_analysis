@@ -1,8 +1,8 @@
-function [rois, traces] = select_ROI(intensity_time_series, num_rows, num_cols, t, colors, mask, map)
+function [rois, traces] = select_ROI(movie, num_rows, num_cols, t, colors, mask, map)
 % Initialize variables
 rois = {};
 traces = [];
-its_2D = reshape(intensity_time_series, num_cols, num_rows, []);
+its_2D = reshape(movie, num_cols, num_rows, []);
 % Set current figure to full screen and add keypress callback
 fig = gcf;
 set(fig,'Position',get(0,'Screensize'));
@@ -55,7 +55,7 @@ while true
     end
     mask = poly2mask(roi_mask.Position(:, 1), roi_mask.Position(:, 2), size(im_adj, 1), size(im_adj, 2));
     rois{end + 1} = mask;
-    trace = mean(intensity_time_series(mask, :));
+    trace = mean(movie(mask, :));
     traces = [traces trace'];
 
     boundary = bwboundaries(mask);
