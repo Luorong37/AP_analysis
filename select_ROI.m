@@ -71,6 +71,13 @@ while true
         continue;
     end
 end
+
+
+%% Polarity judge
+
+
+
+
 fprintf('Finished ROI selection\n');
 end
 

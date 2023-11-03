@@ -53,16 +53,17 @@ fprintf('Finished loading movie after %d s\n',round(t2))
 %% Save loaded movie (optional)
 t1 = tic; % Start a timer
 fprintf('Saving...\n')
+
 raw_filename = fullfile(save_path, '0_Raw_data.mat');
 save(raw_filename,"intensity_time_series",'ncols','nrows','nframes','freq');
+
 t2 = toc(t1); % Get the elapsed time
 fprintf('Finished saving movie after %d s\n',round(t2))
-%% Create a map quickly (optional)
+%% Create a map (optional)
 t1 = tic; % Start a timer
 
 % if SNR is low, please large the bin.
 bin = 2;
-
 [quick_map] = create_map(intensity_time_series, nrows, ncols, bin);
 map = quick_map;
 
@@ -82,10 +83,18 @@ save(mat_filename, 'map');
 
 t2 = toc(t1); % Get the elapsed time
 fprintf('Finished mask creating after %d s\n',round(t2))
-%% Load selected Mask (optional)
-mask_filename = fullfile(folder_path, '0_Sensitivity_Map.mat');
+%% Load saved map (optional)
+
+map_filename = fullfile(folder_path, '0_Sensitivity_Map.mat');
+map = load(map_filename);
+map = map.map;
+
+%% Load saved ROI (optional)
+
+mask_filename = fullfile(folder_path, '1_raw_ROI.mat');
 mask = load(mask_filename);
-mask = mask.map;
+mask = mask.rois;
+
 %% Select ROI
 % with or wihout Mask and Map
 
@@ -93,11 +102,13 @@ mask = mask.map;
 
 fig_filename = fullfile(save_path, '1_raw_trace.fig');
 png_filename = fullfile(save_path, '1_raw_trace.png');
-roi_filename = fullfile(save_path, '1_raw_roi.png');
+roi_filename = fullfile(save_path, '1_raw_ROI.mat');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(roi_filename, 'rois');
+%% Polarity judge
+
 
 %% Photobleaching correction
 traces_highpassfilted = highpassfilter(traces, freq);
