@@ -39,7 +39,7 @@ end
 mkdir(save_path);
 
 % Load image file
-[intensity_time_series, ncols, nrows, nframes] = load_movie(file_path,file_extension);
+[movie, ncols, nrows, nframes] = load_movie(file_path,file_extension);
 
 % Define parameters
 dt = 1 / freq; % Calculate time axis
@@ -55,7 +55,7 @@ t1 = tic; % Start a timer
 fprintf('Saving...\n')
 
 raw_filename = fullfile(save_path, '0_Raw_data.mat');
-save(raw_filename,"intensity_time_series",'ncols','nrows','nframes','freq');
+save(raw_filename,"movie",'ncols','nrows','nframes','freq');
 
 t2 = toc(t1); % Get the elapsed time
 fprintf('Finished saving movie after %d s\n',round(t2))
@@ -64,7 +64,7 @@ t1 = tic; % Start a timer
 
 % if SNR is low, please large the bin.
 bin = 2;
-[quick_map] = create_map(intensity_time_series, nrows, ncols, bin);
+[quick_map] = create_map(movie, nrows, ncols, bin);
 map = quick_map;
 
 % Visualize correlation coefficients as heatmap
@@ -98,7 +98,7 @@ mask = mask.rois;
 %% Select ROI
 % with or wihout Mask and Map
 
-[rois, traces] = select_ROI(intensity_time_series, nrows, ncols, t, colors, mask, map);
+[rois, traces] = select_ROI(movie, nrows, ncols, t, colors, mask, map);
 
 fig_filename = fullfile(save_path, '1_raw_trace.fig');
 png_filename = fullfile(save_path, '1_raw_trace.png');
@@ -107,7 +107,6 @@ roi_filename = fullfile(save_path, '1_raw_ROI.mat');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(roi_filename, 'rois');
-%% Polarity judge
 
 
 %% Photobleaching correction
@@ -123,7 +122,7 @@ fig = figure();
 set(fig,'Position',get(0,'Screensize'));
 % Display ROI selection figure in the same figure
 subplot(1,2,1);
-imshow(imadjust(uint16(mean(reshape(intensity_time_series, ncols,nrows,[]),3))));
+imshow(imadjust(uint16(mean(reshape(movie, ncols,nrows,[]),3))));
 hold on;
 title(sprintf('Selected ROIs'));
 for i = 1:length(rois)
@@ -212,7 +211,7 @@ saveas(gcf, png_filename, 'png');
 figure();
 subplot(1,3,1);
 title(sprintf('Selected ROIs'));
-imshow(imadjust(uint16(mean(reshape(intensity_time_series, ncols,nrows,[]),3))));
+imshow(imadjust(uint16(mean(reshape(movie, ncols,nrows,[]),3))));
 hold on;
 title(sprintf('Selected ROIs'));
 
