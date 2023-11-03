@@ -15,7 +15,7 @@ t1 = tic; % Start a timer
 fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
-% support for folder, .tif, .tiff, .bin. 
+% support for folder, .tif, .tiff, .bin.
 folder_path = 'D:\Temple\20230810-170226recordPVH_2000\Analysis\';
 file_name = '0_Raw_data.mat';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
@@ -41,7 +41,7 @@ mkdir(save_path);
 
 % Define parameters
 dt = 1 / freq; % Calculate time axis
-colors = [lines(7);hsv(5);spring(3);winter(3);gray(3)]; 
+colors = [lines(7);hsv(5);spring(3);winter(3);gray(3)];
 t = (1:nframes) * dt;
 map = [];
 mask = [];
@@ -140,7 +140,7 @@ for i = 1:length(rois)-1
     % plot trace
     trace = traces_highpassfilted(:,i) * peak_polarity(i);
     plot(t,  trace ,'Color',colors(i,:));
-    
+
     % set threshold
     [~,peak_threshold(i)] = ginput(1);
     plot(t,ones(1,length(t)).*peak_threshold(i),'Color',colors(i,:),'LineWidth',2);
@@ -170,7 +170,7 @@ for i = 1:length(rois)-1
     % plot threshold
     plot(t,ones(1,length(t)).*peak_threshold(i),'Color',colors(i,:),'LineWidth',2);
     hold on;
-    
+
     % plot peak
     plot(peaks_index{i}.*dt,peaks_amplitude{i},'v','Color',colors(i,:),'MarkerFaceColor',colors(i,:));
 end
@@ -220,7 +220,7 @@ for i = 1 : length(rois)-1
     [fitresult, gof] = fit( xData, yData, ft );
     RMSE_mean=gof.rmse;
     SNR_trace(:,i) = traces_highpassfilted(:,i) ./ RMSE_mean;
-    
+
     % add plot shift
     if i > 1
         shift_sensitivity(i) = max(sentivity_trace(:,i-1))-min(sentivity_trace(:,i-1));
@@ -428,7 +428,7 @@ for i = 1:length(rois)-1 % i for trace
             plot((1:AP_window_size*2+1)*dt, each_AP.AP_sensitivity','Color',[0.8 0.8 0.8]);
             hold on;
         end
-        
+
         % plot average AP for each trace
         subplot(2,ceil(plot_cols/2),plot_col);
         plot((1:AP_window_size*2+1)*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
@@ -461,51 +461,50 @@ hold on;
 plot_cols = sum(cellfun('isempty',AP_list)==0)+1;
 plot_col = 0;
 subplot(1,plot_cols,plot_cols);
-title('All Average SNR');
-if polarity == -1
-    set(gca,'YDir','reverse')
-end
-hold on;
+
 
 for i = 1:length(rois)-1
     %判断是否为有AP的trace
     peaks_num = length(peaks_index{i});
     if cellfun('isempty',AP_list{i}) == 0
         plot_col = plot_col + 1;
-        subplot(1,plot_cols,plot_col);
-        title(sprintf('ROI %d Average AP SNR',i));
-        if polarity == -1
+        subplot(2,ceil(plot_cols/2),plot_col);
+
+        % set y axis direction
+        if peak_polarity(i) == -1
             set(gca,'YDir','reverse')
-        end
-        hold on;
-        AP_i = zeros(peaks_num, AP_window_size*2+1);
-        % extract each AP
-        for j = 1:peaks_num
-            each_AP = AP_list{i}{j};
-            % save amp
-            AP_i(j,:) = each_AP.AP_SNR;
-            subplot(1,plot_cols,plot_col);
-            plot([1:AP_window_size*2+1]*dt, each_AP.AP_SNR','Color',[0.8 0.8 0.8]);
             hold on;
         end
-        %plot average AP
-        subplot(1,plot_cols,plot_col);
-        plot([1:AP_window_size*2+1]*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',2);
+
+        % extract each AP
+        AP_i = zeros(peaks_num, AP_window_size*2+1);
+        for j = 1:peaks_num
+            each_AP = AP_list{i}{j};
+            AP_i(j,:) = each_AP.AP_SNR;
+            plot((1:AP_window_size*2+1)*dt, each_AP.AP_SNR','Color',[0.8 0.8 0.8]);
+            hold on;
+        end
+
+        % plot average AP for trace
+        subplot(2,ceil(plot_cols/2),plot_col);
+        plot((1:AP_window_size*2+1)*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
         hold on;
-        subplot(1,plot_cols,plot_cols);
-        plot([1:AP_window_size*2+1]*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
+        title(sprintf('ROI %d',i));
+        hold on;
+
+        % plot average AP for all
+        subplot(2,ceil(plot_cols/2),plot_cols);
+        plot((1:AP_window_size*2+1)*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
         hold on;
     end
 end
 
+sgtitle('Average SNR');
+hold on;
 
 fig_filename = fullfile(save_path, '6_average_AP_SNR.fig');
 png_filename = fullfile(save_path, '6_average_AP_SNR.png');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-
-
-
-
 
