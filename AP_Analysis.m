@@ -116,7 +116,7 @@ traces_highpassfilted = highpassfilter(traces, freq);
 polarity = -1;
 
 % AP threshold
-peak_min_height = zeros(1,length(rois));
+peak_threshold = zeros(1,length(rois));
 
 fig = figure();
 set(fig,'Position',get(0,'Screensize'));
@@ -138,8 +138,8 @@ hold on;
 for i = 1:length(rois)
     plot(t, traces_highpassfilted(:,i) * polarity ,'Color',colors(i,:));
     if i < length(rois)
-        [~,peak_min_height(i)] = ginput(1);
-        plot(t,ones(1,length(t)).*peak_min_height(i),'Color',colors(i,:),'LineWidth',2);
+        [~,peak_threshold(i)] = ginput(1);
+        plot(t,ones(1,length(t)).*peak_threshold(i),'Color',colors(i,:),'LineWidth',2);
     end
 end
 hold off;
@@ -188,8 +188,8 @@ for i = 1:length(rois)
 
         %         findpeaks(trace,t, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_min_height(i));
         %         [peaks_amplitude{i}, peaks_index{i}] =  findpeaks(trace, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_min_height(i));
-        findpeaks(trace,t, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_min_height(i));
-        [peaks_amplitude{i}, peaks_index{i}] =  findpeaks(trace, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_min_height(i));
+        findpeaks(trace,t, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_threshold(i));
+        [peaks_amplitude{i}, peaks_index{i}] =  findpeaks(trace, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_threshold(i));
 
 
         hold on;
