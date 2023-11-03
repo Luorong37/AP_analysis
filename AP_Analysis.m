@@ -11,12 +11,13 @@ clear;
 clc;
 
 %% Loading raw data
+t1 = tic; % Start a timer
 fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
-% support for folder, .tif, .bin. 
-folder_path = 'D:\Temple\';
-file_name = 'Data00111_20%561nmPower_1.tif'; 
+% support for folder, .tif, .tiff, .bin. 
+folder_path = 'D:\Temple\20230810-170226recordPVH_2000\Analysis\';
+file_name = '0_Raw_data.mat';  % must add format.
 % ↑↑↑↑↑-------------------------------------------------↑↑↑↑↑
 
 % ↓↓↓↓↓-----------Prompt user for frame rate-----------↓↓↓↓↓
@@ -33,7 +34,7 @@ if length(split_path)>1
 else
     % when read a folder
     file_extension = 'tif';
-    save_path = fullfile(folder_path, 'Analysis');
+    save_path = fullfile([folder_path, '_Analysis']);
 end
 mkdir(save_path);
 
@@ -44,7 +45,8 @@ dt = 1 / freq; % Calculate time axis
 colors = jet(20); % Define a set of colors.change the number to extend
 t = (1:nframes) * dt;
 
-fprintf('Finished loading movie\n')
+t2 = toc(t1); % Get the elapsed time
+fprintf('Finished loading movie after %d s\n',round(t2))
 %% Save loaded movie (optional)
 t1 = tic; % Start a timer
 fprintf('Saving...\n')
