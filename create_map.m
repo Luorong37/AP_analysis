@@ -33,16 +33,16 @@ quick_map = zeros(ncol/bin * nrow/bin,1);
 
 % change the Image to bin16
 % reshape to high dimension for each bin
-its5 = reshape(movie,bin,ncol/bin,bin,nrow/bin,[]);
+movie_5D = reshape(movie,bin,ncol/bin,bin,nrow/bin,[]);
 % average across x y
-its_ave = squeeze(mean(mean(its5,1),3));
+movie_ave = squeeze(mean(mean(movie_5D,1),3));
 
 % reshape to binned
-its_binned = reshape(its_ave,nrow/bin*ncol/bin,nframe);
+movie_binned = reshape(movie_ave,nrow/bin*ncol/bin,nframe);
 % figure()
 % imagesc(mean(reshape(intensity_time_series_binned,ncol/bin,nrow/bin,[]),3))
 % Apply avg_intensity curve to correct photobleaching from each pixel
-npixels = size(its_binned,1);
+npixels = size(movie_binned,1);
 
 % % collect extremum after highpass filter
 % for i = 1:npixels
@@ -55,7 +55,7 @@ npixels = size(its_binned,1);
 
 
 % Apply avg_intensity curve to correct photobleaching from each pixel (recommend)
-avg_trace = mean(its_binned,1);
+avg_trace = mean(movie_binned,1);
 [fit_result, gof] = fit([1:nframe]' ,avg_trace', 'exp1' );
 fit_trace = fit_result.a * exp(fit_result.b * [1: nframe]);
 
@@ -63,7 +63,7 @@ fit_trace = fit_result.a * exp(fit_result.b * [1: nframe]);
 % hold on
 for i = 1:npixels
     fprintf('Processing %d / %d\n', i, npixels );
-    pixel_trace_correct = its_binned(i, :) ./ fit_trace;
+    pixel_trace_correct = movie_binned(i, :) ./ fit_trace;
 %     plot([1:nframe],pixel_trace_correct)
 %     hold on
 %   pixel_trace_correct = intensity_time_series_merged(i, :) ./ avg_trace;
