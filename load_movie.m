@@ -115,11 +115,11 @@ elseif isequal(file_extension,'tif') || isequal(file_extension,'tiff')
     end
 
 elseif isequal(string(file_extension),'bin')
-    filename = [fileparts(file_path) '\movie.txt'];  % 指定文本文件的名称
+    filename = [fileparts(file_path) '\movie_info.txt'];  % 指定文本文件的名称
     fileID = fopen(filename, 'r');  % 以读取模式打开文件
     % read ncol and nrow
     if fileID == -1
-        error('Failed to open file.');
+        error('Failed to open file. change the doc name');
     end
     while ~feof(fileID)  % 继续读取，直到到达文件末尾
         line = fgetl(fileID);  % 读取文件的下一行

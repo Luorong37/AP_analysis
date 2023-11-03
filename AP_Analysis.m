@@ -16,11 +16,13 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'D:\Temple\20230810-170226recordPVH_2000\Analysis\';
-file_name = '0_Raw_data.mat';  % must add format.
+folder_path = 'X:\91 Data and analysis\liuyang\Patch\23.08.15\A0034+Alfa(64Am)-Cy3.5\Cell3\125105_FOI\';
+file_name = 'movie.bin';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
-freq = 400; % Hz
+freq = 484; % Hz
 % -----------------------------------------------------------
+
+% defined bin 1
 
 % read path
 file_path = fullfile(folder_path, file_name);
@@ -158,7 +160,11 @@ close;
 fig = figure();
 set(fig,'Position',get(0,'Screensize'));
 for i = 1:length(rois)-1
+    if ceil((length(rois)-1)/4) > 1
     subplot(ceil((length(rois)-1)/4),4,i); % each line for 4 ROI
+    else
+    subplot(1,length(rois)-1,i)
+    end
     title(sprintf('ROI %d',i));
     hold on;
 
@@ -235,7 +241,7 @@ for i = 1 : length(rois)-1
     hold on;
     % plot SNR
     subplot(1,3,3);
-    plot(t,SNR_trace(:,i) + peak_polarity(i)*sum(shift_SNR(1:i))),'Color', colors(i,:);
+    plot(t,SNR_trace(:,i) + peak_polarity(i)*sum(shift_SNR(1:i)),'Color', colors(i,:));
     hold on;
 
 end
