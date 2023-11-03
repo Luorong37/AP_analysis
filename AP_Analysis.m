@@ -43,7 +43,7 @@ mkdir(save_path);
 
 % Define parameters
 dt = 1 / freq; % Calculate time axis
-colors = jet(20); % Define a set of colors.change the number to extend
+colors = jet(15); % Define a set of colors.change the number to extend
 t = (1:nframes) * dt;
 map = [];
 mask = [];
@@ -153,8 +153,8 @@ ylabel('Mean intensity');
 title(sprintf('Mean intensity of selected ROI after high-pass filter\nSet threshold of peaks'));
 
 % Create a legend label for each ROI
-legend_labels = cell(1, length(rois));
-for i = 1:length(rois)
+legend_labels = cell(1, length(rois)-1);
+for i = 1:length(rois)-1
     legend_labels{i} = sprintf('ROI %d', i);
 end
 legend(legend_labels);
@@ -197,9 +197,6 @@ png_filename = fullfile(save_path, '3_peak_finding.png');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-
-
-
 %% Sensitivity and SNR Analysis
 % show fluorescent imageing
 figure();
@@ -207,7 +204,6 @@ subplot(1,3,1);
 title(sprintf('Selected ROIs'));
 imshow(imadjust(uint16(mean(reshape(movie, ncols,nrows,[]),3))));
 hold on;
-title(sprintf('Selected ROIs'));
 
 for i = 1:length(rois)
     boundary = bwboundaries(rois{i});
@@ -221,21 +217,24 @@ SNR_trace = zeros(nframes,length(rois));
 
 subplot(1,3,2);
 title('Sensitivity');
+hold on;
 subplot(1,3,3);
 title('SNR');
+hold on;
 shift_sensitivity = zeros(size(rois)); % plot shift
 shift_SNR = zeros(size(rois));
 
-for i = 1 : length(rois)
+for i = 1 : length(rois)-1
     intensity_trace(:,i) = traces(:,i) - traces(:,end);
     % calculate sensitivity
     sentivity_trace(:,i) = traces_highpassfilted(:,i)  ./ intensity_trace(:,i);
-    [xData, yData] = prepareCurveData( [], traces_highpassfilted(:,i));
+    [xData, yData] = prepareCurveData([], traces_highpassfilted(:,i));
     ft = fittype( 'poly1' );
     [fitresult, gof] = fit( xData, yData, ft );
     RMSE_mean=gof.rmse;
     SNR_trace(:,i) = traces_highpassfilted(:,i) ./ RMSE_mean;
-
+    
+    % add plot shift
     if i > 1
         shift_sensitivity(i) = max(sentivity_trace(:,i-1))-min(sentivity_trace(:,i-1));
         shift_SNR(i) = max(SNR_trace(:,i-1))-min(SNR_trace(:,i-1));
@@ -254,16 +253,11 @@ for i = 1 : length(rois)
 
 end
 
-
-
 fig_filename = fullfile(save_path, '4_Sensitivity_figure.fig');
 png_filename = fullfile(save_path, '4_Sensitivity_figure.png');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-
-
-
 %% Statistic AP
 AP_list = cell(1, length(rois)-1);
 each_AP = struct('Trace', [], 'AP_number', [], 'AP_index',[],'AP_amp',[], ...
