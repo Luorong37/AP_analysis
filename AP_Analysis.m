@@ -226,8 +226,9 @@ shift_SNR = zeros(size(rois));
 
 for i = 1 : length(rois)-1
     intensity_trace(:,i) = traces(:,i) - traces(:,end);
-    % calculate sensitivity
+    % Calculate Sensitivity
     sentivity_trace(:,i) = traces_highpassfilted(:,i)  ./ intensity_trace(:,i);
+    % Calculate SNR
     [xData, yData] = prepareCurveData([], traces_highpassfilted(:,i));
     ft = fittype( 'poly1' );
     [fitresult, gof] = fit( xData, yData, ft );
