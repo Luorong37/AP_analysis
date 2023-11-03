@@ -192,7 +192,8 @@ hold on;
 
 for i = 1:length(rois)
     boundary = bwboundaries(rois{i});
-    plot(boundary{1}(:,2), boundary{1}(:,1),'Color', colors(mod(i-1, length(colors))+1,:), 'LineWidth', 2);
+    plot(boundary{1}(:,2), boundary{1}(:,1),'Color', colors(i,:), 'LineWidth', 2);
+    hold on;
 end
 
 % plot and calculate
@@ -230,11 +231,11 @@ for i = 1 : length(rois)-1
     end
     % plot sensitivity
     subplot(1,3,2);
-    plot(t,sentivity_trace(:,i) + peak_polarity(i)*sum(shift_sensitivity(1:i)));
+    plot(t,sentivity_trace(:,i) + peak_polarity(i)*sum(shift_sensitivity(1:i)),'Color', colors(i,:));
     hold on;
     % plot SNR
     subplot(1,3,3);
-    plot(t,SNR_trace(:,i) + peak_polarity(i)*sum(shift_SNR(1:i)));
+    plot(t,SNR_trace(:,i) + peak_polarity(i)*sum(shift_SNR(1:i))),'Color', colors(i,:);
     hold on;
 
 end
@@ -399,53 +400,52 @@ writetable(T_ave, [save_path '\AP_data.xlsx'], 'Sheet', 'Average');
 fprintf('Finished statistic AP\n')
 
 %% Plot average AP sensitivity
-% plot
 figure();
-title('Statistic AP');
-hold on;
 
 % 统计不为空的trace数目
 plot_cols = sum(cellfun('isempty',AP_list)==0)+1;
 plot_col = 0;
-subplot(1,plot_cols,plot_cols);
-title('All Average');
-hold on;
 
-for i = 1:length(rois)-1
+for i = 1:length(rois)-1 % i for trace
     %判断是否为有AP的trace
     peaks_num = length(peaks_index{i});
     if cellfun('isempty',AP_list{i}) == 0
         plot_col = plot_col + 1;
-        subplot(1,plot_cols,plot_col);
-        title(sprintf('ROI %d\nAverage AP sensitivity',i));
-        if polarity == -1
+        subplot(2,ceil(plot_cols/2),plot_col);
+
+        % set y axis direction
+        if peak_polarity(i) == -1
             set(gca,'YDir','reverse')
+            hold on;
         end
-        hold on;
+
+        % get each AP
         AP_i = zeros(peaks_num, AP_window_size*2+1);
-        % extract each AP
         for j = 1:peaks_num
             each_AP = AP_list{i}{j};
-            % save amp
             AP_i(j,:) = each_AP.AP_sensitivity;
-            subplot(1,plot_cols,plot_col);
-            plot([1:AP_window_size*2+1]*dt, each_AP.AP_sensitivity','Color',[0.8 0.8 0.8]);
+            % plot each AP
+            plot((1:AP_window_size*2+1)*dt, each_AP.AP_sensitivity','Color',[0.8 0.8 0.8]);
             hold on;
-            if peak_polarity(i) == -1
-                set('YDir','reverse')
-            end
         end
-        %plot average AP
-        subplot(1,plot_cols,plot_col);
-        plot([1:AP_window_size*2+1]*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',2);
+        
+        % plot average AP for each trace
+        subplot(2,ceil(plot_cols/2),plot_col);
+        plot((1:AP_window_size*2+1)*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
         hold on;
-        subplot(1,plot_cols,plot_cols);
-        plot([1:AP_window_size*2+1]*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
+        title(sprintf('ROI %d\n',i));
+        hold on;
+
+        % plot average AP for average trace
+        subplot(2,ceil(plot_cols/2),plot_cols);
+        plot((1:AP_window_size*2+1)*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
         hold on;
     end
 end
-
-
+title('Averaged of All');
+hold on;
+sgtitle('Averaged Sensitivity');
+hold on;
 fig_filename = fullfile(save_path, '5_average_AP_sensitivity.fig');
 png_filename = fullfile(save_path, '5_average_AP_sensitivity.png');
 
