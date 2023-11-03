@@ -13,31 +13,32 @@ clc;
 %% Loading raw data
 fprintf('Loading...\n')
 
-% Define folder path and file extension
-folder_path = 'D:\Temple\20230810-170226recordPVH_2000';
-file_name = '\'; % start with '\' if do not save at same folder
-colors = lines; % Define a set of colors
-% Prompt user for frame rate in Hz
-freq = 400;
+% ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
+folder_path = 'D:\Temple\';
+file_name = 'Data00111_20%561nmPower_1.tif';
+% ↓↓↓↓↓-----------Prompt user for frame rate-----------↓↓↓↓↓
+freq = 400; % Hz
+
 
 % read file
-file_path = [folder_path file_name];
+file_path = fullfile(folder_path, file_name);
 split_path = split(file_name, '.');
 if length(split_path)>1
-    file_extension = string(split_path(2));
+    % when read a file
+    file_extension = string(split_path(end));
+    save_path =  fullfile(folder_path, [cell2mat(split_path(1)),'_Analysis']);
 else
+    % when read a folder
     file_extension = 'tif';
+    save_path = fullfile(folder_path, 'Analysis');
 end
-% save_path = [folder_path cell2mat(split_path(1)) '_analysis'];
-save_path = [folder_path '\Analysis'];
-format =string(cell2mat(split_path(end))) ;
 mkdir(save_path);
-
-% Calculate time axis
-dt = 1 / freq;
 
 % Load image file
 [intensity_time_series, ncols, nrows, nframes] = load_movie(file_path,file_extension);
+
+dt = 1 / freq; % Calculate time axis
+colors = lines; % Define a set of colors
 t = (1:nframes) * dt;
 
 fprintf('Finished loading movie\n')
