@@ -18,11 +18,9 @@ fprintf('Loading...\n')
 % support for folder, .tif, .tiff, .bin. 
 folder_path = 'D:\Temple\20230810-170226recordPVH_2000\Analysis\';
 file_name = '0_Raw_data.mat';  % must add format.
-% ↑↑↑↑↑-------------------------------------------------↑↑↑↑↑
-
-% ↓↓↓↓↓-----------Prompt user for frame rate-----------↓↓↓↓↓
+% ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
-% ↑↑↑↑↑------------------------------------------------↑↑↑↑↑
+% -----------------------------------------------------------
 
 % read path
 file_path = fullfile(folder_path, file_name);
@@ -43,7 +41,7 @@ mkdir(save_path);
 
 % Define parameters
 dt = 1 / freq; % Calculate time axis
-colors = jet(15); % Define a set of colors.change the number to extend
+colors = [lines(7);hsv(5);hot(4);cool(4);spring(3);winter(3);gray(3)]; 
 t = (1:nframes) * dt;
 map = [];
 mask = [];
@@ -132,7 +130,7 @@ for i = 1:length(rois)
     plot(boundary{1}(:,2), boundary{1}(:,1),'Color', colors(mod(i-1, length(colors))+1,:), 'LineWidth', 2);
 end
 
-% Plot mean intensity trace
+% Plot mean intensity trace and set threshold
 subplot(1,2,2);
 trace_axe = gca;
 hold on;
@@ -144,8 +142,21 @@ for i = 1:length(rois)-1
         peak_polarity(i) = -1;
     end
     plot(t, traces_highpassfilted(:,i) * peak_polarity(i) ,'Color',colors(i,:));
+    % set threshold
     [~,peak_threshold(i)] = ginput(1);
     plot(t,ones(1,length(t)).*peak_threshold(i),'Color',colors(i,:),'LineWidth',2);
+    hold off;
+end
+
+% Plot summary
+figure()
+for i = 1:length(rois)-1
+    subplot(ceil((length(rois)-1)/4),4,i); % each line for 4 ROI
+    plot(t, traces_highpassfilted(:,i) * peak_polarity(i) ,'Color',colors(i,:));
+    hold on;
+    plot(t,ones(1,length(t)).*peak_threshold(i),'Color',colors(i,:),'LineWidth',2);
+    hold on;
+    title(sprintf('ROI %d',i));
 end
 hold off;
 xlabel('Time (s)');
@@ -181,12 +192,15 @@ peaks_index = cell(1, length(rois)-1);
 
 for i = 1:length(rois)
     if i < length(rois)
+        subplot(ceil((length(rois)-1)/4),4,i); % each line for 4 ROI
         trace = traces_highpassfilted(:,i) * peak_polarity(i);
         % set Prominence (define factor = 0.3)
         MinPeakProminence = max(trace)*0.3;
-        findpeaks(trace,t, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_threshold(i));
+        findpeaks(trace,t, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_threshold(i),'Color',colors(i,:));
         [peaks_amplitude{i}, peaks_index{i}] =  findpeaks(trace, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_threshold(i));
+        plot()
         hold on;
+        title(sprintf('ROI %d',i));
     else
         plot(t, traces_highpassfilted(:,i) * peak_polarity(i) ,'Color',colors(i,:));
     end
