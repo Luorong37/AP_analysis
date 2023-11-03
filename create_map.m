@@ -1,7 +1,7 @@
 %% Creat cell mask
 % find cell mask according to plot the extreme SNR(minus) of each pixel.
 
-function [quick_map] = create_map(intensity_time_series, num_rows, num_cols, bin)
+function [quick_map] = create_map(movie, num_rows, num_cols, bin)
 
 % Design high-pass filter
 % dt = 1 / Hz;
@@ -23,17 +23,17 @@ if mod(ncol,bin) ~= 0
     cut = true;
 end
 if cut == true
-    temp = reshape(intensity_time_series,num_cols,num_rows,[]);
-    intensity_time_series = temp(1:ncol,1:nrow,:);
+    temp = reshape(movie,num_cols,num_rows,[]);
+    movie = temp(1:ncol,1:nrow,:);
 end
-its_size = size(intensity_time_series);
+its_size = size(movie);
 nframe = its_size(end);
 % Initialize matrix to store cell labels
 quick_map = zeros(ncol/bin * nrow/bin,1);
 
 % change the Image to bin16
 % reshape to high dimension for each bin
-its5 = reshape(intensity_time_series,bin,ncol/bin,bin,nrow/bin,[]);
+its5 = reshape(movie,bin,ncol/bin,bin,nrow/bin,[]);
 % average across x y
 its_ave = squeeze(mean(mean(its5,1),3));
 
