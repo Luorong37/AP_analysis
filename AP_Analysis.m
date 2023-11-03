@@ -1,7 +1,5 @@
-clear all;
-clc;
-
-%% Loading
+% AP_analysis powered by Liu-Yang Luorong.
+% version 2
 
 % Need Functions:
 % load_tif_movie, readBinMov,select_ROI_and_draw_trace, find_cell
@@ -9,13 +7,16 @@ clc;
 % Need Toolbox:
 % Image Processing Toolbox, Curve Fitting Toolbox, Signal Processing Toolbox
 
+clear;
+clc;
+
+%% Loading raw data
 fprintf('Loading...\n')
 
 % Define folder path and file extension
 folder_path = 'D:\Temple\20230810-170226recordPVH_2000';
 file_name = '\'; % start with '\' if do not save at same folder
-% colors = {'r', 'g', 'b', 'm', 'c', 'y', 'k'}; % Define a set of colors
-colors = lines;
+colors = lines; % Define a set of colors
 % Prompt user for frame rate in Hz
 freq = 400;
 
@@ -40,6 +41,10 @@ dt = 1 / freq;
 t = (1:nframes) * dt;
 
 fprintf('Finished loading movie\n')
+%% Loading saved raw data
+
+
+
 %% Save loaded movie (optional)
 t1 = tic; % Start a timer
 fprintf('Saving...\n')
