@@ -41,7 +41,7 @@ mkdir(save_path);
 
 % Define parameters
 dt = 1 / freq; % Calculate time axis
-colors = [lines(7);hsv(5);hot(4);cool(4);spring(3);winter(3);gray(3)]; 
+colors = [lines(7);hsv(5);spring(3);winter(3);gray(3)]; 
 t = (1:nframes) * dt;
 map = [];
 mask = [];
@@ -110,101 +110,72 @@ save(roi_filename, 'rois');
 
 %% Photobleaching correction
 traces_highpassfilted = highpassfilter(traces, freq);
+fprintf('Finished highpass filter\n')
 
-% % polarity judge:
-% polarity = -1;
-
+%% Peak finding
 % AP threshold and polarity
-peak_threshold = zeros(1,length(rois));
 peak_polarity =  zeros(1,length(rois));
+peak_threshold = zeros(1,length(rois));
 
-% Display ROI selection in the fluorescence figure
+% set peak finding
+AP_window_size = 100 ; % number of frames to for AP window (defined = 100)
+MinPeakDistance = 20 * dt; % (defined = 20 * dt)
+peaks_amplitude = cell(1, length(rois)-1);
+peaks_index = cell(1, length(rois)-1);
+
+% Plot mean intensity trace and set threshold to find peak
 fig = figure();
 set(fig,'Position',get(0,'Screensize'));
-subplot(1,2,1);
-imshow(imadjust(uint16(mean(reshape(movie, ncols, nrows, []),3))));
-hold on;
-title(sprintf('Selected ROIs'));
-for i = 1:length(rois)
-    boundary = bwboundaries(rois{i});
-    plot(boundary{1}(:,2), boundary{1}(:,1),'Color', colors(mod(i-1, length(colors))+1,:), 'LineWidth', 2);
-end
-
-% Plot mean intensity trace and set threshold
-subplot(1,2,2);
-trace_axe = gca;
-hold on;
 for i = 1:length(rois)-1
+    clf;
+    title(sprintf('ROI %d',i));
+    hold on;
     % polarity judge
     if abs(min(traces_highpassfilted(:,i))) < max(abs(traces_highpassfilted(:,i)))
         peak_polarity(i) = 1;
     else
         peak_polarity(i) = -1;
     end
-    plot(t, traces_highpassfilted(:,i) * peak_polarity(i) ,'Color',colors(i,:));
+
+    % plot trace
+    trace = traces_highpassfilted(:,i) * peak_polarity(i);
+    plot(t,  trace ,'Color',colors(i,:));
+    
     % set threshold
     [~,peak_threshold(i)] = ginput(1);
     plot(t,ones(1,length(t)).*peak_threshold(i),'Color',colors(i,:),'LineWidth',2);
     hold off;
+    pause(0.2);
+
+    % find peak
+    MinPeakProminence = (max(trace)-mean(trace))*0.5; % (define factor = 0.7)
+    [peaks_amplitude{i}, peaks_index{i}] =  findpeaks(trace, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_threshold(i));
+
 end
+close;
 
 % Plot summary
-figure()
+fig = figure();
+set(fig,'Position',get(0,'Screensize'));
 for i = 1:length(rois)-1
     subplot(ceil((length(rois)-1)/4),4,i); % each line for 4 ROI
-    plot(t, traces_highpassfilted(:,i) * peak_polarity(i) ,'Color',colors(i,:));
+    title(sprintf('ROI %d',i));
     hold on;
+
+    % plot trace
+    trace = traces_highpassfilted(:,i) * peak_polarity(i);
+    plot(t,  trace ,'Color',colors(i,:));
+    hold on;
+
+    % plot threshold
     plot(t,ones(1,length(t)).*peak_threshold(i),'Color',colors(i,:),'LineWidth',2);
     hold on;
-    title(sprintf('ROI %d',i));
+    
+    % plot peak
+    plot(peaks_index{i}.*dt,peaks_amplitude{i},'v','Color',colors(i,:),'MarkerFaceColor',colors(i,:));
 end
-hold off;
-xlabel('Time (s)');
-ylabel('Mean intensity');
-title(sprintf('Mean intensity of selected ROI after high-pass filter\nSet threshold of peaks'));
-
-% Create a legend label for each ROI
-legend_labels = cell(1, length(rois)-1);
-for i = 1:length(rois)-1
-    legend_labels{i} = sprintf('ROI %d', i);
-end
-legend(legend_labels);
-
-% Save
-fig_filename = fullfile(save_path, '2_filtered_trace.fig');
-png_filename = fullfile(save_path, '2_filtered_trace.png');
-
-saveas(gcf, fig_filename, 'fig');
-saveas(gcf, png_filename, 'png');
-
-%% Peak finding
-% from stimulated_AP_multicycles_V3.1
-
-figure();
-AP_window_size = 100 ; % number of frames to for AP window
-MinPeakDistance = 20 * dt;
-% MinPeakProminence = 20 ;
-
-title('Peak finding');
+sgtitle('Peak finding');
 hold on;
-peaks_amplitude = cell(1, length(rois)-1);
-peaks_index = cell(1, length(rois)-1);
-
-for i = 1:length(rois)
-    if i < length(rois)
-        subplot(ceil((length(rois)-1)/4),4,i); % each line for 4 ROI
-        trace = traces_highpassfilted(:,i) * peak_polarity(i);
-        % set Prominence (define factor = 0.3)
-        MinPeakProminence = max(trace)*0.3;
-        findpeaks(trace,t, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_threshold(i),'Color',colors(i,:));
-        [peaks_amplitude{i}, peaks_index{i}] =  findpeaks(trace, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_threshold(i));
-        plot()
-        hold on;
-        title(sprintf('ROI %d',i));
-    else
-        plot(t, traces_highpassfilted(:,i) * peak_polarity(i) ,'Color',colors(i,:));
-    end
-end
 
 fig_filename = fullfile(save_path, '3_peak_finding.fig');
 png_filename = fullfile(save_path, '3_peak_finding.png');
@@ -516,9 +487,6 @@ for i = 1:length(rois)-1
             subplot(1,plot_cols,plot_col);
             plot([1:AP_window_size*2+1]*dt, each_AP.AP_SNR','Color',[0.8 0.8 0.8]);
             hold on;
-            %             subplot(1,plot_cols,plot_cols);
-            %             plot([1:AP_window_size*2+1]*dt, each_AP.AP_SNR','Color',[0.8 0.8 0.8]);
-            %             hold on;
         end
         %plot average AP
         subplot(1,plot_cols,plot_col);
