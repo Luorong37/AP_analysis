@@ -89,6 +89,7 @@ map_filename = fullfile(folder_path, '0_Sensitivity_Map.mat');
 map = load(map_filename);
 map = map.map;
 
+fprintf('Finished map loading\n')
 %% Load saved ROI (optional)
 
 mask_filename = fullfile(folder_path, '1_raw_ROI.mat');
@@ -136,7 +137,8 @@ subplot(1,2,2);
 trace_axe = gca;
 hold on;
 for i = 1:length(rois)-1
-    if min(traces_highpassfilted(:,i)) < max(abs(traces_highpassfilted(:,i)))
+    % polarity judge
+    if abs(min(traces_highpassfilted(:,i))) < max(abs(traces_highpassfilted(:,i)))
         peak_polarity(i) = 1;
     else
         peak_polarity(i) = -1;
@@ -177,24 +179,13 @@ hold on;
 peaks_amplitude = cell(1, length(rois)-1);
 peaks_index = cell(1, length(rois)-1);
 
-% set threshold and find peak
-peak_threshold = 0;
-peak_min_distance = 5*dt;
-% peak_min_height = 10;
-
 for i = 1:length(rois)
     if i < length(rois)
         trace = traces_highpassfilted(:,i) * peak_polarity(i);
-
-        % set Prominence
+        % set Prominence (define factor = 0.3)
         MinPeakProminence = max(trace)*0.3;
-
-        %         findpeaks(trace,t, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_min_height(i));
-        %         [peaks_amplitude{i}, peaks_index{i}] =  findpeaks(trace, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_min_height(i));
         findpeaks(trace,t, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_threshold(i));
         [peaks_amplitude{i}, peaks_index{i}] =  findpeaks(trace, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_threshold(i));
-
-
         hold on;
     else
         plot(t, traces_highpassfilted(:,i) * peak_polarity(i) ,'Color',colors(i,:));
