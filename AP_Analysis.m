@@ -1,10 +1,10 @@
-% AP_analysis powered by Liu-Yang Luorong.
+% AP_ANALYSIS POWERED BY LIU-YANG LUORONG.
 % version 2
 
-% Need Functions:
-% load_tif_movie, readBinMov,select_ROI_and_draw_trace, find_cell
+% NEED FUNCTIONS:
+% load_movie, create_map, highpassfilter, select_ROI
 
-% Need Toolbox:
+% NEED TOOLBOX:
 % Image Processing Toolbox, Curve Fitting Toolbox, Signal Processing Toolbox
 
 clear;
@@ -14,13 +14,16 @@ clc;
 fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
+% support for folder, .tif, .bin. 
 folder_path = 'D:\Temple\';
-file_name = 'Data00111_20%561nmPower_1.tif';
+file_name = 'Data00111_20%561nmPower_1.tif'; 
+% ↑↑↑↑↑-------------------------------------------------↑↑↑↑↑
+
 % ↓↓↓↓↓-----------Prompt user for frame rate-----------↓↓↓↓↓
 freq = 400; % Hz
+% ↑↑↑↑↑------------------------------------------------↑↑↑↑↑
 
-
-% read file
+% read path
 file_path = fullfile(folder_path, file_name);
 split_path = split(file_name, '.');
 if length(split_path)>1
@@ -38,14 +41,10 @@ mkdir(save_path);
 [intensity_time_series, ncols, nrows, nframes] = load_movie(file_path,file_extension);
 
 dt = 1 / freq; % Calculate time axis
-colors = lines; % Define a set of colors
+colors = jet(20); % Define a set of colors.change the number to extend
 t = (1:nframes) * dt;
 
 fprintf('Finished loading movie\n')
-%% Loading saved raw data
-
-
-
 %% Save loaded movie (optional)
 t1 = tic; % Start a timer
 fprintf('Saving...\n')
