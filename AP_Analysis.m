@@ -112,17 +112,18 @@ save(roi_filename, 'rois');
 %% Photobleaching correction
 traces_highpassfilted = highpassfilter(traces, freq);
 
-% polarity judge:
-polarity = -1;
+% % polarity judge:
+% polarity = -1;
 
-% AP threshold
+% AP threshold and polarity
 peak_threshold = zeros(1,length(rois));
+peak_polarity =  zeros(1,length(rois));
 
+% Display ROI selection in the fluorescence figure
 fig = figure();
 set(fig,'Position',get(0,'Screensize'));
-% Display ROI selection figure in the same figure
 subplot(1,2,1);
-imshow(imadjust(uint16(mean(reshape(movie, ncols,nrows,[]),3))));
+imshow(imadjust(uint16(mean(reshape(movie, ncols, nrows, []),3))));
 hold on;
 title(sprintf('Selected ROIs'));
 for i = 1:length(rois)
@@ -130,17 +131,15 @@ for i = 1:length(rois)
     plot(boundary{1}(:,2), boundary{1}(:,1),'Color', colors(mod(i-1, length(colors))+1,:), 'LineWidth', 2);
 end
 
-
-% Plot mean intensity over time
+% Plot mean intensity trace
 subplot(1,2,2);
 trace_axe = gca;
 hold on;
-for i = 1:length(rois)
+for i = 1:length(rois)-1
+
     plot(t, traces_highpassfilted(:,i) * polarity ,'Color',colors(i,:));
-    if i < length(rois)
-        [~,peak_threshold(i)] = ginput(1);
-        plot(t,ones(1,length(t)).*peak_threshold(i),'Color',colors(i,:),'LineWidth',2);
-    end
+    [~,peak_threshold(i)] = ginput(1);
+    plot(t,ones(1,length(t)).*peak_threshold(i),'Color',colors(i,:),'LineWidth',2);
 end
 hold off;
 xlabel('Time (s)');
