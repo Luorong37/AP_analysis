@@ -136,8 +136,12 @@ subplot(1,2,2);
 trace_axe = gca;
 hold on;
 for i = 1:length(rois)-1
-
-    plot(t, traces_highpassfilted(:,i) * polarity ,'Color',colors(i,:));
+    if min(traces_highpassfilted(:,i)) < max(abs(traces_highpassfilted(:,i)))
+        peak_polarity(i) = 1;
+    else
+        peak_polarity(i) = -1;
+    end
+    plot(t, traces_highpassfilted(:,i) * peak_polarity(i) ,'Color',colors(i,:));
     [~,peak_threshold(i)] = ginput(1);
     plot(t,ones(1,length(t)).*peak_threshold(i),'Color',colors(i,:),'LineWidth',2);
 end
@@ -180,7 +184,7 @@ peak_min_distance = 5*dt;
 
 for i = 1:length(rois)
     if i < length(rois)
-        trace = traces_highpassfilted(:,i) * polarity;
+        trace = traces_highpassfilted(:,i) * peak_polarity(i);
 
         % set Prominence
         MinPeakProminence = max(trace)*0.3;
@@ -193,7 +197,7 @@ for i = 1:length(rois)
 
         hold on;
     else
-        plot(t, traces_highpassfilted(:,i) * polarity ,'Color',colors(i,:));
+        plot(t, traces_highpassfilted(:,i) * peak_polarity(i) ,'Color',colors(i,:));
     end
 end
 
@@ -250,11 +254,11 @@ for i = 1 : length(rois)
     end
     % plot sensitivity
     subplot(1,3,2);
-    plot(t,sentivity_trace(:,i) + polarity*sum(shift_sensitivity(1:i)));
+    plot(t,sentivity_trace(:,i) + peak_polarity(i)*sum(shift_sensitivity(1:i)));
     hold on;
     % plot SNR
     subplot(1,3,3);
-    plot(t,SNR_trace(:,i) + polarity*sum(shift_SNR(1:i)));
+    plot(t,SNR_trace(:,i) + peak_polarity(i)*sum(shift_SNR(1:i)));
     hold on;
 
 end
@@ -279,7 +283,7 @@ for i = 1:length(rois)-1 % i for trace
     peaks_num = length(peaks_index{i});
     peaks_index_i = peaks_index{i};
     peaks_amp_i = peaks_amplitude{i};
-    each_trace = traces_highpassfilted(:,i) * polarity;
+    each_trace = traces_highpassfilted(:,i) * peak_polarity(i);
     each_trace_sensitivity = sentivity_trace(:,i);
     each_trace_SNR = SNR_trace(:,i);
 
@@ -358,8 +362,8 @@ for i = 1:length(rois)-1 % i for trace
 
         % Amplitude = abs(AP_base - peak_amp_ij);
         Amplitude = abs(peak_amp_ij);
-        Sensitivity = polarity * max(abs(AP_sensitivity));
-        SNR = polarity * max(abs(AP_SNR));
+        Sensitivity = peak_polarity(i) * max(abs(AP_sensitivity));
+        SNR = peak_polarity(i) * max(abs(AP_SNR));
 
         each_AP = struct('Trace', i, 'AP_number', j, 'AP_index',AP_index, ...
             'AP_amp',AP_amp,'Amplitude', Amplitude,'FWHM',FWHM, ...
@@ -434,9 +438,6 @@ plot_cols = sum(cellfun('isempty',AP_list)==0)+1;
 plot_col = 0;
 subplot(1,plot_cols,plot_cols);
 title('All Average');
-if polarity == -1
-    set(gca,'YDir','reverse')
-end
 hold on;
 
 for i = 1:length(rois)-1
@@ -459,9 +460,9 @@ for i = 1:length(rois)-1
             subplot(1,plot_cols,plot_col);
             plot([1:AP_window_size*2+1]*dt, each_AP.AP_sensitivity','Color',[0.8 0.8 0.8]);
             hold on;
-            %             subplot(1,plot_cols,plot_cols);
-            %             plot([1:AP_window_size*2+1]*dt, each_AP.AP_sensitivity','Color',[0.8 0.8 0.8]);
-            %             hold on;
+            if peak_polarity(i) == -1
+                set('YDir','reverse')
+            end
         end
         %plot average AP
         subplot(1,plot_cols,plot_col);
