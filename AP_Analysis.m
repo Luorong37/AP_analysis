@@ -314,17 +314,15 @@ for i = 1:length(rois)-1 % i for trace
         peak_index_ij = peaks_index_i(j);
         peak_amp_ij = peaks_amp_i(j);
 
-        % 防止出边缘
+        % keep in board
         AP_start_index = max(1, peak_index_ij - AP_window_size);
         AP_end_index = min(nframes, peak_index_ij + AP_window_size);
         AP_index = AP_start_index : AP_end_index;
 
-        % 检索强度，灵敏度，SNR
+        % search
         AP_amp = each_trace(AP_start_index:AP_end_index)';
         AP_sensitivity = each_trace_sensitivity(AP_start_index:AP_end_index)';
         AP_SNR = each_trace_SNR(AP_start_index:AP_end_index)';
-        % calculate SNR
-        % noise
 
         % fill NaN
         if 0 > peak_index_ij - AP_window_size
@@ -337,54 +335,13 @@ for i = 1:length(rois)-1 % i for trace
             AP_SNR = [AP_SNR NaN(1,peak_index_ij + AP_window_size - nframes)];
         end
 
-        AP_base = mean(AP_amp,'omitnan');
-        HM = 0.5 * (AP_base + peak_amp_ij);
-
-        % Calculate FWHM
-        % 在峰左侧找到半最大值的位置
-        [left_below_idx, left_above_idx] = deal([], []);
-        if any(AP_amp(1:AP_window_size + 1) < HM)
-            left_below_idx = find(AP_amp(1:AP_window_size+1) < HM, 1,'last');
-        end
-        if any(AP_amp(1:AP_window_size + 1) > HM)
-            left_above_idx = left_below_idx - 1 + find(AP_amp(left_below_idx:AP_window_size+1) > HM, 1, 'first');
-        end
-
-        % 在峰右侧找到半最大值的位置
-        [right_above_idx, right_below_idx] = deal([], []);
-        if any(AP_amp(AP_window_size + 1 :end) < HM)
-            right_below_idx = find(AP_amp(AP_window_size+1:end) < HM, 1, 'first') + AP_window_size;
-        end
-        if any(AP_amp(AP_window_size + 1:end) > HM)
-            right_above_idx = find(AP_amp(AP_window_size+1:right_below_idx) > HM, 1, 'last') + AP_window_size;
-        end
-
-
-        % 使用线性插值估算精确的半最大值位置
-        if ~isempty(left_below_idx) && ~isempty(left_above_idx)
-            idx_left_exact = left_below_idx + (HM - AP_amp(left_below_idx)) / (AP_amp(left_above_idx) - AP_amp(left_below_idx));
-        else
-            idx_left_exact = [];
-        end
-
-        if ~isempty(right_above_idx) && ~isempty(right_below_idx)
-            idx_right_exact = right_below_idx - (AP_amp(right_above_idx) - HM) / (AP_amp(right_above_idx) - AP_amp(right_below_idx));
-        else
-            idx_right_exact = [];
-        end
-
-        % 计算FWHM
-        if isempty(idx_left_exact) || isempty(idx_right_exact)
-            FWHM = NaN; % 或者可以设定为某个默认值
-        else
-            FWHM = (idx_right_exact - idx_left_exact) * dt;
-        end
-
-        % Amplitude = abs(AP_base - peak_amp_ij);
+        % Calculate;
         Amplitude = abs(peak_amp_ij);
         Sensitivity = peak_polarity(i) * max(abs(AP_sensitivity));
         SNR = peak_polarity(i) * max(abs(AP_SNR));
-
+        FWHM = calculate_FWHM(AP_amp, dt, peak_index, AP_window_size);
+        
+        % save AP data
         each_AP = struct('Trace', i, 'AP_number', j, 'AP_index',AP_index, ...
             'AP_amp',AP_amp,'Amplitude', Amplitude,'FWHM',FWHM, ...
             'AP_sensitivity',AP_sensitivity,'Sensitivity',Sensitivity, ...
