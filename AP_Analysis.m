@@ -118,10 +118,11 @@ fprintf('Finished highpass filter\n')
 
 %% Photobleaching correction
 traces_input = zeros(size(traces,1),size(traces,2)-1);
+background = traces(:,end);
 
 % remove background
 for i = 1: size(traces,2)-1
-    traces_input(:,i) = traces(:,i) - traces(:,end);
+    traces_input(:,i) = traces(:,i) - background;
 end
 
 % fit
@@ -165,6 +166,7 @@ AP_window_width = 40 ; % number of frames to for AP window (defined = 40)
 MinPeakDistance = 20 * dt; % (defined = 20 * dt)
 peaks_amplitude = cell(1, length(rois)-1);
 peaks_index = cell(1, length(rois)-1);
+peaks_sensitivity = cell(1, length(rois)-1);
 
 % Plot mean intensity trace and set threshold to find peak
 fig = figure();
@@ -182,8 +184,8 @@ for i = 1:length(rois)-1
     end
 
     % plot trace
-    trace = traces_corrected(:,i) * peak_polarity(i);
-    plot(t,  trace ,'Color',colors(i,:));
+    plot_trace = traces_corrected(:,i) * peak_polarity(i);
+    plot(t,  plot_trace ,'Color',colors(i,:));
 
     % set threshold
     [~,peak_threshold(i)] = ginput(1);
@@ -192,9 +194,12 @@ for i = 1:length(rois)-1
     pause(0.2);
 
     % find peak
-    MinPeakProminence = (max(trace)-mean(trace))*0.5; % (define factor = 0.7)
-    [peaks_amplitude{i}, peaks_index{i}] =  findpeaks(trace, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_threshold(i));
-
+    MinPeakProminence = (max(plot_trace)-mean(plot_trace))*0.5; % (define factor = 0.7)
+    [peak_y,peak_x] =  findpeaks(plot_trace, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_threshold(i));
+    peaks_index{i} = peak_x;
+    current_trace = traces_input(:,i);
+    peaks_amplitude{i} = current_trace(peak_x);
+    peaks_sensitivity{i} = peak_y;
 end
 close;
 
@@ -220,7 +225,7 @@ for i = 1:length(rois)-1
     hold on;
 
     % plot peak
-    plot(peaks_index{i}.*dt,peaks_amplitude{i},'v','Color',colors(i,:),'MarkerFaceColor',colors(i,:));
+    plot(peaks_index{i}.*dt,peaks_sensitivity{i},'v','Color',colors(i,:),'MarkerFaceColor',colors(i,:));
 end
 sgtitle('Peak finding');
 hold on;
@@ -298,9 +303,10 @@ for i = 1:length(rois)-1 % i for trace
     peaks_num = length(peaks_index{i});
     peaks_index_i = peaks_index{i};
     peaks_amp_i = peaks_amplitude{i};
-    each_trace = traces_corrected(:,i) * peak_polarity(i);
+    each_trace_amp = traces_input(:,i)*peak_polarity(i);
     each_trace_sensitivity = sentivity_trace(:,i);
     each_trace_SNR = SNR_trace(:,i);
+    each_trace_smooth = smooth_trace(:,i);
     AP_list{i} = cell(1, length(peaks_index{i}));
 
     % each peak
@@ -314,32 +320,36 @@ for i = 1:length(rois)-1 % i for trace
         AP_index = AP_start_index : AP_end_index;
 
         % search
-        AP_amp = each_trace(AP_start_index:AP_end_index)';
+        AP_amp = each_trace_amp(AP_start_index:AP_end_index)';
         AP_sensitivity = each_trace_sensitivity(AP_start_index:AP_end_index)';
         AP_SNR = each_trace_SNR(AP_start_index:AP_end_index)';
+        AP_smooth = each_trace_smooth(AP_start_index:AP_end_index)';
 
         % fill NaN
         if 0 > peak_index_ij - AP_window_width
             AP_amp = [NaN(1,0 - (peak_index_ij - AP_window_width)+1), AP_amp];
             AP_sensitivity = [NaN(1,0 - (peak_index_ij - AP_window_width)+1),AP_sensitivity];
             AP_SNR = [NaN(1,0 - (peak_index_ij - AP_window_width)+1),AP_SNR];
+            AP_smooth = [NaN(1,0 - (peak_index_ij - AP_window_width)+1),AP_smooth];
         elseif nframes < peak_index_ij + AP_window_width
             AP_amp = [AP_amp, NaN(1,peak_index_ij + AP_window_width - nframes)];
             AP_sensitivity = [AP_sensitivity, NaN(1,peak_index_ij + AP_window_width - nframes)];
-            AP_SNR = [AP_SNR NaN(1,peak_index_ij + AP_window_width - nframes)];
+            AP_SNR = [AP_SNR, NaN(1,peak_index_ij + AP_window_width - nframes)];
+            AP_smooth = [AP_smooth, NaN(1,peak_index_ij + AP_window_width - nframes)];
         end
 
         % Calculate;
         Amplitude = abs(peak_amp_ij);
         Sensitivity = AP_sensitivity(AP_window_width+1) - 1 ;
         SNR = abs(AP_SNR(AP_window_width+1));
-        FWHM = calculate_FWHM(AP_amp, dt, AP_window_width);
+        baseline = mean(AP_smooth,'omitnan');
+        FWHM = calculate_FWHM(AP_sensitivity, dt, AP_window_width, baseline, peak_polarity(i))
         
         % save AP data
         each_AP = struct('Trace', i, 'AP_number', j, 'AP_index',AP_index, ...
             'AP_amp',AP_amp,'Amplitude', Amplitude,'FWHM',FWHM, ...
             'AP_sensitivity',AP_sensitivity,'Sensitivity',Sensitivity, ...
-            'AP_SNR', AP_SNR, 'SNR', SNR);
+            'AP_SNR', AP_SNR, 'SNR', SNR,'baseline',baseline);
         AP_list{i}{j} = each_AP;
     end
 end

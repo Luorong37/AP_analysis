@@ -27,7 +27,7 @@ function [SNR_trace,smooth_trace] = calculate_SNR(trace, threshold, polarity, sp
     end
     
     % Calculate RMSE from the included residuals
-    rmse_noise = sqrt(mean(residuals.^2))
+    rmse_noise = sqrt(mean(residuals.^2));
     
     % Compute SNR using the peak amplitude divided by RMSE noise    
     SNR_trace = (trace - smooth_trace) / rmse_noise;
