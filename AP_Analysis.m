@@ -161,7 +161,7 @@ peak_polarity =  zeros(1,length(rois));
 peak_threshold = zeros(1,length(rois));
 
 % set peak finding
-AP_window_size = 100 ; % number of frames to for AP window (defined = 100)
+AP_window_width = 40 ; % number of frames to for AP window (defined = 40)
 MinPeakDistance = 20 * dt; % (defined = 20 * dt)
 peaks_amplitude = cell(1, length(rois)-1);
 peaks_index = cell(1, length(rois)-1);
@@ -173,6 +173,7 @@ for i = 1:length(rois)-1
     clf;
     title(sprintf('ROI %d',i));
     hold on;
+
     % polarity judge
     if abs(min(traces_corrected(:,i))-mean(traces_corrected(:,i))) < max(abs(traces_corrected(:,i)) - mean(traces_corrected(:,i)))
         peak_polarity(i) = 1;
@@ -259,17 +260,14 @@ shift_sensitivity = zeros(size(rois)); % plot shift
 shift_SNR = zeros(size(rois));
 
 for i = 1 : length(rois)-1
-    intensity_trace(:,i) = traces(:,i) - traces(:,end);
-    % Calculate Sensitivity
-    sentivity_trace(:,i) = traces_corrected(:,i)  ./ intensity_trace(:,i);
-
+    fprintf('Calculating ROI %d ... \n',i);
     
+    % Calculate Sensitivity
+    intensity_trace(:,i) = 1;
+    sentivity_trace(:,i) = traces_corrected(:,i)-1 ./ 1;
+
     % Calculate SNR
-    [xData, yData] = prepareCurveData([], traces_corrected(:,i));
-    ft = fittype( 'poly1' );
-    [fitresult, gof] = fit( xData, yData, ft );
-    RMSE_mean=gof.rmse;
-    SNR_trace(:,i) = (traces_corrected(:,i)-1) ./ RMSE_mean;
+    [SNR_trace(:,i),smooth_trace(:,i)]  = calculate_SNR(traces_corrected(:,i), peak_threshold(i), peak_polarity(i));
 
     % add plot shift
     if i > 1
@@ -292,7 +290,7 @@ fig_filename = fullfile(save_path, '4_Sensitivity_figure.fig');
 png_filename = fullfile(save_path, '4_Sensitivity_figure.png');
 
 saveas(gcf, fig_filename, 'fig');
-saveas(gcf, png_filename, 'png');
+saveas(gcf, png_filename, 'png'); 
 %% Statistic AP
 AP_list = cell(1, length(rois)-1);
 each_AP = struct('Trace', [], 'AP_number', [], 'AP_index',[],'AP_amp',[], ...
@@ -315,8 +313,8 @@ for i = 1:length(rois)-1 % i for trace
         peak_amp_ij = peaks_amp_i(j);
 
         % keep in board
-        AP_start_index = max(1, peak_index_ij - AP_window_size);
-        AP_end_index = min(nframes, peak_index_ij + AP_window_size);
+        AP_start_index = max(1, peak_index_ij - AP_window_width);
+        AP_end_index = min(nframes, peak_index_ij + AP_window_width);
         AP_index = AP_start_index : AP_end_index;
 
         % search
@@ -325,21 +323,21 @@ for i = 1:length(rois)-1 % i for trace
         AP_SNR = each_trace_SNR(AP_start_index:AP_end_index)';
 
         % fill NaN
-        if 0 > peak_index_ij - AP_window_size
-            AP_amp = [NaN(1,0 - (peak_index_ij - AP_window_size)+1), AP_amp];
-            AP_sensitivity = [NaN(1,0 - (peak_index_ij - AP_window_size)+1),AP_sensitivity];
-            AP_SNR = [NaN(1,0 - (peak_index_ij - AP_window_size)+1),AP_SNR];
-        elseif nframes < peak_index_ij + AP_window_size
-            AP_amp = [AP_amp, NaN(1,peak_index_ij + AP_window_size - nframes)];
-            AP_sensitivity = [AP_sensitivity, NaN(1,peak_index_ij + AP_window_size - nframes)];
-            AP_SNR = [AP_SNR NaN(1,peak_index_ij + AP_window_size - nframes)];
+        if 0 > peak_index_ij - AP_window_width
+            AP_amp = [NaN(1,0 - (peak_index_ij - AP_window_width)+1), AP_amp];
+            AP_sensitivity = [NaN(1,0 - (peak_index_ij - AP_window_width)+1),AP_sensitivity];
+            AP_SNR = [NaN(1,0 - (peak_index_ij - AP_window_width)+1),AP_SNR];
+        elseif nframes < peak_index_ij + AP_window_width
+            AP_amp = [AP_amp, NaN(1,peak_index_ij + AP_window_width - nframes)];
+            AP_sensitivity = [AP_sensitivity, NaN(1,peak_index_ij + AP_window_width - nframes)];
+            AP_SNR = [AP_SNR NaN(1,peak_index_ij + AP_window_width - nframes)];
         end
 
         % Calculate;
         Amplitude = abs(peak_amp_ij);
         Sensitivity = peak_polarity(i) * max(abs(AP_sensitivity));
         SNR = peak_polarity(i) * max(abs(AP_SNR));
-        FWHM = calculate_FWHM(AP_amp, dt, peak_index, AP_window_size);
+        FWHM = calculate_FWHM(AP_amp, dt, peak_index, AP_window_width);
         
         % save AP data
         each_AP = struct('Trace', i, 'AP_number', j, 'AP_index',AP_index, ...
@@ -425,25 +423,25 @@ for i = 1:length(rois)-1 % i for trace
         end
 
         % get each AP
-        AP_i = zeros(peaks_num, AP_window_size*2+1);
+        AP_i = zeros(peaks_num, AP_window_width*2+1);
         for j = 1:peaks_num
             each_AP = AP_list{i}{j};
             AP_i(j,:) = each_AP.AP_sensitivity;
             % plot each AP
-            plot((1:AP_window_size*2+1)*dt, each_AP.AP_sensitivity','Color',[0.8 0.8 0.8]);
+            plot((1:AP_window_width*2+1)*dt, each_AP.AP_sensitivity','Color',[0.8 0.8 0.8]);
             hold on;
         end
 
         % plot average AP for each trace
         subplot(2,ceil(plot_cols/2),plot_col);
-        plot((1:AP_window_size*2+1)*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
+        plot((1:AP_window_width*2+1)*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
         hold on;
         title(sprintf('ROI %d\n',i));
         hold on;
 
         % plot average AP for average trace
         subplot(2,ceil(plot_cols/2),plot_cols);
-        plot((1:AP_window_size*2+1)*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
+        plot((1:AP_window_width*2+1)*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
         hold on;
     end
 end
@@ -482,24 +480,24 @@ for i = 1:length(rois)-1
         end
 
         % extract each AP
-        AP_i = zeros(peaks_num, AP_window_size*2+1);
+        AP_i = zeros(peaks_num, AP_window_width*2+1);
         for j = 1:peaks_num
             each_AP = AP_list{i}{j};
             AP_i(j,:) = each_AP.AP_SNR;
-            plot((1:AP_window_size*2+1)*dt, each_AP.AP_SNR','Color',[0.8 0.8 0.8]);
+            plot((1:AP_window_width*2+1)*dt, each_AP.AP_SNR','Color',[0.8 0.8 0.8]);
             hold on;
         end
 
         % plot average AP for trace
         subplot(2,ceil(plot_cols/2),plot_col);
-        plot((1:AP_window_size*2+1)*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
+        plot((1:AP_window_width*2+1)*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
         hold on;
         title(sprintf('ROI %d',i));
         hold on;
 
         % plot average AP for all
         subplot(2,ceil(plot_cols/2),plot_cols);
-        plot((1:AP_window_size*2+1)*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
+        plot((1:AP_window_width*2+1)*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
         hold on;
     end
 end
