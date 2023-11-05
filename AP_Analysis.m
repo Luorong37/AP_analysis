@@ -12,11 +12,12 @@ clc;
 
 %% Loading raw data
 t1 = tic; % Start a timer
+nowtime = string(datestr(now, 'yyyy-mm-dd_HH-MM-SS'));
 fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'X:\91 Data and analysis\liuyang\Patch\23.08.15\A0034+Alfa(64Am)-Cy3.5\Cell3\125105_FOI\';
+folder_path = 'D:\Temple\125105_FOI';
 file_name = 'movie.bin';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 484; % Hz
@@ -30,11 +31,11 @@ split_path = split(file_name, '.');
 if length(split_path)>1
     % when read a file
     file_extension = string(split_path(end));
-    save_path =  fullfile(folder_path, [cell2mat(split_path(1)),'_Analysis']);
+    save_path =  fullfile(folder_path, [cell2mat(split_path(1)),'_Analysis'], nowtime);
 else
     % when read a folder
     file_extension = 'tif';
-    save_path = fullfile([folder_path, '_Analysis']);
+    save_path = fullfile([folder_path, '_Analysis'] ,nowtime);
 end
 mkdir(save_path);
 
@@ -110,9 +111,15 @@ saveas(gcf, png_filename, 'png');
 save(roi_filename, 'rois');
 
 
-%% Photobleaching correction
-traces_highpassfilted = highpassfilter(traces, freq);
+%% Photobleaching correction (optional)
+
+traces_corrected = highpassfilter(traces, freq);
 fprintf('Finished highpass filter\n')
+
+%% Photobleaching correction
+
+traces_corrected = fit_exp1(traces, freq);
+fprintf('Finished exp1 fit\n')
 
 %% Peak finding
 % AP threshold and polarity
@@ -133,14 +140,14 @@ for i = 1:length(rois)-1
     title(sprintf('ROI %d',i));
     hold on;
     % polarity judge
-    if abs(min(traces_highpassfilted(:,i))) < max(abs(traces_highpassfilted(:,i)))
+    if abs(min(traces_corrected(:,i))) < max(abs(traces_corrected(:,i)))
         peak_polarity(i) = 1;
     else
         peak_polarity(i) = -1;
     end
 
     % plot trace
-    trace = traces_highpassfilted(:,i) * peak_polarity(i);
+    trace = traces_corrected(:,i) * peak_polarity(i);
     plot(t,  trace ,'Color',colors(i,:));
 
     % set threshold
@@ -169,7 +176,7 @@ for i = 1:length(rois)-1
     hold on;
 
     % plot trace
-    trace = traces_highpassfilted(:,i) * peak_polarity(i);
+    trace = traces_corrected(:,i) * peak_polarity(i);
     plot(t,  trace ,'Color',colors(i,:));
     hold on;
 
@@ -220,13 +227,13 @@ shift_SNR = zeros(size(rois));
 for i = 1 : length(rois)-1
     intensity_trace(:,i) = traces(:,i) - traces(:,end);
     % Calculate Sensitivity
-    sentivity_trace(:,i) = traces_highpassfilted(:,i)  ./ intensity_trace(:,i);
+    sentivity_trace(:,i) = traces_corrected(:,i)  ./ intensity_trace(:,i);
     % Calculate SNR
-    [xData, yData] = prepareCurveData([], traces_highpassfilted(:,i));
+    [xData, yData] = prepareCurveData([], traces_corrected(:,i));
     ft = fittype( 'poly1' );
     [fitresult, gof] = fit( xData, yData, ft );
     RMSE_mean=gof.rmse;
-    SNR_trace(:,i) = traces_highpassfilted(:,i) ./ RMSE_mean;
+    SNR_trace(:,i) = traces_corrected(:,i) ./ RMSE_mean;
 
     % add plot shift
     if i > 1
@@ -262,7 +269,7 @@ for i = 1:length(rois)-1 % i for trace
     peaks_num = length(peaks_index{i});
     peaks_index_i = peaks_index{i};
     peaks_amp_i = peaks_amplitude{i};
-    each_trace = traces_highpassfilted(:,i) * peak_polarity(i);
+    each_trace = traces_corrected(:,i) * peak_polarity(i);
     each_trace_sensitivity = sentivity_trace(:,i);
     each_trace_SNR = SNR_trace(:,i);
 
