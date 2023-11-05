@@ -208,9 +208,9 @@ fig = figure();
 set(fig,'Position',get(0,'Screensize'));
 for i = 1:length(rois)-1
     if ceil((length(rois)-1)/4) > 1
-    subplot(ceil((length(rois)-1)/4),4,i); % each line for 4 ROI
+        subplot(ceil((length(rois)-1)/4),4,i); % each line for 4 ROI
     else
-    subplot(1,length(rois)-1,i)
+        subplot(1,length(rois)-1,i)
     end
     title(sprintf('ROI %d',i));
     hold on;
@@ -278,7 +278,7 @@ for i = 1 : length(rois)-1
         'r','Parent',sensitivity_axe,'LineWidth',2);
     hold(sensitivity_axe,'on');
 
-%     
+    %
     % plot SNR
     plot(t,SNR_trace(:,i) + peak_polarity(i)*sum(shift_SNR(1:i)),'Color', colors(i,:),'Parent',SNR_axe);
     hold(SNR_axe,'on');
@@ -291,7 +291,7 @@ fig_filename = fullfile(save_path, '4_Sensitivity_figure.fig');
 png_filename = fullfile(save_path, '4_Sensitivity_figure.png');
 
 saveas(gcf, fig_filename, 'fig');
-saveas(gcf, png_filename, 'png'); 
+saveas(gcf, png_filename, 'png');
 %% Statistic AP
 AP_list = cell(1, length(rois)-1);
 each_AP = struct('Trace', [], 'AP_number', [], 'AP_index',[],'AP_amp',[], ...
@@ -344,7 +344,7 @@ for i = 1:length(rois)-1 % i for trace
         SNR = abs(AP_SNR(AP_window_width+1));
         baseline = mean(AP_smooth,'omitnan');
         FWHM = calculate_FWHM(AP_sensitivity, dt, AP_window_width, baseline, peak_polarity(i));
-        
+
         % save AP data
         each_AP = struct('Trace', i, 'AP_number', j, 'AP_index',AP_index, ...
             'AP_amp',AP_amp,'Amplitude', Amplitude,'FWHM',FWHM, ...
@@ -517,5 +517,43 @@ png_filename = fullfile(save_path, '6_average_AP_SNR.png');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-% 
-%% 
+%
+%% Firing rate
+
+% set up
+window = 1; % second, (def = 1 s)
+num_windows = ceil(nframes / window*dt)-1;
+window_length = ceil(window / dt);
+firing_rate_traces = zeros(num_windows, length(rois));
+t_window = [0:window:num_windows-1]+0.5 * window;
+
+% 统计不为空的trace数目
+figure();
+plot_cols = sum(cellfun('isempty',AP_list)==0)+1;
+plot_col = 0;
+sum_axe = subplot(2,ceil(plot_cols/2),plot_cols);
+title('Summary rate');
+hold on;
+for i = 1:length(rois)-1
+    %判断是否为有AP的trace
+    peaks_num = length(peaks_index{i});
+    firing_rate_traces(:,i) = calculate_firing_rate(peaks_index{i}, window,num_windows, window_length);
+    subplot(2,ceil(plot_cols/2),i);
+    title(sprintf('ROI %d',i));
+    hold on;
+    plot(t_window, firing_rate_traces(:,i),'Color',colors(i,:),"LineWidth",2);
+    hold on;
+    plot(t,SNR_trace(:,i) * peak_polarity(i),'Color', colors(i,:));
+    hold on;
+    plot(t_window, firing_rate_traces(:,i),'Color',colors(i,:),"LineWidth",2,'Parent',sum_axe);
+    hold(sum_axe,'on');
+end
+
+sgtitle('Firing rate');
+hold on;
+
+fig_filename = fullfile(save_path, '7_firing_rate.fig');
+png_filename = fullfile(save_path, '7_firing_rate.png');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
