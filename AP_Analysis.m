@@ -12,7 +12,7 @@ clc;
 
 %% Loading raw data
 t1 = tic; % Start a timer
-nowtime = string(datestr(now, 'yyyy-mm-dd_HH-MM-SS'));
+nowtime = string(datetime);
 fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
@@ -525,7 +525,7 @@ window = 1; % second, (def = 1 s)
 num_windows = ceil(nframes / window*dt)-1;
 window_length = ceil(window / dt);
 firing_rate_traces = zeros(num_windows, length(rois));
-t_window = [0:window:num_windows-1]+0.5 * window;
+t_window = (0:window:num_windows-1)+0.5 * window;
 
 % 统计不为空的trace数目
 figure();
