@@ -1,8 +1,10 @@
 % AP_ANALYSIS POWERED BY LIU-YANG LUORONG.
 % version 2
+% https://github.com/Luorong37/AP_analysis
 
 % NEED FUNCTIONS:
-% load_movie, create_map, highpassfilter, select_ROI
+% calculate_firing_rate, calculate_FWHM, create_map, calculate_SNR
+% fit_exp1, highpassfilter, select_ROI
 
 % NEED TOOLBOX:
 % Image Processing Toolbox, Curve Fitting Toolbox, Signal Processing Toolbox
