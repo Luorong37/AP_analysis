@@ -17,10 +17,10 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'D:\Temple\125105_FOI';
-file_name = 'movie.bin';  % must add format.
+folder_path = 'D:\Temple\20230810-170226recordPVH_2000';
+file_name = '';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
-freq = 484; % Hz
+freq = 400; % Hz
 % -----------------------------------------------------------
 
 % defined bin 1
@@ -233,26 +233,26 @@ saveas(gcf, png_filename, 'png');
 % show fluorescent imageing
 fig = figure();
 set(fig,'Position',get(0,'Screensize'));
-subplot(1,3,1);
-title(sprintf('Selected ROIs'));
-imshow(imadjust(uint16(mean(reshape(movie, ncols,nrows,[]),3))));
-hold on;
-
-for i = 1:length(rois)
-    boundary = bwboundaries(rois{i});
-    plot(boundary{1}(:,2), boundary{1}(:,1),'Color', colors(i,:), 'LineWidth', 2);
-    hold on;
-end
+% subplot(1,3,1);
+% title(sprintf('Selected ROIs'));
+% imshow(imadjust(uint16(mean(reshape(movie, ncols,nrows,[]),3))));
+% hold on;
+% 
+% for i = 1:length(rois)
+%     boundary = bwboundaries(rois{i});
+%     plot(boundary{1}(:,2), boundary{1}(:,1),'Color', colors(i,:), 'LineWidth', 2);
+%     hold on;
+% end
 
 % plot and calculate
 intensity_trace = zeros(nframes,length(rois));
 sentivity_trace = zeros(nframes,length(rois));
 SNR_trace = zeros(nframes,length(rois));
 
-subplot(1,3,2);
+sensitivity_axe = subplot(1,2,1);
 title('Sensitivity');
 hold on;
-subplot(1,3,3);
+SNR_axe = subplot(1,2,2);
 title('SNR');
 hold on;
 shift_sensitivity = zeros(size(rois)); % plot shift
@@ -262,12 +262,14 @@ for i = 1 : length(rois)-1
     intensity_trace(:,i) = traces(:,i) - traces(:,end);
     % Calculate Sensitivity
     sentivity_trace(:,i) = traces_corrected(:,i)  ./ intensity_trace(:,i);
+
+    
     % Calculate SNR
     [xData, yData] = prepareCurveData([], traces_corrected(:,i));
     ft = fittype( 'poly1' );
     [fitresult, gof] = fit( xData, yData, ft );
     RMSE_mean=gof.rmse;
-    SNR_trace(:,i) = traces_corrected(:,i) ./ RMSE_mean;
+    SNR_trace(:,i) = (traces_corrected(:,i)-1) ./ RMSE_mean;
 
     % add plot shift
     if i > 1
@@ -278,13 +280,11 @@ for i = 1 : length(rois)-1
         shift_SNR(i) = 0;
     end
     % plot sensitivity
-    subplot(1,3,2);
-    plot(t,sentivity_trace(:,i) + peak_polarity(i)*sum(shift_sensitivity(1:i)),'Color', colors(i,:));
-    hold on;
+    plot(t,sentivity_trace(:,i) + peak_polarity(i)*sum(shift_sensitivity(1:i)),'Color', colors(i,:),'Parent',sensitivity_axe);
+    hold(sensitivity_axe,'on');
     % plot SNR
-    subplot(1,3,3);
-    plot(t,SNR_trace(:,i) + peak_polarity(i)*sum(shift_SNR(1:i)),'Color', colors(i,:));
-    hold on;
+    plot(t,SNR_trace(:,i) + peak_polarity(i)*sum(shift_SNR(1:i)),'Color', colors(i,:),'Parent',SNR_axe);
+    hold(SNR_axe,'on');
 
 end
 
@@ -298,6 +298,7 @@ AP_list = cell(1, length(rois)-1);
 each_AP = struct('Trace', [], 'AP_number', [], 'AP_index',[],'AP_amp',[], ...
     'Amplitude', [],'FWHM',[], 'AP_sensitivity',[],'Sensitivity',[], ...
     'AP_SNR', [], 'SNR', []);
+
 % each trace
 for i = 1:length(rois)-1 % i for trace
     peaks_num = length(peaks_index{i});
@@ -306,7 +307,6 @@ for i = 1:length(rois)-1 % i for trace
     each_trace = traces_corrected(:,i) * peak_polarity(i);
     each_trace_sensitivity = sentivity_trace(:,i);
     each_trace_SNR = SNR_trace(:,i);
-
     AP_list{i} = cell(1, length(peaks_index{i}));
 
     % each peak
