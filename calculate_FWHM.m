@@ -5,7 +5,7 @@ function FWHM = calculate_FWHM(AP_sensitivity, dt, AP_window_width,baseline,pola
     baseline = (baseline - 1)* polarity;
 
     % Calculate the baseline and half-maximum value
-    HM = 0.5 * (baseline + AP_sensitivity(AP_window_width+1))
+    HM = 0.5 * (baseline + AP_sensitivity(AP_window_width+1));
 
     % Calculate FWHM
     FWHM = NaN; % Initialize FWHM to NaN in case exact indices are not found

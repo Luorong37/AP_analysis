@@ -343,7 +343,7 @@ for i = 1:length(rois)-1 % i for trace
         Sensitivity = AP_sensitivity(AP_window_width+1) - 1 ;
         SNR = abs(AP_SNR(AP_window_width+1));
         baseline = mean(AP_smooth,'omitnan');
-        FWHM = calculate_FWHM(AP_sensitivity, dt, AP_window_width, baseline, peak_polarity(i))
+        FWHM = calculate_FWHM(AP_sensitivity, dt, AP_window_width, baseline, peak_polarity(i));
         
         % save AP data
         each_AP = struct('Trace', i, 'AP_number', j, 'AP_index',AP_index, ...
@@ -517,4 +517,5 @@ png_filename = fullfile(save_path, '6_average_AP_SNR.png');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-
+% 
+%% 
