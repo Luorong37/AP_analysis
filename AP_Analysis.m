@@ -190,7 +190,8 @@ saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 %% Sensitivity and SNR Analysis
 % show fluorescent imageing
-figure();
+fig = figure();
+set(fig,'Position',get(0,'Screensize'));
 subplot(1,3,1);
 title(sprintf('Selected ROIs'));
 imshow(imadjust(uint16(mean(reshape(movie, ncols,nrows,[]),3))));
