@@ -117,12 +117,42 @@ traces_corrected = highpassfilter(traces, freq);
 fprintf('Finished highpass filter\n')
 
 %% Photobleaching correction
-traces_input = zeros(size(traces));
+traces_input = zeros(size(traces,1),size(traces,2)-1);
 
-for i = 1: size(traces,2)
+% remove background
+for i = 1: size(traces,2)-1
     traces_input(:,i) = traces(:,i) - traces(:,end);
 end
-traces_corrected = fit_exp1(traces_input, freq);
+
+% fit
+[traces_corrected, fitted_curves] = fit_exp1(traces_input, freq);
+
+% plot
+fig = figure();
+set(fig,'Position',get(0,'Screensize'));
+fit_axe = subplot(2,1,1);
+fited_axe = subplot(2,1,2);
+
+for i = 1: size(traces_corrected,2)
+    plot(t,traces_input(:,i),'Color',colors(i,:),'Parent',fit_axe);
+    hold(fit_axe, 'on');
+    plot(t,fitted_curves(:,i),'Color',colors(i,:),'LineWidth',2,'Parent',fit_axe);
+    hold(fit_axe, 'on');
+    plot(t,traces_corrected(:,i),'Color',colors(i,:),'Parent',fited_axe);
+    hold(fited_axe, 'on');
+end
+
+% note
+title(fit_axe, 'Original and Fitted Curves');
+title(fited_axe, 'Corrected Traces');
+legend(fit_axe, 'Original Trace', 'Fitted Curve');
+
+fig_filename = fullfile(save_path, '2_fitted_trace.fig');
+png_filename = fullfile(save_path, '2_fitted_trace.png');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+
 fprintf('Finished exp1 fit\n')
 
 %% Peak finding
