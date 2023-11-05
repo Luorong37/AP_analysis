@@ -38,7 +38,7 @@ Clone the repository from [GitHub](https://github.com/Luorong37/AP_analysis) or 
 1. **Loading raw data:** Load imaging files or raw data using provided dialogues.
 2. **Creating a map:** Generate sensitivity maps to visualize ROI correlation coefficients.
 3. **Selecting ROIs:** Manually select ROIs for further analysis.
-4. **Correcting Photobleaching:** Apply high-pass filtering to correct for photobleaching artifacts.
+4. **Correcting Photobleaching:** Apply single exponential function to correct for photobleaching artifacts.
 5. **Finding Peaks:** Determine the peaks in the fluorescence traces that correspond to APs.
 6. **Analyzing Sensitivity and SNR:** Calculate sensitivity and SNR for each trace.
 7. **Statistical Analysis:** Generate statistics on AP characteristics across all ROIs.
