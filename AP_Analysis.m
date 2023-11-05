@@ -117,8 +117,12 @@ traces_corrected = highpassfilter(traces, freq);
 fprintf('Finished highpass filter\n')
 
 %% Photobleaching correction
+traces_input = zeros(size(traces));
 
-traces_corrected = fit_exp1(traces, freq);
+for i = 1: size(traces,2)
+    traces_input(:,i) = traces(:,i) - traces(:,end);
+end
+traces_corrected = fit_exp1(traces_input, freq);
 fprintf('Finished exp1 fit\n')
 
 %% Peak finding
