@@ -231,25 +231,15 @@ png_filename = fullfile(save_path, '3_peak_finding.png');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 %% Sensitivity and SNR Analysis
-% show fluorescent imageing
+% set up
 fig = figure();
 set(fig,'Position',get(0,'Screensize'));
-% subplot(1,3,1);
-% title(sprintf('Selected ROIs'));
-% imshow(imadjust(uint16(mean(reshape(movie, ncols,nrows,[]),3))));
-% hold on;
-% 
-% for i = 1:length(rois)
-%     boundary = bwboundaries(rois{i});
-%     plot(boundary{1}(:,2), boundary{1}(:,1),'Color', colors(i,:), 'LineWidth', 2);
-%     hold on;
-% end
-
-% plot and calculate
 intensity_trace = zeros(nframes,length(rois));
 sentivity_trace = zeros(nframes,length(rois));
 SNR_trace = zeros(nframes,length(rois));
+smooth_trace = zeros(nframes,length(rois));
 
+% plot
 sensitivity_axe = subplot(1,2,1);
 title('Sensitivity');
 hold on;
@@ -260,11 +250,8 @@ shift_sensitivity = zeros(size(rois)); % plot shift
 shift_SNR = zeros(size(rois));
 
 for i = 1 : length(rois)-1
-    fprintf('Calculating ROI %d ... \n',i);
-    
     % Calculate Sensitivity
-    intensity_trace(:,i) = 1;
-    sentivity_trace(:,i) = traces_corrected(:,i)-1 ./ 1;
+    sentivity_trace(:,i) = traces_corrected(:,i);
 
     % Calculate SNR
     [SNR_trace(:,i),smooth_trace(:,i)]  = calculate_SNR(traces_corrected(:,i), peak_threshold(i), peak_polarity(i));
@@ -277,14 +264,23 @@ for i = 1 : length(rois)-1
         shift_sensitivity(i) = 0;
         shift_SNR(i) = 0;
     end
+
     % plot sensitivity
     plot(t,sentivity_trace(:,i) + peak_polarity(i)*sum(shift_sensitivity(1:i)),'Color', colors(i,:),'Parent',sensitivity_axe);
     hold(sensitivity_axe,'on');
+    % plot smooth curve
+    plot(t,smooth_trace(:,i) + peak_polarity(i)*sum(shift_sensitivity(1:i)), ...
+        'r','Parent',sensitivity_axe,'LineWidth',2);
+    hold(sensitivity_axe,'on');
+
+%     
     % plot SNR
     plot(t,SNR_trace(:,i) + peak_polarity(i)*sum(shift_SNR(1:i)),'Color', colors(i,:),'Parent',SNR_axe);
     hold(SNR_axe,'on');
 
 end
+
+legend(sensitivity_axe, 'Sensitivity', 'Fitted Curve');
 
 fig_filename = fullfile(save_path, '4_Sensitivity_figure.fig');
 png_filename = fullfile(save_path, '4_Sensitivity_figure.png');
