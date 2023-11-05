@@ -331,9 +331,9 @@ for i = 1:length(rois)-1 % i for trace
 
         % Calculate;
         Amplitude = abs(peak_amp_ij);
-        Sensitivity = peak_polarity(i) * max(abs(AP_sensitivity));
-        SNR = peak_polarity(i) * max(abs(AP_SNR));
-        FWHM = calculate_FWHM(AP_amp, dt, peak_index, AP_window_width);
+        Sensitivity = AP_sensitivity(AP_window_width+1) - 1 ;
+        SNR = abs(AP_SNR(AP_window_width+1));
+        FWHM = calculate_FWHM(AP_amp, dt, AP_window_width);
         
         % save AP data
         each_AP = struct('Trace', i, 'AP_number', j, 'AP_index',AP_index, ...
@@ -354,6 +354,7 @@ AP_number = zeros(length(AP_list), 1);
 ROI_number = zeros(length(AP_list), 1);
 
 % 计算所有AP的SNR数据并存储在tables中
+table_name = fullfile(save_path,'AP_data.xlsx');
 for i = 1:length(AP_list)
     if cellfun('isempty',AP_list{i}) == 0
         AP_i = AP_list{i}; % 当前trace的所有APs
@@ -379,8 +380,8 @@ for i = 1:length(AP_list)
             'VariableNames', {'Number', 'Amplitude', 'FWHM (ms)', 'Sensitivity', 'SNR'});
 
         % 将表格写入Excel的一个新工作表
-        sheet_name = ['ROI ' num2str(i)];
-        writetable(T, [save_path '\AP_data.xlsx'], 'Sheet', sheet_name);
+        sheet_name = string(['ROI ' num2str(i)]);
+        writetable(T,table_name, 'Sheet', sheet_name);
 
         % save average value
         avg_amp(i) = mean(amp_i);
@@ -394,7 +395,7 @@ end
 
 T_ave = table(ROI_number, AP_number, avg_amp, avg_FWHM, avg_sensitivity, avg_SNR, ...
     'VariableNames', {'ROI Number','AP Number', 'Average Amplitude', 'Average FWHM (ms)', 'Average Sensitivity', 'Average SNR'});
-writetable(T_ave, [save_path '\AP_data.xlsx'], 'Sheet', 'Average');
+writetable(T_ave, table_name, 'Sheet', 'Average');
 
 fprintf('Finished statistic AP\n')
 
