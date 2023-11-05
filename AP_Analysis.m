@@ -140,7 +140,7 @@ for i = 1:length(rois)-1
     title(sprintf('ROI %d',i));
     hold on;
     % polarity judge
-    if abs(min(traces_corrected(:,i))) < max(abs(traces_corrected(:,i)))
+    if abs(min(traces_corrected(:,i))-mean(traces_corrected(:,i))) < max(abs(traces_corrected(:,i)) - mean(traces_corrected(:,i)))
         peak_polarity(i) = 1;
     else
         peak_polarity(i) = -1;
