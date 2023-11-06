@@ -15,6 +15,7 @@ if ~isempty(map)
     imagesc(map);
     colorbar;
     title(sprintf('Sensitivity MAP\n\nPRESS Space to continue\nPRESS ENTER to end'));
+    hold on;
     axis image;
 end
 
@@ -41,8 +42,8 @@ if ~isempty(mask)
         trace = mean(movie(mask{i}, :));
         traces = [traces trace'];
         boundary = bwboundaries(mask{i});
-        plot(boundary{1}(:, 2), boundary{1}(:, 1), 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'LineWidth', 1, 'Parent', image_axe);
-        plot(t, trace, 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'Parent', map_axe);
+        plot(boundary{1}(:, 2), boundary{1}(:, 1), 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'LineWidth', 2, 'Parent', map_axe);
+        plot(t, trace, 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'Parent', trace_axe);
     end
 
 else
