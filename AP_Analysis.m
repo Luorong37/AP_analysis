@@ -14,13 +14,15 @@ clc;
 
 %% Loading raw data
 t1 = tic; % Start a timer
-nowtime = string(datetime);
+nowtime = string(datetime('now'));
+% Replace colons with hyphens to get the desired output format
+nowtime = strrep(nowtime , ':', '-');
 fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'D:\Temple\20230810-170226recordPVH_2000';
-file_name = '';  % must add format.
+folder_path = 'E:\Data\20230810\20230810-161506recordSCN';
+file_name = '\';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
