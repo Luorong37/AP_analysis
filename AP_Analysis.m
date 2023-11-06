@@ -21,7 +21,7 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\Data\20230810\20230810-161506recordSCN';
+folder_path = 'E:\Data\20230810\20230810-161606recordSCN';
 file_name = '\';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
@@ -68,7 +68,7 @@ fprintf('Finished saving movie after %d s\n',round(t2))
 t1 = tic; % Start a timer
 
 % if SNR is low, please large the bin.
-bin = 2;
+bin = 4;
 [quick_map] = create_map(movie, nrows, ncols, bin);
 map = quick_map;
 
@@ -89,15 +89,15 @@ save(mat_filename, 'map');
 t2 = toc(t1); % Get the elapsed time
 fprintf('Finished mask creating after %d s\n',round(t2))
 %% Load saved map (optional)
-
-map_filename = fullfile(folder_path, '0_Sensitivity_Map.mat');
+map_path = '';
+map_filename = fullfile(map_path, '0_Sensitivity_Map.mat');
 map = load(map_filename);
 map = map.map;
 
 fprintf('Finished map loading\n')
 %% Load saved ROI (optional)
-
-mask_filename = fullfile(folder_path, '1_raw_ROI.mat');
+mask_path = 'E:\Data\20230810\20230810-161506recordSCN_Analysis\2023-11-06 09-12-40';
+mask_filename = fullfile(mask_path, '1_raw_ROI.mat');
 mask = load(mask_filename);
 mask = mask.rois;
 
@@ -168,6 +168,7 @@ peak_threshold = zeros(1,length(rois));
 % set peak finding
 AP_window_width = 40 ; % number of frames to for AP window (defined = 40)
 MinPeakDistance = 20 * dt; % (defined = 20 * dt)
+MinPeakProminence_factor = 0.7; % (defined = 0.5)
 peaks_amplitude = cell(1, length(rois)-1);
 peaks_index = cell(1, length(rois)-1);
 peaks_sensitivity = cell(1, length(rois)-1);
@@ -198,7 +199,7 @@ for i = 1:length(rois)-1
     pause(0.2);
 
     % find peak
-    MinPeakProminence = (max(plot_trace)-mean(plot_trace))*0.5; % (define factor = 0.7)
+    MinPeakProminence = (max(plot_trace)-mean(plot_trace))*MinPeakProminence_factor;
     [peak_y,peak_x] =  findpeaks(plot_trace, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_threshold(i));
     peaks_index{i} = peak_x;
     current_trace = traces_input(:,i);
@@ -293,7 +294,9 @@ legend(sensitivity_axe, 'Sensitivity', 'Fitted Curve');
 
 fig_filename = fullfile(save_path, '4_Sensitivity_figure.fig');
 png_filename = fullfile(save_path, '4_Sensitivity_figure.png');
+trace_filename = fullfile(save_path, '4_Sensitivity_data.mat');
 
+save(trace_filename,"sentivity_trace",'SNR_trace');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 %% Statistic AP
@@ -390,7 +393,7 @@ for i = 1:length(AP_list)
         end
 
         % 为当前trace创建一个表格
-        T = table(number_i, amp_i, FWHM_i.*1000, sensitivity_i, SNR_i, ...
+        T = table(number_i, amp_i, FWHM_i, sensitivity_i, SNR_i, ...
             'VariableNames', {'Number', 'Amplitude', 'FWHM (ms)', 'Sensitivity', 'SNR'});
 
         % 将表格写入Excel的一个新工作表
@@ -399,7 +402,7 @@ for i = 1:length(AP_list)
 
         % save average value
         avg_amp(i) = mean(amp_i);
-        avg_FWHM(i) = mean(FWHM_i) .* 1000;
+        avg_FWHM(i) = mean(FWHM_i);
         avg_sensitivity(i) = mean(sensitivity_i);
         avg_SNR(i) = mean(SNR_i);
         AP_number(i) = number_i(end);
@@ -415,7 +418,7 @@ fprintf('Finished statistic AP\n')
 
 %% Plot average AP sensitivity
 figure();
-
+set(fig,'Position',get(0,'Screensize'));
 % 统计不为空的trace数目
 plot_cols = sum(cellfun('isempty',AP_list)==0)+1;
 plot_col = 0;
@@ -533,24 +536,17 @@ t_window = (0:window:num_windows-1)+0.5 * window;
 
 % 统计不为空的trace数目
 figure();
-plot_cols = sum(cellfun('isempty',AP_list)==0)+1;
-plot_col = 0;
-sum_axe = subplot(2,ceil(plot_cols/2),plot_cols);
-title('Summary rate');
-hold on;
+shift_firingrate = 0;
 for i = 1:length(rois)-1
     %判断是否为有AP的trace
     peaks_num = length(peaks_index{i});
     firing_rate_traces(:,i) = calculate_firing_rate(peaks_index{i}, window,num_windows, window_length);
-    subplot(2,ceil(plot_cols/2),i);
-    title(sprintf('ROI %d',i));
+    plot(t_window, firing_rate_traces(:,i) + shift_firingrate,'Color',colors(i,:),'LineWidth',2);
     hold on;
-    plot(t_window, firing_rate_traces(:,i),'Color',colors(i,:),"LineWidth",2);
+    plot(t_window, shift_firingrate*ones(size(t_window)),'black');
     hold on;
-    plot(t,SNR_trace(:,i) * peak_polarity(i),'Color', colors(i,:));
-    hold on;
-    plot(t_window, firing_rate_traces(:,i),'Color',colors(i,:),"LineWidth",2,'Parent',sum_axe);
-    hold(sum_axe,'on');
+    shift_frstep = max(firing_rate_traces(:,i));
+    shift_firingrate = shift_firingrate+ shift_frstep;
 end
 
 sgtitle('Firing rate');
