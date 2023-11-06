@@ -116,9 +116,9 @@ save(roi_filename, 'rois');
 
 
 %% Photobleaching correction (optional)
-
-traces_corrected = highpassfilter(traces, freq);
-fprintf('Finished highpass filter\n')
+% 
+% traces_corrected = highpassfilter(traces, freq);
+% fprintf('Finished highpass filter\n')
 
 %% Photobleaching correction
 traces_input = zeros(size(traces,1),size(traces,2)-1);
@@ -211,26 +211,22 @@ close;
 % Plot summary
 fig = figure();
 set(fig,'Position',get(0,'Screensize'));
+shift_peak = 0;
+shift_peak_step = 0.3; % (def = 0.3)
 for i = 1:length(rois)-1
-    if ceil((length(rois)-1)/4) > 1
-        subplot(ceil((length(rois)-1)/4),4,i); % each line for 4 ROI
-    else
-        subplot(1,length(rois)-1,i)
-    end
-    title(sprintf('ROI %d',i));
-    hold on;
-
     % plot trace
-    trace = traces_corrected(:,i) * peak_polarity(i);
+    trace = traces_corrected(:,i) * peak_polarity(i) + shift_peak;
     plot(t,  trace ,'Color',colors(i,:));
     hold on;
 
     % plot threshold
-    plot(t,ones(1,length(t)).*peak_threshold(i),'Color',colors(i,:),'LineWidth',2);
+    plot(t,ones(1,length(t)).*(peak_threshold(i)+shift_peak),'Color',colors(i,:),'LineWidth',2);
     hold on;
 
     % plot peak
-    plot(peaks_index{i}.*dt,peaks_sensitivity{i},'v','Color',colors(i,:),'MarkerFaceColor',colors(i,:));
+    plot(peaks_index{i}.*dt,peaks_sensitivity{i}+shift_peak,'v','Color',colors(i,:),'MarkerFaceColor',colors(i,:));
+    
+    shift_peak = shift_peak + shift_peak_step;
 end
 sgtitle('Peak finding');
 hold on;
