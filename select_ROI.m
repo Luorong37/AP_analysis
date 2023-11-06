@@ -38,41 +38,41 @@ if ~isempty(mask)
     roi_amount = size(mask, 2);
     rois = mask;
     for i = 1:roi_amount
-        trace = mean(its_2D(mask{i}, :));
+        trace = mean(movie(mask{i}, :));
         traces = [traces trace'];
         boundary = bwboundaries(mask{i});
         plot(boundary{1}(:, 2), boundary{1}(:, 1), 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'LineWidth', 1, 'Parent', image_axe);
-        plot(t, trace, 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'Parent', trace_axe);
+        plot(t, trace, 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'Parent', map_axe);
     end
+
+else
+    % ROI selection process
+    while true
+        if ~isempty(map)
+            roi_mask = drawpolygon('Color', colors(mod(length(rois), length(colors)) + 1, :), 'LineWidth', 1, 'Parent', map_axe);
+        else
+            roi_mask = drawpolygon('Color', colors(mod(length(rois), length(colors)) + 1, :), 'LineWidth', 1, 'Parent', image_axe);
+        end
+        mask = poly2mask(roi_mask.Position(:, 1), roi_mask.Position(:, 2), size(im_adj, 1), size(im_adj, 2));
+        rois{end + 1} = mask;
+        trace = mean(movie(mask, :));
+        traces = [traces trace'];
+
+        boundary = bwboundaries(mask);
+        plot(boundary{1}(:, 2), boundary{1}(:, 1), 'Color', colors(mod(length(rois) - 1, length(colors)) + 1, :), 'LineWidth', 1, 'Parent', image_axe);
+        plot(t, trace, 'Color', colors(mod(length(rois) - 1, length(colors)) + 1, :), 'Parent', trace_axe);
+
+        % Wait for user input
+        fig.UserData = [];
+        waitfor(fig, 'UserData');
+        if strcmp(fig.UserData, 'stop')
+            break;
+        elseif strcmp(fig.UserData, 'spacePressed')
+            continue;
+        end
+    end
+
 end
-
-% ROI selection process
-while true
-    if ~isempty(map)
-        roi_mask = drawpolygon('Color', colors(mod(length(rois), length(colors)) + 1, :), 'LineWidth', 1, 'Parent', map_axe);
-    else
-        roi_mask = drawpolygon('Color', colors(mod(length(rois), length(colors)) + 1, :), 'LineWidth', 1, 'Parent', image_axe);
-    end
-    mask = poly2mask(roi_mask.Position(:, 1), roi_mask.Position(:, 2), size(im_adj, 1), size(im_adj, 2));
-    rois{end + 1} = mask;
-    trace = mean(movie(mask, :));
-    traces = [traces trace'];
-
-    boundary = bwboundaries(mask);
-    plot(boundary{1}(:, 2), boundary{1}(:, 1), 'Color', colors(mod(length(rois) - 1, length(colors)) + 1, :), 'LineWidth', 1, 'Parent', image_axe);
-    plot(t, trace, 'Color', colors(mod(length(rois) - 1, length(colors)) + 1, :), 'Parent', trace_axe);
-
-    % Wait for user input
-    fig.UserData = [];
-    waitfor(fig, 'UserData');
-    if strcmp(fig.UserData, 'stop')
-        break;
-    elseif strcmp(fig.UserData, 'spacePressed')
-        continue;
-    end
-end
-
-
 fprintf('Finished ROI selection\n');
 end
 
