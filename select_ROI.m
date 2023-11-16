@@ -14,7 +14,7 @@ if ~isempty(map)
     map_axe = gca;
     imagesc(map);
     colorbar;
-    title(sprintf('Sensitivity MAP\n\nPRESS Space to continue\nPRESS ENTER to end'));
+    title(sprintf('Sensitivity MAP\n\nPress SPACE to continue\nPress ENTER to end'));
     hold on;
     axis image;
 end
