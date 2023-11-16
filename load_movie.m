@@ -1,44 +1,49 @@
-% Write by Liu-Yang Luorong and ChatGPT3.5
-% LOAD_TIF_MOVIE Load a TIFF movie or a directory containing TIFF files and
-% return a 2D array containing intensity time series for each pixel.
-%
-%   intensity_time_series = LOAD_TIF_MOVIE(folder_path, file_extension)
-%   returns a 2D array containing intensity time series for each pixel in a
-%   TIFF movie. If the input folder_path is a path to a TIFF movie, the
-%   function loads the movie and extracts intensity time series for each
-%   pixel. If the input folder_path is a directory containing TIFF files,
-%   the function loads all TIFF files in the directory, sorts them
-%   numerically, and extracts intensity time series for each pixel from all
-%   files.
-%
-%   folder_path: A string containing a path to a TIFF movie or a directory
-%   containing TIFF files.
-%
-%   file_extension: A string containing a file extension of TIFF files to
-%   load from the directory. This argument is ignored if folder_path is a
-%   path to a TIFF movie. Default value is '*.tif'.
-%
-%   intensity_time_series: A 2D array containing intensity time series for
-%   each pixel in the TIFF movie or directory. The rows of the array
-%   represent pixels and the columns represent time points.
-
-%   num_rows: An integer indicating the number of rows in the TIFF movie or
-%   directory.
-%
-%   num_cols: An integer indicating the number of columns in the TIFF movie
-%   or directory.
-
-%   batch_size: An integer defining the number of TIFF files to load at a
-%   time. Default value is 1000.
-
-%   For cxd file, please download bio-formats in https://www.openmicroscopy.org/bio-formats/downloads/
-
-%   Example:
-%   intensity_time_series = load_tif_movie('D:\20230321-150800', '*.tif');
-
-
 function [intensity_time_series,ncols,nrows,nframes] = ...
                     load_movie(file_path, file_extension, batch_size)
+
+% ----------Write by Liu-Yang Luorong and ChatGPT----------
+% ----------POWERED by Zoulab in Peking University----------
+% Date: 23.11.16
+% MATLAB Version: R2022b
+% 
+% LOAD_MOVIE Loads movie data from various file formats and computes the intensity time series.
+%
+%   This function is designed to load movie data from files in TIFF, binary, or MAT format. It can
+%   handle data from a single file or a directory containing multiple files. The function reads the 
+%   movie data, computes the intensity time series, and returns this data along with the dimensions 
+%   and number of frames.
+%
+%   Syntax:
+%   [intensity_time_series, ncols, nrows, nframes] = load_movie(file_path, file_extension)
+%   [intensity_time_series, ncols, nrows, nframes] = load_movie(file_path, file_extension, batch_size)
+%
+%   Parameters:
+%   file_path - String specifying the path to the movie file or directory containing movie files.
+%   file_extension - String specifying the file format ('tif', 'tiff', 'bin', 'mat').
+%   batch_size - (Optional) Integer specifying the number of files to process in one batch. Default is 1000.
+%
+%   Returns:
+%   intensity_time_series - A 2D matrix where each column represents the intensity values of a frame.
+%   ncols - Number of columns in each frame.
+%   nrows - Number of rows in each frame.
+%   nframes - Total number of frames in the movie.
+%
+%   Description:
+%   The function processes TIFF files either as a batch from a directory or individually from a file. 
+%   For binary files, it reads associated dimensions from a text file. For MAT files, it directly loads 
+%   the stored variables. The function also includes basic error handling and progress updates.
+%
+%   Examples:
+%   [its, nc, nr, nf] = load_movie('path/to/movie.tif', 'tif');
+%   [its, nc, nr, nf] = load_movie('path/to/movies/', 'tif', 500);
+%
+%   Notes:
+%   - The function is designed to manage memory efficiently by processing files in batches.
+%   - Ensure that the file format assumptions match the actual structure of your data files.
+%   - The function provides verbose output for progress tracking, especially useful for large datasets.
+%
+%   See also IMREAD, IMFINFO, FOPEN, FREAD, RESHAPE.
+
 
 if nargin < 3
     batch_size = 1000;
