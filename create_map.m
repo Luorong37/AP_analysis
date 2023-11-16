@@ -22,19 +22,19 @@ function [quick_map] = create_map(movie, num_rows, num_cols, bin)
 % 2. Reshape the movie into a 5D array for binning.
 % 3. Calculate the average intensity for each binned pixel across all frames.
 % 4. Apply photobleaching correction using an exponential fitting on the average intensity trace.
-% 5. Compute a quick_map based on normalized intensity values.
+% 5. Compute a quick_map based on normalized intensity extreme values.
 % 6. Resize the quick_map to the original movie dimensions.
 %
 % Output:
 % quick_map - A 2D array representing the processed and normalized data, resized to the original movie dimensions.
 %
 % Example:
-% quick_map = your_function_name(movie, bin, num_rows, num_cols);
+% quick_map = create_map(movie, bin, num_rows, num_cols);
 %
 % Notes:
-% - The function assumes the input movie is a 3D array with the third dimension representing time (frames).
-% - Photobleaching correction is optional but recommended for more accurate results.
-% - The function provides progress updates during processing.
+% - The function assumes the input movie is a 2D array with the third dimension representing time (frames).
+% - Photobleaching correction is defined as single exponential function.
+% - The map only find the extreme value in frames of binned pixels which may lost plateau.
 %
 % See also RESHAPE, MEAN, FIT, STD, IMRESIZE.
 
