@@ -1,11 +1,40 @@
 function [traces_corrected, fitted_curves] = fit_exp1(traces, freq)
-% This function performs photobleaching correction on the intensity-time
-% traces using a single exponential fit and optionally returns the fitted
-% curves.
-% Input arguments:
-% traces: a matrix of size num_frames x num_rois containing the intensity-time traces for each ROI
-% freq: the frame rate in Hz
-% return_fit: a boolean to decide if the fitted curves should be returned
+% ----------Write by Liu-Yang Luorong and ChatGPT----------
+% ----------POWERED by Zoulab in Peking University----------
+% Date: 23.11.16
+% MATLAB Version: R2022b
+% 
+% FIT_EXP1 Applies exponential fitting for photobleaching correction in fluorescence traces.
+%
+%   This function corrects for photobleaching in fluorescence traces by fitting a single-term 
+%   exponential decay model to each trace. It then divides each original trace by its fitted 
+%   exponential curve to mitigate the photobleaching effects.
+%
+%   Syntax:
+%   [traces_corrected, fitted_curves] = fit_exp1(traces, freq)
+%
+%   Parameters:
+%   traces - A matrix containing fluorescence traces, with each column representing a trace.
+%   freq - Sampling frequency of the traces.
+%
+%   Returns:
+%   traces_corrected - A matrix of the same size as 'traces', containing the photobleaching-corrected traces.
+%   fitted_curves - A matrix of fitted exponential curves corresponding to each trace in 'traces'.
+%
+%   Description:
+%   - For each trace in 'traces', the function fits a single-term exponential decay model.
+%   - The fitting is performed using MATLAB's 'fit' function with 'exp1' as the model type.
+%   - Each original trace is then divided by its corresponding fitted curve to correct for photobleaching.
+%   - The function returns both the corrected traces and the fitted exponential curves.
+%
+%   Example:
+%   [corrected_traces, exp_curves] = fit_exp1(raw_traces, sampling_frequency);
+%
+%   Notes:
+%   - Ensure that 'traces' are correctly preprocessed before applying this function.
+%   - The function assumes that photobleaching follows a single-term exponential decay.
+%
+% See also FIT.
 
 
 % Calculate time axis
