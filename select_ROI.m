@@ -1,8 +1,53 @@
-function [rois, traces] = select_ROI(movie, num_rows, num_cols, t, colors, mask, map)
+function [rois, traces] = select_ROI(movie, nrows, ncols, t, colors, mask, map)
+% 
+% ----------Write by Liu-Yang Luorong and ChatGPT----------
+% ----------POWERED by Zoulab in Peking University----------
+% Date: 23.11.16
+% MATLAB Version: R2022b
+% SELECT_ROI Allows for interactive selection of Regions of Interest (ROIs) in a movie data set.
+%
+%   This function is designed for interactive selection and visualization of ROIs in movie data. 
+%   It displays the movie and an optional sensitivity map, allowing the user to draw polygons 
+%   representing ROIs. The function then calculates and returns the mean intensity trace for each ROI.
+%
+%   Syntax:
+%   [rois, traces] = select_ROI(movie, num_rows, num_cols, t, colors, mask, map)
+%
+%   Parameters:
+%   movie - A 2D array representing the movie, with dimensions [ncols*nrows, nframes].
+%   nrows - Number of rows in the movie.
+%   ncols - Number of columns in the movie.
+%   t - Time vector corresponding to the movie frames.
+%   colors - A matrix of RGB values for differentiating multiple ROIs.
+%   mask - (Optional) A predefined set of masks for ROIs. If provided, the function skips manual selection.
+%   map - (Optional) A sensitivity map to be displayed alongside the movie for guidance in ROI selection.
+%
+%   Returns:
+%   rois - A cell array of masks for each selected ROI.
+%   traces - A matrix where each column represents the mean intensity trace of a corresponding ROI.
+%
+%   Description:
+%   - The function displays the movie and sensitivity map (if provided) in separate subplots.
+%   - Users can draw ROIs on the movie (if map were not provided) or sensitivity map. The ROIs are displayed as colored polygons.
+%   - For each ROI, the function calculates the mean intensity trace over time.
+%   - The process continues by user presses 'SPACE' until the user presses the 'Enter' key to end selection.
+%
+%   Example:
+%   [rois, traces] = select_ROI(movie_data, ncols, nrows, time_vector, color_matrix, [], sensitivity_map);
+%
+%   Notes:
+%   - The function requires an interactive MATLAB figure environment to work correctly.
+%   - The 'colors' parameter should have as many rows as the maximum number of ROIs expected to be selected.
+%   - If a 'mask' is provided, the function uses these masks instead of manual ROI selection.
+%   - Press 'Space' to continue drawing ROIs; press 'Enter' to end the selection process.
+%
+% See also IMAGESC, IMSHOW, DRAWPOLYGON, POLY2MASK, MEAN.
+
+
 % Initialize variables
 rois = {};
 traces = [];
-its_2D = reshape(movie, num_cols, num_rows, []);
+movie_2D = reshape(movie, ncols, nrows, []);
 % Set current figure to full screen and add keypress callback
 fig = gcf;
 set(fig,'Position',get(0,'Screensize'));
@@ -22,7 +67,7 @@ end
 % Display fluorescent image
 subplot(2,2,2);
 image_axe = gca;
-im_adj = imadjust(uint16(mean(its_2D, 3)));
+im_adj = imadjust(uint16(mean(movie_2D, 3)));
 imshow(im_adj);
 hold on;
 title('Fluorescent Image');
