@@ -120,10 +120,11 @@ elseif isequal(string(file_extension),'bin')
     if fileID == -1
         filename = [fileparts(file_path) '\movie.txt'];  % change文本文件的名称
         fileID = fopen(filename, 'r');
+        if fileID == -1
+        error('Failed to open file. change the txt name manually');
+        end
     end
-    if fileID == -1
-        error('Failed to open file. change the txt name');
-    end
+
     % read ncol and nrow
     while ~feof(fileID)  % 继续读取，直到到达文件末尾
         line = fgetl(fileID);  % 读取文件的下一行
