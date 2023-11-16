@@ -1,4 +1,4 @@
-function [intensity_time_series,ncols,nrows,nframes] = ...
+function [movie,ncols,nrows,nframes] = ...
                     load_movie(file_path, file_extension, batch_size)
 
 % ----------Write by Liu-Yang Luorong and ChatGPT----------
@@ -14,8 +14,8 @@ function [intensity_time_series,ncols,nrows,nframes] = ...
 %   and number of frames.
 %
 %   Syntax:
-%   [intensity_time_series, ncols, nrows, nframes] = load_movie(file_path, file_extension)
-%   [intensity_time_series, ncols, nrows, nframes] = load_movie(file_path, file_extension, batch_size)
+%   [movie, ncols, nrows, nframes] = load_movie(file_path, file_extension)
+%   [movie, ncols, nrows, nframes] = load_movie(file_path, file_extension, batch_size)
 %
 %   Parameters:
 %   file_path - String specifying the path to the movie file or directory containing movie files.
@@ -23,7 +23,7 @@ function [intensity_time_series,ncols,nrows,nframes] = ...
 %   batch_size - (Optional) Integer specifying the number of files to process in one batch. Default is 1000.
 %
 %   Returns:
-%   intensity_time_series - A 2D matrix where each column represents the intensity values of a frame.
+%   movie - A 2D matrix where each column represents the intensity values of a frame.
 %   ncols - Number of columns in each frame.
 %   nrows - Number of rows in each frame.
 %   nframes - Total number of frames in the movie.
@@ -67,14 +67,8 @@ if isfolder(file_path)
     % Load first image to get dimensions
     im = imread(fullfile(file_path, file_names{1}));
     [nrows, ncols] = size(im);
+    movie = zeros(nrows*ncols, length(file_names), 'double');
 
-    % Initialize parameter containing intensity time series
-    %         if length(file_names) > 12000 % Memory save
-    %             intensity_time_series = zeros(num_rows*num_cols, length(12000), 'double');
-    %         else
-    %
-    %         end
-    intensity_time_series = zeros(nrows*ncols, length(file_names), 'double');
     % Loop through all TIF files and populate intensity time series parameter
     num_files = numel(file_list);
     nframes = num_files;
@@ -96,7 +90,7 @@ if isfolder(file_path)
         batch_images_2D = reshape(batch_images, nrows*ncols, []);
 
         % Append batch intensity time series to full intensity time series
-        intensity_time_series(:,batch_start:batch_end) = double(batch_images_2D);
+        movie(:,batch_start:batch_end) = double(batch_images_2D);
 
         % Update batch start and end indices
         batch_start = batch_end + 1;
@@ -110,11 +104,11 @@ elseif isequal(file_extension,'tif') || isequal(file_extension,'tiff')
     [ncols, nrows] = size(imread(file_path, 1));
     nframes = numel(info);
     % Initialize parameter containing intensity time series
-    intensity_time_series = zeros(nrows*ncols, nframes, 'double');
+    movie = zeros(nrows*ncols, nframes, 'double');
     % Loop through all frames and populate intensity time series parameter
     for i = 1:nframes
         im = imread(file_path, i);
-        intensity_time_series(:, i) = double(im(:));
+        movie(:, i) = double(im(:));
         % Print progress
         fprintf('Processing frame %d for %d\n', i,nframes)
     end
@@ -153,16 +147,16 @@ elseif isequal(string(file_extension),'bin')
 
     % reshape vector into appropriately oriented, 3D array
     nframes = length(Mov)/(nrows*ncols);
-    intensity_time_series = reshape(Mov, [nrows, ncols, nframes]);
-    intensity_time_series = permute(intensity_time_series, [2 1 3]);
-    intensity_time_series = reshape(intensity_time_series, [nrows*ncols, nframes]);
+    movie = reshape(Mov, [nrows, ncols, nframes]);
+    movie = permute(movie, [2 1 3]);
+    movie = reshape(movie, [nrows*ncols, nframes]);
     fclose(fileID);
 
 elseif isequal(string(file_extension),'mat')
     
     fprintf('Loading saved data...\n')
     file = load(file_path);
-    intensity_time_series = file.intensity_time_series;
+    movie = file.intensity_time_series;
     ncols = file.ncols;
     nrows = file.nrows;
     nframes = file.nframes;
@@ -171,20 +165,3 @@ end
 
 
 end
-
-% elseif isequal(string(file_extension),'cxd')
-%     % Load cxd file using Bio-Formats toolbox
-%     reader = bfGetReader(file_path);
-%     nframes = reader.getSizeT();
-%     nrows = javaMethod('getSizeY', reader);
-%     ncols = javaMethod('getSizeX', reader);
-% 
-%     % Initialize parameter containing intensity time series
-%     intensity_time_series = zeros(nrows*ncols, nframes, 'double');
-%     % Loop through all frames and populate intensity time series parameter
-%     for i = 1:nframes
-%         im = bfGetPlane(reader, i);
-%         intensity_time_series(:, i) = double(im(:));
-%         % Print progress
-%         fprintf('Processing frame %d for %d\n', i,nframes);
-%     end
