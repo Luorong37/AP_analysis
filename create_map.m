@@ -1,24 +1,52 @@
-%% Creat cell mask
-% find cell mask according to plot the extreme SNR(minus) of each pixel.
-
 function [quick_map] = create_map(movie, num_rows, num_cols, bin)
 
-% Design high-pass filter
-% dt = 1 / Hz;
-% Fc = 1/n;
-% [b, a] = butter(3, Fc*dt, 'high'); % 3rd order Butterworth high-pass filter
+% ----------Write by Liu-Yang Luorong and ChatGPT----------
+% ----------POWERED by Zoulab in Peking University----------
+% Date: 23.11.16
+% MATLAB Version: R2022b
+% Function to process movie data by binning, normalizing, and generating a quick_map.
+%
+% This function create a map by the extreme value for each pixel.
+% It takes a 2D movie array and applies several processing steps to transform the movie data.
+% It first adjusts the movie size to be divisible by a given bin size, then performs binning and normalization.
+% The output is a quick_map representing normalized, binned data of the movie.
+%
+% Parameters:
+% movie - A 2D array representing the movie, with dimensions [num_cols*num_rows, num_frames].
+% bin - Integer representing the binning factor.
+% num_rows - Number of rows in the movie.
+% num_cols - Number of columns in the movie.
+%
+% Processing Steps:
+% 1. Adjust movie size to make it divisible by the bin size.
+% 2. Reshape the movie into a 5D array for binning.
+% 3. Calculate the average intensity for each binned pixel across all frames.
+% 4. Apply photobleaching correction using an exponential fitting on the average intensity trace.
+% 5. Compute a quick_map based on normalized intensity values.
+% 6. Resize the quick_map to the original movie dimensions.
+%
+% Output:
+% quick_map - A 2D array representing the processed and normalized data, resized to the original movie dimensions.
+%
+% Example:
+% quick_map = your_function_name(movie, bin, num_rows, num_cols);
+%
+% Notes:
+% - The function assumes the input movie is a 3D array with the third dimension representing time (frames).
+% - Photobleaching correction is optional but recommended for more accurate results.
+% - The function provides progress updates during processing.
+%
+% See also RESHAPE, MEAN, FIT, STD, IMRESIZE.
 
 % cut the size
 cut = false;
 nrow = num_rows;
 ncol = num_cols;
 if mod(nrow,bin) ~= 0
-%     intensity_time_series = reshape(intensity_time_series,num_rows,num_cols,[]);
     nrow = nrow - mod(nrow,bin);
     cut = true;
 end
 if mod(ncol,bin) ~= 0
-%     intensity_time_series = reshape(intensity_time_series,num_rows,num_cols,[]);
     ncol = ncol - mod(ncol,bin);
     cut = true;
 end
@@ -26,12 +54,12 @@ if cut == true
     temp = reshape(movie,num_cols,num_rows,[]);
     movie = temp(1:ncol,1:nrow,:);
 end
-its_size = size(movie);
-nframe = its_size(end);
+movie_size = size(movie);
+nframe = movie_size(end);
+
 % Initialize matrix to store cell labels
 quick_map = zeros(ncol/bin * nrow/bin,1);
 
-% change the Image to bin16
 % reshape to high dimension for each bin
 movie_5D = reshape(movie,bin,ncol/bin,bin,nrow/bin,[]);
 % average across x y
@@ -39,60 +67,24 @@ movie_ave = squeeze(mean(mean(movie_5D,1),3));
 
 % reshape to binned
 movie_binned = reshape(movie_ave,nrow/bin*ncol/bin,nframe);
-% figure()
-% imagesc(mean(reshape(intensity_time_series_binned,ncol/bin,nrow/bin,[]),3))
-% Apply avg_intensity curve to correct photobleaching from each pixel
 npixels = size(movie_binned,1);
-
-% % collect extremum after highpass filter
-% for i = 1:npixels
-%     fprintf('Processing %d / %d\n', i, npixels );
-%     filted_pixel_trace = highpassfilter(intensity_time_series_merged(i, :)', Hz);
-%     % baseline = abs(mean(intensity_time_series_merged(i, :)))
-%     extremum = max(abs(filted_pixel_trace));
-%     quick_map(i) =  extremum ;
-% end
-
 
 % Apply avg_intensity curve to correct photobleaching from each pixel (recommend)
 avg_trace = mean(movie_binned,1);
 [fit_result, gof] = fit([1:nframe]' ,avg_trace', 'exp1' );
 fit_trace = fit_result.a * exp(fit_result.b * [1: nframe]);
 
-% plot([1:nframe],fit_trace)
-% hold on
 for i = 1:npixels
     fprintf('Processing %d / %d\n', i, npixels );
     pixel_trace_correct = movie_binned(i, :) ./ fit_trace;
-%     plot([1:nframe],pixel_trace_correct)
-%     hold on
-%   pixel_trace_correct = intensity_time_series_merged(i, :) ./ avg_trace;
-%     % High-pass filter
-%     pixel_trace_correct = filtfilt(b, a, intensity_time_series_merged(i, :));
     baseline = mean(pixel_trace_correct);
     quick_map(i) = (min(pixel_trace_correct)- baseline) ./ baseline;
-%     plot(i,quick_map(i),'o')
-%     hold on
 end
 
 % converse to Z score
 baseline = mean(quick_map);
 quick_map = (quick_map - baseline) ./ std(quick_map);
-
 quick_map = reshape(quick_map,ncol/bin,nrow/bin, 1);
-% quick_map = permute(quick_map, [2, 1, 3]);
 quick_map = imresize(quick_map,[ncol,nrow] );
 end
-
-% 
-% figure()
-% subplot(3,1,1)
-% plot(pixel_trace_correct);
-% title('pixel_trace_correct');
-% subplot(3,1,2)
-% plot(intensity_time_series(i, :)) ;
-% title('intensity_time_series(i, :) ');
-% subplot(3,1,3)
-% plot(avg_trace) ;
-% title('avg_trace');
 
