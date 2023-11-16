@@ -119,14 +119,18 @@ elseif isequal(string(file_extension),'bin')
     fileID = fopen(filename, 'r');  % 以读取模式打开文件
     % read ncol and nrow
     if fileID == -1
-        error('Failed to open file. change the doc name');
+        filename = [fileparts(file_path) '\movie.txt'];  % 指定文本文件的名称
+        fileID = fopen(filename, 'r');
+    end
+    if fileID == -1
+        error('Failed to open file. change the txt name');
     end
     while ~feof(fileID)  % 继续读取，直到到达文件末尾
         line = fgetl(fileID);  % 读取文件的下一行
         if contains(line, 'nrow =')  % 检查该行是否包含 'x ='
             % 使用 str2double 和 strtrim 函数从字符串中提取数值
             nrows = str2double(strtrim(extractAfter(line, 'nrow =')));
-        elseif contains(line, 'ncol =')  % 检查该行是否包含 'x ='
+        elseif contains(line, 'ncol =')  % 检查该行是否包含 'y ='
             % 使用 str2double 和 strtrim 函数从字符串中提取数值
             ncols = str2double(strtrim(extractAfter(line, 'ncol =')));
         end
