@@ -27,8 +27,6 @@ file_name = '\';  % must add format.
 freq = 400; % Hz
 % -----------------------------------------------------------
 
-% defined bin 1
-
 % read path
 file_path = fullfile(folder_path, file_name);
 split_path = split(file_name, '.');
@@ -89,18 +87,21 @@ save(mat_filename, 'map');
 t2 = toc(t1); % Get the elapsed time
 fprintf('Finished mask creating after %d s\n',round(t2))
 %% Load saved map (optional)
-map_path = '';
-map_filename = fullfile(map_path, '0_Sensitivity_Map.mat');
-map = load(map_filename);
-map = map.map;
 
-fprintf('Finished map loading\n')
+% map_path = '';
+% map_filename = fullfile(map_path, '0_Sensitivity_Map.mat');
+% map = load(map_filename);
+% map = map.map;
+% 
+% fprintf('Finished map loading\n')
 %% Load saved ROI (optional)
-mask_path = 'E:\Data\20230810\20230810-161506recordSCN_Analysis\2023-11-06 09-12-40';
-mask_filename = fullfile(mask_path, '1_raw_ROI.mat');
-mask = load(mask_filename);
-mask = mask.rois;
 
+% mask_path = 'E:\Data\20230810\20230810-161506recordSCN_Analysis\2023-11-06 09-12-40';
+% mask_filename = fullfile(mask_path, '1_raw_ROI.mat');
+% mask = load(mask_filename);
+% mask = mask.rois;
+
+% fprintf('Finished mask loading\n')
 %% Select ROI
 % with or wihout Mask and Map
 
