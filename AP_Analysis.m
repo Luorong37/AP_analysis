@@ -66,7 +66,7 @@ fprintf('Finished saving movie after %d s\n',round(t2))
 t1 = tic; % Start a timer
 
 % if SNR is low, please large the bin.
-bin = 4;
+bin = 2; % defined bin = 2
 [quick_map] = create_map(movie, nrows, ncols, bin);
 map = quick_map;
 
