@@ -156,7 +156,7 @@ elseif isequal(string(file_extension),'mat')
     
     fprintf('Loading saved data...\n')
     file = load(file_path);
-    movie = file.intensity_time_series;
+    movie = file.movie;
     ncols = file.ncols;
     nrows = file.nrows;
     nframes = file.nframes;
