@@ -21,8 +21,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\Data\20230810\20230810-161606recordSCN';
-file_name = '\';  % must add format.
+folder_path = 'D:\Temple\20231201-1749SCN_Analysis\2023-12-17 14-33-33\';
+file_name = '0_Raw_data.mat';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
@@ -64,7 +64,7 @@ t2 = toc(t1); % Get the elapsed time
 fprintf('Finished saving movie after %d s\n',round(t2))
 %% Create a map (optional)
 t1 = tic; % Start a timer
-
+fprintf('Creating...\n')
 % if SNR is low, please large the bin.
 bin = 2; % defined bin = 2
 [quick_map] = create_map(movie, nrows, ncols, bin);
