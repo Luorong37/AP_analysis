@@ -23,23 +23,20 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'D:\Temple\20231201-1749SCN_Analysis\2023-12-17 14-33-33\';
-file_name = '0_Raw_data.mat';  % must add format.
+folder_path = 'F:\20240322\';
+file = '20240322-161555right!';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
 
 % read path
-file_path = fullfile(folder_path, file_name);
-split_path = split(file_name, '.');
-if length(split_path)>1
-    % when read a file
-    file_extension = string(split_path(end));
-    save_path =  fullfile(folder_path, [cell2mat(split_path(1)),'_Analysis'], nowtime);
-else
-    % when read a folder
+file_path = fullfile(folder_path, file);
+[~, file_name, file_extension] = fileparts(file);
+save_path = fullfile([folder_path, file_name, '_Analysis'], nowtime);
+
+if ~isempty(file_extension)
+     % when read a folder
     file_extension = 'tif';
-    save_path = fullfile([folder_path, '_Analysis'] ,nowtime);
 end
 mkdir(save_path);
 
@@ -68,7 +65,7 @@ fprintf('Finished saving movie after %d s\n',round(t2))
 t1 = tic; % Start a timer
 fprintf('Creating...\n')
 % if SNR is low, please large the bin.
-bin = 2; % defined bin = 2
+bin = 4; % defined bin = 4
 [quick_map] = create_map(movie, nrows, ncols, bin);
 map = quick_map;
 
@@ -417,7 +414,7 @@ fprintf('Finished statistic AP\n')
 
 %% Plot average AP sensitivity
 figure();
-set(fig,'Position',get(0,'Screensize'));
+set(gcf,'Position',get(0,'Screensize'));
 % 统计不为空的trace数目
 plot_cols = sum(cellfun('isempty',AP_list)==0)+1;
 plot_col = 0;
