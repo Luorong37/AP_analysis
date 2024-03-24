@@ -1,15 +1,28 @@
-% AP_ANALYSIS POWERED BY LIU-YANG LUORONG.
-% version 2
-% https://github.com/Luorong37/AP_analysis
-
-% This functions are used for quickly analysis voltage signal.
-
-% NEED FUNCTIONS:
-% calculate_firing_rate, calculate_FWHM, create_map, calculate_SNR
+% AP_ANALYSIS - Quick Analysis of Voltage Signals
+% This script is used for quickly analyzing voltage signals. It requires
+% several functions and toolboxes to run properly.
+%
+% Requirements:
+%   Functions: calculate_firing_rate, calculate_FWHM, create_map, calculate_SNR,
+%              fit_exp1, highpassfilter, select_ROI
+%   Toolboxes: Image Processing Toolbox, Curve Fitting Toolbox, Signal Processing Toolbox
+%
+% Usage:
+%   1. Set the folder_path and file variables to point to your data.
+%   2. Specify the frame rate (freq) of your data.
+%   3. Run the script.
+%
+% Example:
+%   folder_path = 'F:\20240321\';
+%   file = '20240321.tif'; % Include the format in the file name.
+%   freq = 400; % Frequency in Hz
+%
+% Author: Liu-Yang Luorong
+% Version: 2
+% GitHub: https://github.com/Luorong37/AP_analysis
+%
+% See also calculate_firing_rate, calculate_FWHM, create_map, calculate_SNR,
 % fit_exp1, highpassfilter, select_ROI
-
-% NEED TOOLBOX:
-% Image Processing Toolbox, Curve Fitting Toolbox, Signal Processing Toolbox
 
 clear;
 clc;
