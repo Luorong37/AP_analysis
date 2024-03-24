@@ -21,8 +21,7 @@
 % Version: 2
 % GitHub: https://github.com/Luorong37/AP_analysis
 %
-% See also calculate_firing_rate, calculate_FWHM, create_map, calculate_SNR,
-% fit_exp1, highpassfilter, select_ROI
+% See also calculate_firing_rate, calculate_FWHM, create_map, calculate_SNR, fit_exp1, highpassfilter, select_ROI
 
 clear;
 clc;
@@ -46,12 +45,12 @@ freq = 400; % Hz
 file_path = fullfile(folder_path, file);
 [~, file_name, file_extension] = fileparts(file);
 save_path = fullfile([folder_path, file_name, '_Analysis'], nowtime);
+mkdir(save_path);
 
+% when read a folder
 if ~isempty(file_extension)
-     % when read a folder
     file_extension = 'tif';
 end
-mkdir(save_path);
 
 % Load image file
 [movie, ncols, nrows, nframes] = load_movie(file_path,file_extension);
@@ -60,20 +59,45 @@ mkdir(save_path);
 dt = 1 / freq; % Calculate time axis
 colors = [lines(7);hsv(5);spring(3);winter(3);gray(3)];
 t = (1:nframes) * dt;
-map = [];
-mask = [];
+
+% ----------------------Optional part------------------------
+
+% Save loaded movie (optional)
+save_movie = false; % defined as false
+if save_movie == true
+    t1 = tic; % Start a timer
+    fprintf('Saving...\n')
+    raw_filename = fullfile(save_path, '0_Raw_data.mat');
+    save(raw_filename,"movie",'ncols','nrows','nframes','freq');
+    t2 = toc(t1); % Get the elapsed time
+    fprintf('Finished saving movie after %d s\n',round(t2))
+end
+
+% Load saved map or mask (optional)
+map_path = ''; % define as ''
+if isempty(map_path)
+    map = [];
+else
+    map_filename = fullfile(map_path, '0_Sensitivity_Map.mat');
+    map = load(map_filename);
+    map = map.map;
+end
+
+mask_path = ''; % define as ''
+if isempty(mask_path)
+    mask = []; 
+else
+    mask_path = 'E:\Data\20230810\20230810-161506recordSCN_Analysis\2023-11-06 09-12-40';
+    mask_filename = fullfile(mask_path, '1_raw_ROI.mat');
+    mask = load(mask_filename);
+    mask = mask.rois;
+end
+% -----------------------------------------------------------
+
 
 t2 = toc(t1); % Get the elapsed time
-fprintf('Finished loading movie after %d s\n',round(t2))
-%% Save loaded movie (optional)
-t1 = tic; % Start a timer
-fprintf('Saving...\n')
+fprintf('Finished loading after %d s\n',round(t2))
 
-raw_filename = fullfile(save_path, '0_Raw_data.mat');
-save(raw_filename,"movie",'ncols','nrows','nframes','freq');
-
-t2 = toc(t1); % Get the elapsed time
-fprintf('Finished saving movie after %d s\n',round(t2))
 %% Create a map (optional)
 t1 = tic; % Start a timer
 fprintf('Creating...\n')
@@ -98,22 +122,8 @@ save(mat_filename, 'map');
 
 t2 = toc(t1); % Get the elapsed time
 fprintf('Finished mask creating after %d s\n',round(t2))
-%% Load saved map (optional)
 
-% map_path = '';
-% map_filename = fullfile(map_path, '0_Sensitivity_Map.mat');
-% map = load(map_filename);
-% map = map.map;
-% 
-% fprintf('Finished map loading\n')
-%% Load saved ROI (optional)
 
-% mask_path = 'E:\Data\20230810\20230810-161506recordSCN_Analysis\2023-11-06 09-12-40';
-% mask_filename = fullfile(mask_path, '1_raw_ROI.mat');
-% mask = load(mask_filename);
-% mask = mask.rois;
-
-% fprintf('Finished mask loading\n')
 %% Select ROI
 % with or wihout Mask and Map
 
