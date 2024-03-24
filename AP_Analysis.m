@@ -2,6 +2,8 @@
 % version 2
 % https://github.com/Luorong37/AP_analysis
 
+% This functions are used for quickly analysis voltage signal.
+
 % NEED FUNCTIONS:
 % calculate_firing_rate, calculate_FWHM, create_map, calculate_SNR
 % fit_exp1, highpassfilter, select_ROI
