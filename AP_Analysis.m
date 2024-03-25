@@ -18,7 +18,8 @@
 %   freq = 400; % Frequency in Hz
 %
 % Author: Liu-Yang Luorong
-% Version: 2
+% Version: 3.0
+% Date: 2024.03
 % GitHub: https://github.com/Luorong37/AP_analysis
 %
 % See also calculate_firing_rate, calculate_FWHM, create_map, calculate_SNR, fit_exp1, highpassfilter, select_ROI
@@ -198,54 +199,11 @@ saveas(gcf, png_filename, 'png');
 fprintf('Finished exp1 fit\n')
 
 %% Peak finding
-% AP threshold and polarity
-peak_polarity =  zeros(1,length(rois));
-peak_threshold = zeros(1,length(rois));
 
-% set peak finding
 AP_window_width = 40 ; % number of frames to for AP window (defined = 40)
-% MinPeakDistance = 20 * dt; % (defined = 20 * dt)
-MinPeakProminence_factor = 0.4; % (defined = 0.4)
-peaks_amplitude = cell(1, length(rois)-1);
-peaks_index = cell(1, length(rois)-1);
-peaks_sensitivity = cell(1, length(rois)-1);
+[peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = peak_finding(traces_corrected, t, colors, rois);
 
-% Plot mean intensity trace and set threshold to find peak
-fig = figure();
-set(fig,'Position',get(0,'Screensize'));
-for i = 1:length(rois)-1
-    clf;
-    title(sprintf('ROI %d',i));
-    hold on;
-
-    % polarity judge
-    if abs(min(traces_corrected(:,i))-mean(traces_corrected(:,i))) < max(abs(traces_corrected(:,i)) - mean(traces_corrected(:,i)))
-        peak_polarity(i) = 1;
-    else
-        peak_polarity(i) = -1;
-    end
-
-    % plot trace
-    plot_trace = traces_corrected(:,i) * peak_polarity(i);
-    plot(t,  plot_trace ,'Color',colors(i,:));
-
-    % set threshold
-    [~,peak_threshold(i)] = ginput(1);
-    plot(t,ones(1,length(t)).*peak_threshold(i),'Color',colors(i,:),'LineWidth',2);
-    hold off;
-    pause(0.2);
-
-    % find peak
-    MinPeakProminence = (max(plot_trace)-mean(plot_trace))*MinPeakProminence_factor;
-    [peak_y,peak_x] =  findpeaks(plot_trace, 'MinPeakProminence', MinPeakProminence ,'MinPeakHeight',peak_threshold(i));
-    peaks_index{i} = peak_x;
-    current_trace = traces_input(:,i);
-    peaks_amplitude{i} = current_trace(peak_x);
-    peaks_sensitivity{i} = peak_y;
-end
-close;
-
-% Plot summary
+% plot
 offset_plot(traces_corrected,t,rois,colors,peaks_index,peak_polarity,peak_threshold,peaks_sensitivity)
 fig_filename = fullfile(save_path, '3_peak_finding.fig');
 png_filename = fullfile(save_path, '3_peak_finding.png');
