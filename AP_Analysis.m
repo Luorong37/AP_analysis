@@ -244,30 +244,9 @@ for i = 1:length(rois)-1
     peaks_sensitivity{i} = peak_y;
 end
 close;
-%%
+
 % Plot summary
-fig = figure();
-set(fig,'Position',get(0,'Screensize'));
-offset_peak = 0;
-offset_peak_step = max(traces_corrected(:))-min(traces_corrected(:)); 
-for i = 1:length(rois)-1
-    % plot trace
-    trace = traces_corrected(:,i) * peak_polarity(i) + offset_peak;
-    plot(t,  trace ,'Color',colors(i,:));
-    hold on;
-
-    % plot threshold
-    plot(t,ones(1,length(t)).*(peak_threshold(i)+offset_peak),'Color',colors(i,:),'LineWidth',2);
-    hold on;
-
-    % plot peak
-    plot(peaks_index{i}.*dt,peaks_sensitivity{i}+offset_peak,'v','Color',colors(i,:),'MarkerFaceColor',colors(i,:));
-    
-    offset_peak = offset_peak + offset_peak_step;
-end
-sgtitle('Peak finding');
-hold on;
-
+offset_plot(traces_corrected,t,rois,colors,peaks_index,peak_polarity,peak_threshold,peaks_sensitivity)
 fig_filename = fullfile(save_path, '3_peak_finding.fig');
 png_filename = fullfile(save_path, '3_peak_finding.png');
 
