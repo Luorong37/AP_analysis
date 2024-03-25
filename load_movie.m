@@ -3,8 +3,8 @@ function [movie,ncols,nrows,nframes] = ...
 
 % ----------Write by Liu-Yang Luorong and ChatGPT----------
 % ----------POWERED by Zoulab in Peking University----------
-% Date: 23.11.16
-% MATLAB Version: R2022b
+% Date: 24.03.25
+% MATLAB Version: R2023a
 % 
 % LOAD_MOVIE Loads movie data from various file formats and computes the intensity time series.
 %
@@ -73,28 +73,31 @@ if isfolder(file_path)
     num_files = numel(file_list);
     nframes = num_files;
     batch_start = 1;
-    while batch_start <= num_files
-        %fprintf('Processing batch starting at file %d\n', batch_start);
+    prev_percentage = -1; % Initialize with -1 so the first update is always printed
 
+    while batch_start <= num_files
         % Load batch of TIF files
         batch_end = min(batch_start + batch_size - 1, num_files);
         batch_files = file_names(batch_start:batch_end);
         num_batch_files = length(batch_files);
         batch_images = zeros(nrows, ncols, num_batch_files, 'uint16');
+
         for i = 1:num_batch_files
-            fprintf('Processing %d/%d\n', i+batch_start-1, num_files);
             batch_images(:,:,i) = imread(fullfile(file_path, batch_files{i}));
+            % Calculate and display progress if percentage changes
+            current_percentage = floor(((i - 1) / num_files) * 100);
+            if current_percentage > prev_percentage
+                fprintf('Processing %d/%d files (%d%% complete) \n', i - 1, num_files, current_percentage);
+                prev_percentage = current_percentage;
+            end
         end
 
-        % Reshape batch images into 2D array
+        % Append batch images to movie
         batch_images_2D = reshape(batch_images, nrows*ncols, []);
-
-        % Append batch intensity time series to full intensity time series
         movie(:,batch_start:batch_end) = double(batch_images_2D);
 
         % Update batch start and end indices
         batch_start = batch_end + 1;
-        batch_end = min(batch_start + batch_size - 1, num_files);
     end
 
 
@@ -117,11 +120,11 @@ elseif isequal(string(file_extension),'bin')
     filename = [fileparts(file_path) '\movie_info.txt'];  % 指定文本文件的名称
     fileID = fopen(filename, 'r');  % 以读取模式打开文件
     if fileID == -1
-        filename = [fileparts(file_path) '\movie.txt'];  % change文本文件的名称
+        filename = [fileparts(file_path) '\movie.txt'];  % 更改文本文件的名称
         fileID = fopen(filename, 'r');
-        if fileID == -1
+    end
+    if fileID == -1
         error('Failed to open file. change the txt name manually');
-        end
     end
 
     % read ncol and nrow
