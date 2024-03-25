@@ -73,6 +73,9 @@ if save_movie == true
     fprintf('Finished saving movie after %d s\n',round(t2))
 end
 
+t2 = toc(t1); % Get the elapsed time
+fprintf('Finished loading after %d s\n',round(t2))
+
 % Load saved map or mask (optional)
 map_path = ''; % define as ''
 if isempty(map_path)
@@ -95,8 +98,6 @@ end
 % -----------------------------------------------------------
 
 
-t2 = toc(t1); % Get the elapsed time
-fprintf('Finished loading after %d s\n',round(t2))
 
 %% Create a map (optional)
 t1 = tic; % Start a timer
