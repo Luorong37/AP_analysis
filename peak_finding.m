@@ -1,4 +1,27 @@
 function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = peak_finding(traces_corrected, t, colors, rois)
+    %PEAK_FINDING 寻找给定ROI信号中的峰值。
+    %
+    %   [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = 
+    %   peak_finding(traces_corrected, t, colors, rois) 函数通过用户交互的方式设置阈值，来找到
+    %   每个ROI信号中的峰值。
+    %
+    %   输入参数：
+    %       traces_corrected - 矫正后的信号矩阵，每一列代表一个ROI的信号。
+    %       t - 信号对应的时间轴，与traces_corrected的行数相同。
+    %       colors - 用于绘制信号的颜色，每一行代表一个颜色。
+    %       rois - ROI的数量。
+    %
+    %   返回值：
+    %       peak_polarity - 每个ROI信号峰值的极性（1或-1）。
+    %       peak_threshold - 用于找峰的阈值。
+    %       peaks_index - 每个ROI信号峰值的索引。
+    %       peaks_amplitude - 每个ROI信号峰值的幅度。
+    %       peaks_sensitivity - 每个ROI信号峰值的灵敏度。
+    %
+    %   请在每个ROI的信号上用鼠标点击一次来设置查找峰值的阈值。
+    %   函数将会根据设置的阈值和最小峰值显著性因子来找到信号中的峰值。    
+
+
     % 初始化变量
     peak_polarity = zeros(1,length(rois));
     peak_threshold = zeros(1,length(rois));

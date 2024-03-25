@@ -60,6 +60,7 @@ end
 dt = 1 / freq; % Calculate time axis
 colors = [lines(7);hsv(5);spring(3);winter(3);gray(3)];
 t = (1:nframes) * dt;
+peakfinding = false;
 
 % Save code
 code_path = fullfile(save_path,'Code');
@@ -82,7 +83,7 @@ fprintf('All codes have been copied to %s\n', code_path);
 
 % Save loaded movie (optional)
 save_movie = false; % defined as false
-if save_movie == true
+if save_movie
     t1 = tic; % Start a timer
     fprintf('Saving...\n')
     raw_filename = fullfile(save_path, '0_Raw_data.mat');
@@ -198,18 +199,36 @@ saveas(gcf, png_filename, 'png');
 
 fprintf('Finished exp1 fit\n')
 
-%% Peak finding
+%% Peak finding (optional)
+peakfinding = true; % defined as true
+
+if peakfinding
 
 AP_window_width = 40 ; % number of frames to for AP window (defined = 40)
 [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = peak_finding(traces_corrected, t, colors, rois);
 
-% plot
-offset_plot(traces_corrected,t,rois,colors,peaks_index,peak_polarity,peak_threshold,peaks_sensitivity)
+% plot trace
+fig = figure();
+set(fig,'Position',get(0,'Screensize'));
+offset_plot(traces_corrected,t,colors)
+% plot label
+for i = 1:length(rois)-1
+    % plot threshold
+    plot(t,ones(1,length(t)).*(1-peak_threshold(i)*peak_polarity(i)) + offset_peak,'Color',colors(i,:),'LineWidth',2); hold on;
+    % plot peak
+    dt = t(2)-t(1);
+    plot(peaks_index{i}.*dt, (1-peaks_sensitivity{i}*peak_polarity(i))+ offset_peak,'v', ...
+        'Color',colors(i,:),'MarkerFaceColor',colors(i,:)); hold on;
+
+end
+end
+
 fig_filename = fullfile(save_path, '3_peak_finding.fig');
 png_filename = fullfile(save_path, '3_peak_finding.png');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
+
 %% Sensitivity and SNR Analysis
 % set up
 fig = figure();
@@ -217,50 +236,34 @@ set(fig,'Position',get(0,'Screensize'));
 intensity_trace = zeros(nframes,length(rois));
 sentivity_trace = zeros(nframes,length(rois));
 SNR_trace = zeros(nframes,length(rois));
-smooth_trace = zeros(nframes,length(rois));
+fitted_trace = zeros(nframes,length(rois));
+options.colors = colors;
 
-% plot
+ % plot sensitivity
 sensitivity_axe = subplot(1,2,1);
 title('Sensitivity');
 hold on;
+for i = 1 : length(rois)-1
+    % Calculate Sensitivity
+    sentivity_trace(:,i) = traces_corrected(:,i)-1;
+    [~] = offset_plot(sentivity_trace,t,options);
+end
+
+% plot SNR
 SNR_axe = subplot(1,2,2);
 title('SNR');
 hold on;
-shift_sensitivity = zeros(size(rois)); % plot shift
-shift_SNR = zeros(size(rois));
 
 for i = 1 : length(rois)-1
-    % Calculate Sensitivity
-    sentivity_trace(:,i) = traces_corrected(:,i);
-
     % Calculate SNR
-    [SNR_trace(:,i),smooth_trace(:,i)]  = calculate_SNR(traces_corrected(:,i), peak_threshold(i), peak_polarity(i));
-
-    % add plot shift
-    if i > 1
-        shift_sensitivity(i) = max(sentivity_trace(:,i-1))-min(sentivity_trace(:,i-1));
-        shift_SNR(i) = max(SNR_trace(:,i-1))-min(SNR_trace(:,i-1));
+    if peakfinding
+        [SNR_trace(:,i),fitted_trace(:,i)]  = calculate_SNR(traces_corrected(:,i), peak_threshold(i), peak_polarity(i));
     else
-        shift_sensitivity(i) = 0;
-        shift_SNR(i) = 0;
+        [SNR_trace(:,i),fitted_trace(:,i)]  = calculate_SNR(traces_corrected(:,i));
     end
-
-    % plot sensitivity
-    plot(t,sentivity_trace(:,i) + peak_polarity(i)*sum(shift_sensitivity(1:i)),'Color', colors(i,:),'Parent',sensitivity_axe);
-    hold(sensitivity_axe,'on');
-    % % plot smooth curve
-    % plot(t,smooth_trace(:,i) + peak_polarity(i)*sum(shift_sensitivity(1:i)), ...
-    %     'r','Parent',sensitivity_axe,'LineWidth',2);
-    % hold(sensitivity_axe,'on');
-
-    %
-    % plot SNR
-    plot(t,SNR_trace(:,i) + peak_polarity(i)*sum(shift_SNR(1:i)),'Color', colors(i,:),'Parent',SNR_axe);
-    hold(SNR_axe,'on');
-
+        
+    [~] = offset_plot(SNR_trace,t,options);
 end
-
-legend(sensitivity_axe, 'Sensitivity', 'Fitted Curve');
 
 fig_filename = fullfile(save_path, '4_Sensitivity_figure.fig');
 png_filename = fullfile(save_path, '4_Sensitivity_figure.png');
@@ -283,7 +286,7 @@ for i = 1:length(rois)-1 % i for trace
     each_trace_amp = traces_input(:,i)*peak_polarity(i);
     each_trace_sensitivity = sentivity_trace(:,i);
     each_trace_SNR = SNR_trace(:,i);
-    each_trace_smooth = smooth_trace(:,i);
+    each_trace_smooth = fitted_trace(:,i);
     AP_list{i} = cell(1, length(peaks_index{i}));
 
     % each peak
