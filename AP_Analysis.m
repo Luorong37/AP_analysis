@@ -143,8 +143,9 @@ fprintf('Finished mask creating after %d s\n',round(t2))
 
 
 %% Select ROI
-% with or wihout Mask and Map
+t1 = tic; % Start a timer
 
+% with or wihout Mask and Map
 [rois, traces] = select_ROI(movie, nrows, ncols, t, colors, mask, map);
 
 fig_filename = fullfile(save_path, '1_raw_trace.fig');
@@ -155,6 +156,9 @@ saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(roi_filename, 'rois');
 
+t2 = toc(t1); % Get the elapsed time
+
+fprintf('Saved ROI figure after %d s\n',round(t2))
 
 %% Photobleaching correction (optional)
 % 
