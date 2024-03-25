@@ -156,16 +156,6 @@ saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(roi_filename, 'rois');
 
-t2 = toc(t1); % Get the elapsed time
-
-fprintf('Saved ROI figure after %d s\n',round(t2))
-
-%% Photobleaching correction (optional)
-% 
-% traces_corrected = highpassfilter(traces, freq);
-% fprintf('Finished highpass filter\n')
-
-%% Photobleaching correction
 traces_input = zeros(size(traces,1),size(traces,2)-1);
 background = traces(:,end);
 
@@ -173,6 +163,13 @@ background = traces(:,end);
 for i = 1: size(traces,2)-1
     traces_input(:,i) = traces(:,i) - background;
 end
+
+t2 = toc(t1); % Get the elapsed time
+
+fprintf('Saved ROI figure after %d s\n',round(t2))
+
+
+%% Photobleaching correction
 
 % fit
 [traces_corrected, fitted_curves] = fit_exp1(traces_input, freq);

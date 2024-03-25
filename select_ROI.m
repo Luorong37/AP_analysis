@@ -59,7 +59,8 @@ if ~isempty(map)
     map_axe = gca;
     imagesc(map);
     colorbar;
-    title(sprintf('Sensitivity MAP\n\nPress SPACE to continue\nPress ENTER to end'));
+    title(sprintf(['Sensitivity MAP\n\nPress SPACE to continue\nPress ENTER to end' ...
+        '\n\n!!!!!!!!!!----------THE LAST ROI MUST BE BACKGROUND----------!!!!!!!!!!']));
     hold on;
     axis image;
 end
