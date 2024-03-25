@@ -67,7 +67,6 @@ if isfolder(file_path)
     % Load first image to get dimensions
     im = imread(fullfile(file_path, file_names{1}));
     [nrows, ncols] = size(im);
-
     num_files = numel(file_list);
     movie = zeros(nrows*ncols, num_files, 'double');
     nframes = num_files;
@@ -75,25 +74,28 @@ if isfolder(file_path)
     % Loop through all TIF files and populate intensity time series parameter
     batch_start = 1;
     prev_percentage = -1; % Initialize with -1 so the first update is always printed
-
+    
+    tic; 
     while batch_start <= num_files
         % Load batch of TIF files
         batch_end = min(batch_start + batch_size - 1, num_files);
         batch_range = batch_start:batch_end;
 
         for i = batch_range
-            % Read the current image
+            % Read the current image, store the image directly in 'movie'
             current_image = imread(fullfile(file_path, file_names{i}));
-
-            % Store the image directly in 'movie'
             movie(:, i) = double(reshape(current_image, nrows*ncols, 1));
 
             % Calculate and display progress if percentage changes
             current_percentage = floor(((i - 1) / num_files) * 100);
             if current_percentage > prev_percentage
-                fprintf('Processing %d/%d files (%d%% complete) \n', i - 1, num_files, current_percentage);
+                elapsed = toc;
+                remaining = elapsed / ((i-1) / num_files) - elapsed;
+                fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
+                    i - 1, num_files, current_percentage, remaining);
                 prev_percentage = current_percentage;
             end
+
         end
 
         % Update batch start and end indices

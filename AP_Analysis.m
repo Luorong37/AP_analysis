@@ -60,6 +60,23 @@ dt = 1 / freq; % Calculate time axis
 colors = [lines(7);hsv(5);spring(3);winter(3);gray(3)];
 t = (1:nframes) * dt;
 
+% Save code
+code_path = fullfile(save_path,'Code');
+mkdir(code_path);
+currentScript = which("AP_Analysis.m");
+
+% 获取当前脚本依赖的所有文件
+[requiredFiles, ~] = matlab.codetools.requiredFilesAndProducts(currentScript);
+
+% 复制当前脚本和所有依赖文件到目标文件夹
+for k = 1:length(requiredFiles)
+    [~, name, ext] = fileparts(requiredFiles{k});
+    copyfile(requiredFiles{k}, fullfile(code_path, [name, ext]));
+end
+
+% 提示完成
+fprintf('All codes have been copied to %s\n', code_path);
+
 % ----------------------Optional part------------------------
 
 % Save loaded movie (optional)
