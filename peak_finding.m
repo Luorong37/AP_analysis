@@ -43,6 +43,7 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
         end
 
         % plot trace
+        
         plot_trace = traces_corrected(:,i) * peak_polarity(i);
         plot(t, plot_trace, 'Color', colors(i,:)); hold on;
         title(sprintf('ROI %d', i));
@@ -51,7 +52,7 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
         [~, peak_threshold(i)] = ginput(1);
         plot(t,ones(1,length(t)).*peak_threshold(i),'Color',colors(i,:),'LineWidth',2);
         hold off;
-        pause(0.2);
+        
 
         % 寻找峰值
         MinPeakProminence = (max(plot_trace)-mean(plot_trace)) * MinPeakProminence_factor;
@@ -60,6 +61,7 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
         current_trace = traces_corrected(:,i);
         peaks_amplitude{i} = current_trace(peak_x);
         peaks_sensitivity{i} = peak_y;
+        pause(0.5);
     end
     close;
 end

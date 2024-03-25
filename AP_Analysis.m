@@ -61,6 +61,7 @@ dt = 1 / freq; % Calculate time axis
 colors = [lines(7);hsv(5);spring(3);winter(3);gray(3)];
 t = (1:nframes) * dt;
 peakfinding = false;
+options.colors = colors;
 
 % Save code
 code_path = fullfile(save_path,'Code');
@@ -204,23 +205,23 @@ peakfinding = true; % defined as true
 
 if peakfinding
 
-AP_window_width = 40 ; % number of frames to for AP window (defined = 40)
-[peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = peak_finding(traces_corrected, t, colors, rois);
+    AP_window_width = 40 ; % number of frames to for AP window (defined = 40)
+    [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = peak_finding(traces_corrected, t, colors, rois);
 
-% plot trace
-fig = figure();
-set(fig,'Position',get(0,'Screensize'));
-offset_plot(traces_corrected,t,colors)
-% plot label
-for i = 1:length(rois)-1
-    % plot threshold
-    plot(t,ones(1,length(t)).*(1-peak_threshold(i)*peak_polarity(i)) + offset_peak,'Color',colors(i,:),'LineWidth',2); hold on;
-    % plot peak
-    dt = t(2)-t(1);
-    plot(peaks_index{i}.*dt, (1-peaks_sensitivity{i}*peak_polarity(i))+ offset_peak,'v', ...
-        'Color',colors(i,:),'MarkerFaceColor',colors(i,:)); hold on;
+    % plot trace
+    fig = figure();
+    set(fig,'Position',get(0,'Screensize'));
+    [offset_array] = offset_plot(traces_corrected,t,options);
+    % plot label
+    for i = 1:length(rois)-1
+        % plot threshold
+        plot(t,ones(1,length(t)).*(1-peak_threshold(i)*peak_polarity(i)) + offset_array(i),'Color',colors(i,:),'LineWidth',2); hold on;
+        % plot peak
+        dt = t(2)-t(1);
+        plot(peaks_index{i}.*dt, (1-peaks_sensitivity{i}*peak_polarity(i))+ offset_array(i),'v', ...
+            'Color',colors(i,:),'MarkerFaceColor',colors(i,:)); hold on;
+    end
 
-end
 end
 
 fig_filename = fullfile(save_path, '3_peak_finding.fig');
@@ -237,7 +238,7 @@ intensity_trace = zeros(nframes,length(rois));
 sentivity_trace = zeros(nframes,length(rois));
 SNR_trace = zeros(nframes,length(rois));
 fitted_trace = zeros(nframes,length(rois));
-options.colors = colors;
+
 
  % plot sensitivity
 sensitivity_axe = subplot(1,2,1);
