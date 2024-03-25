@@ -1,4 +1,4 @@
-function [traces_corrected, fitted_curves] = fit_exp1(traces, freq)
+function [traces_corrected, fitted_curves] = fit_exp1(traces)
 % ----------Write by Liu-Yang Luorong and ChatGPT----------
 % ----------POWERED by Zoulab in Peking University----------
 % Date: 23.11.16
@@ -38,7 +38,7 @@ function [traces_corrected, fitted_curves] = fit_exp1(traces, freq)
 
 
 % Calculate time axis
-time = (0:size(traces, 1) - 1) / freq;
+time = 1:size(traces, 1);
 
 % Initialize corrected traces matrix and fitted curves matrix if required
 traces_corrected = zeros(size(traces));

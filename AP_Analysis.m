@@ -114,8 +114,6 @@ else
 end
 % -----------------------------------------------------------
 
-
-
 %% Create a map (optional)
 t1 = tic; % Start a timer
 fprintf('Creating...\n')
@@ -141,7 +139,6 @@ save(mat_filename, 'map');
 t2 = toc(t1); % Get the elapsed time
 fprintf('Finished mask creating after %d s\n',round(t2))
 
-
 %% Select ROI
 t1 = tic; % Start a timer
 
@@ -165,14 +162,12 @@ for i = 1: size(traces,2)-1
 end
 
 t2 = toc(t1); % Get the elapsed time
-
 fprintf('Saved ROI figure after %d s\n',round(t2))
-
 
 %% Photobleaching correction
 
 % fit
-[traces_corrected, fitted_curves] = fit_exp1(traces_input, freq);
+[traces_corrected, fitted_curves] = fit_exp1(traces_input);
 
 % plot
 fig = figure();
@@ -209,8 +204,8 @@ peak_threshold = zeros(1,length(rois));
 
 % set peak finding
 AP_window_width = 40 ; % number of frames to for AP window (defined = 40)
-MinPeakDistance = 20 * dt; % (defined = 20 * dt)
-MinPeakProminence_factor = 0.7; % (defined = 0.5)
+% MinPeakDistance = 20 * dt; % (defined = 20 * dt)
+MinPeakProminence_factor = 0.4; % (defined = 0.4)
 peaks_amplitude = cell(1, length(rois)-1);
 peaks_index = cell(1, length(rois)-1);
 peaks_sensitivity = cell(1, length(rois)-1);
@@ -249,26 +244,26 @@ for i = 1:length(rois)-1
     peaks_sensitivity{i} = peak_y;
 end
 close;
-
+%%
 % Plot summary
 fig = figure();
 set(fig,'Position',get(0,'Screensize'));
-shift_peak = 0;
-shift_peak_step = 0.3; % (def = 0.3)
+offset_peak = 0;
+offset_peak_step = max(traces_corrected(:))-min(traces_corrected(:)); 
 for i = 1:length(rois)-1
     % plot trace
-    trace = traces_corrected(:,i) * peak_polarity(i) + shift_peak;
+    trace = traces_corrected(:,i) * peak_polarity(i) + offset_peak;
     plot(t,  trace ,'Color',colors(i,:));
     hold on;
 
     % plot threshold
-    plot(t,ones(1,length(t)).*(peak_threshold(i)+shift_peak),'Color',colors(i,:),'LineWidth',2);
+    plot(t,ones(1,length(t)).*(peak_threshold(i)+offset_peak),'Color',colors(i,:),'LineWidth',2);
     hold on;
 
     % plot peak
-    plot(peaks_index{i}.*dt,peaks_sensitivity{i}+shift_peak,'v','Color',colors(i,:),'MarkerFaceColor',colors(i,:));
+    plot(peaks_index{i}.*dt,peaks_sensitivity{i}+offset_peak,'v','Color',colors(i,:),'MarkerFaceColor',colors(i,:));
     
-    shift_peak = shift_peak + shift_peak_step;
+    offset_peak = offset_peak + offset_peak_step;
 end
 sgtitle('Peak finding');
 hold on;
@@ -316,10 +311,10 @@ for i = 1 : length(rois)-1
     % plot sensitivity
     plot(t,sentivity_trace(:,i) + peak_polarity(i)*sum(shift_sensitivity(1:i)),'Color', colors(i,:),'Parent',sensitivity_axe);
     hold(sensitivity_axe,'on');
-    % plot smooth curve
-    plot(t,smooth_trace(:,i) + peak_polarity(i)*sum(shift_sensitivity(1:i)), ...
-        'r','Parent',sensitivity_axe,'LineWidth',2);
-    hold(sensitivity_axe,'on');
+    % % plot smooth curve
+    % plot(t,smooth_trace(:,i) + peak_polarity(i)*sum(shift_sensitivity(1:i)), ...
+    %     'r','Parent',sensitivity_axe,'LineWidth',2);
+    % hold(sensitivity_axe,'on');
 
     %
     % plot SNR
@@ -595,3 +590,11 @@ png_filename = fullfile(save_path, '7_firing_rate.png');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
+
+%% Save parameter
+% 定义保存路径和文件名
+save_filename = fullfile(save_path, '-1_workspace_variables.mat');
+
+% 保存当前工作区中的所有变量到.mat文件
+clear movie;
+save(save_filename);
