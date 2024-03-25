@@ -57,9 +57,9 @@ nframes = NaN;
 if isfolder(file_path)
     % Get all TIFF file names in folder
     file_list = dir(fullfile(file_path, ['*.' file_extension]));
-
-    % Sort file names
     file_names = {file_list.name};
+    
+    % Sort file names
     file_nums = cellfun(@(x) sscanf(x,'%d.tif'), file_names);
     [~, idx] = sort(file_nums);
     file_names = file_names(idx);
@@ -67,23 +67,27 @@ if isfolder(file_path)
     % Load first image to get dimensions
     im = imread(fullfile(file_path, file_names{1}));
     [nrows, ncols] = size(im);
-    movie = zeros(nrows*ncols, length(file_names), 'double');
 
-    % Loop through all TIF files and populate intensity time series parameter
     num_files = numel(file_list);
+    movie = zeros(nrows*ncols, num_files, 'double');
     nframes = num_files;
+    
+    % Loop through all TIF files and populate intensity time series parameter
     batch_start = 1;
     prev_percentage = -1; % Initialize with -1 so the first update is always printed
 
     while batch_start <= num_files
         % Load batch of TIF files
         batch_end = min(batch_start + batch_size - 1, num_files);
-        batch_files = file_names(batch_start:batch_end);
-        num_batch_files = length(batch_files);
-        batch_images = zeros(nrows, ncols, num_batch_files, 'uint16');
+        batch_range = batch_start:batch_end;
 
-        for i = 1:num_batch_files
-            batch_images(:,:,i) = imread(fullfile(file_path, batch_files{i}));
+        for i = batch_range
+            % Read the current image
+            current_image = imread(fullfile(file_path, file_names{i}));
+
+            % Store the image directly in 'movie'
+            movie(:, i) = double(reshape(current_image, nrows*ncols, 1));
+
             % Calculate and display progress if percentage changes
             current_percentage = floor(((i - 1) / num_files) * 100);
             if current_percentage > prev_percentage
@@ -91,10 +95,6 @@ if isfolder(file_path)
                 prev_percentage = current_percentage;
             end
         end
-
-        % Append batch images to movie
-        batch_images_2D = reshape(batch_images, nrows*ncols, []);
-        movie(:,batch_start:batch_end) = double(batch_images_2D);
 
         % Update batch start and end indices
         batch_start = batch_end + 1;

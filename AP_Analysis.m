@@ -35,7 +35,7 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'F:\20240322\';
+folder_path = 'E:\1_Data\TEST';
 file = '20240322-161555right!';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
@@ -44,7 +44,7 @@ freq = 400; % Hz
 % read path
 file_path = fullfile(folder_path, file);
 [~, file_name, file_extension] = fileparts(file);
-save_path = fullfile([folder_path, file_name, '_Analysis'], nowtime);
+save_path = fullfile(folder_path, [file_name, '_Analysis'], nowtime);
 mkdir(save_path);
 
 % when read a folder
