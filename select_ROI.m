@@ -82,12 +82,13 @@ ylabel('Intensity');
 
 % Mask provided, overlay ROI and traces
 if ~isempty(mask)
-    roi_amount = size(mask, 2);
-    rois = mask;
-    for i = 1:roi_amount
-        trace = mean(movie(mask{i}, :));
+    bwmask = mask;
+    num_roi = max(bwmask(:));
+    for i = 1:num_roi
+        roi = (bwmask == i);
+        trace = mean(movie(roi, :));
         traces = [traces trace'];
-        boundary = bwboundaries(mask{i});
+        boundary = bwboundaries(roi);
         plot(boundary{1}(:, 2), boundary{1}(:, 1), 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'LineWidth', 2, 'Parent', image_axe);
         plot(t, trace, 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'Parent', trace_axe);
     end
