@@ -103,7 +103,7 @@ if ~isempty(mask)
     num_roi = max(bwmask(:));
     for i = 1:num_roi
         roi = (bwmask == i);
-        trace = mean(movie(roi, :));
+        trace = mean(movie(roi, :),1);
         traces = [traces trace'];
         boundary = bwboundaries(roi);
         plot(boundary{1}(:, 2), boundary{1}(:, 1), 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'LineWidth', 2, 'Parent', image_axe);

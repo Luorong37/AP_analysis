@@ -115,6 +115,7 @@ else
     mask = load(mask_filename);
     mask = mask.rois;
 end
+
 % -----------------------------------------------------------
 
 %% Create a map (optional)
