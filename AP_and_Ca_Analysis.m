@@ -37,7 +37,7 @@ fprintf('Loading...\n')
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
 folder_path = 'C:\Users\DELL\Downloads\20240403';
-file = '20240403-171944!';  % must add format.
+file = '20240403-174429!';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 freq_ca = 10; % Hz

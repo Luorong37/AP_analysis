@@ -81,9 +81,9 @@ fit_trace = fit_result.a * exp(fit_result.b * [1: nframe]);
 for i = 1:npixels
     fprintf('Processing %d / %d\n', i, npixels );
     pixel_trace_correct = movie_binned(i, :) ./ fit_trace;
-    baseline = mean(pixel_trace_correct);
+    baseline = mean(pixel_trace_correct) ;
     if strcmp(mode,'voltage')
-        quick_map(i) = (max(abs(pixel_trace_correct))- baseline) ./ baseline; % do not judge polarity
+        quick_map(i) = (max(abs(pixel_trace_correct- baseline))) ; % ./ baseline ; % do not judge polarity
     elseif strcmp(mode,'calcium')
         quick_map(i) = std(pixel_trace_correct);
     end
