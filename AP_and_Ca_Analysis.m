@@ -37,7 +37,7 @@ fprintf('Loading...\n')
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
 folder_path = 'C:\Users\DELL\Downloads\20240403';
-file = '20240403-171608!';  % must add format.
+file = '20240403-171944!';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 freq_ca = 10; % Hz
@@ -135,23 +135,34 @@ bin = 4; % defined bin = 4
 [quick_map] = create_map(movie, nrows, ncols, bin);
 map = quick_map;
 
+bin_ca = 2; % defined bin_ca = 2
+[quick_map] = create_map(movie_ca, nrows_ca, ncols_ca, bin_ca,'calcium');
+map_ca = quick_map;
+
 % Visualize correlation coefficients as heatmap
 figure()
-imagesc(quick_map);
+axe_v = subplot(1,2,1);
+imagesc(map);
 title('Sensitivity Map');
 axis image;
 colorbar;
+
+axe_ca = subplot(1,2,2);
+imagesc(map_ca);
+title('Calcium Map');
+axis image;
+colorbar;
+
 fig_filename = fullfile(save_path, '0_Sensitivity_Map.fig');
 png_filename = fullfile(save_path, '0_Sensitivity_Map.png');
 mat_filename = fullfile(save_path, '0_Sensitivity_Map.mat');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-save(mat_filename, 'map');
+save(mat_filename, 'map','map_ca');
 
 t2 = toc(t1); % Get the elapsed time
 fprintf('Finished mask creating after %d s\n',round(t2))
-
 %% Select ROI
 t1 = tic; % Start a timer
 

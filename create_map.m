@@ -83,12 +83,7 @@ for i = 1:npixels
     pixel_trace_correct = movie_binned(i, :) ./ fit_trace;
     baseline = mean(pixel_trace_correct);
     if strcmp(mode,'voltage')
-        % judge polarity
-        if abs(min(pixel_trace_correct)-baseline) < max(abs(pixel_trace_correct) - baseline)
-            quick_map(i) = (max(pixel_trace_correct)- baseline) ./ baseline;
-        else
-            quick_map(i) = (min(pixel_trace_correct)- baseline) ./ baseline;
-        end
+        quick_map(i) = (max(abs(pixel_trace_correct))- baseline) ./ baseline; % do not judge polarity
     elseif strcmp(mode,'calcium')
         quick_map(i) = std(pixel_trace_correct);
     end
