@@ -1,4 +1,4 @@
-function [quick_map] = create_map(movie, num_rows, num_cols, bin)
+function [quick_map] = create_map(movie, num_rows, num_cols, bin, mode)
 
 % ----------Write by Liu-Yang Luorong and ChatGPT----------
 % ----------POWERED by Zoulab in Peking University----------
@@ -37,6 +37,10 @@ function [quick_map] = create_map(movie, num_rows, num_cols, bin)
 % - The map only find the extreme value in frames of binned pixels which may lost plateau.
 %
 % See also RESHAPE, MEAN, FIT, STD, IMRESIZE.
+
+if nargin < 5
+    mode = 'voltage'; % defined create sensitivity map
+end
 
 % cut the size
 cut = false;
@@ -78,7 +82,16 @@ for i = 1:npixels
     fprintf('Processing %d / %d\n', i, npixels );
     pixel_trace_correct = movie_binned(i, :) ./ fit_trace;
     baseline = mean(pixel_trace_correct);
-    quick_map(i) = (min(pixel_trace_correct)- baseline) ./ baseline;
+    if strcmp(mode,'voltage')
+        % judge polarity
+        if abs(min(pixel_trace_correct)-baseline) < max(abs(pixel_trace_correct) - baseline)
+            quick_map(i) = (max(pixel_trace_correct)- baseline) ./ baseline;
+        else
+            quick_map(i) = (min(pixel_trace_correct)- baseline) ./ baseline;
+        end
+    elseif strcmp(mode,'calcium')
+        quick_map(i) = std(pixel_trace_correct);
+    end
 end
 
 % converse to Z score

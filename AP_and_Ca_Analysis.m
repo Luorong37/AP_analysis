@@ -36,11 +36,18 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\TEST';
-file = '20240322-161555right!';  % must add format.
+folder_path = 'C:\Users\DELL\Downloads\20240403';
+file = '20240403-171608!';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
+freq_ca = 10; % Hz
 % -----------------------------------------------------------
+
+% Define parameters
+peakfinding = false;
+Calcium_analysis = true;
+colors = [lines(7);hsv(5);spring(3);winter(3);gray(3)];
+options.colors = colors;
 
 % read path
 file_path = fullfile(folder_path, file);
@@ -56,12 +63,17 @@ end
 % Load image file
 [movie, ncols, nrows, nframes] = load_movie(file_path,file_extension,100000);
 
+if Calcium_analysis
+    file_path_ca = [file_path,'_Green']; % defined name 
+    [movie_ca, ncols_ca, nrows_ca, nframes_ca] = load_movie(file_path_ca,file_extension,100);
+
+end
+
 % Define parameters
 dt = 1 / freq; % Calculate time axis
-colors = [lines(7);hsv(5);spring(3);winter(3);gray(3)];
+dt_ca = 1 / freq_ca;
 t = (1:nframes) * dt;
-peakfinding = false;
-options.colors = colors;
+t_ca = (1:nframes_ca) * dt_ca;
 
 % Save code
 code_path = fullfile(save_path,'Code');
@@ -93,9 +105,6 @@ if save_movie
     fprintf('Finished saving movie after %d s\n',round(t2))
 end
 
-t2 = toc(t1); % Get the elapsed time
-fprintf('Finished loading after %d s\n',round(t2))
-
 % Load saved map or mask (optional)
 map_path = ''; % define as ''
 if isempty(map_path)
@@ -115,7 +124,7 @@ else
     mask = load(mask_filename);
     mask = mask.rois;
 end
-
+t2 = toc(t1); % Get the elapsed time
 % -----------------------------------------------------------
 
 %% Create a map (optional)
