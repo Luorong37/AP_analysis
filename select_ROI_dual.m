@@ -1,4 +1,5 @@
-function [bwmask, traces] = select_ROI(movie, nrows, ncols, t, colors, mask, map)
+function [bwmask, traces] = select_ROI_dual(movie, movie_ca, ...
+    nrows, ncols, nrows_ca, ncols_ca, t, t_ca, colors, mask, map, mask_ca, map_ca)
 % 
 % ----------Write by Liu-Yang Luorong and ChatGPT----------
 % ----------POWERED by Zoulab in Peking University----------
@@ -46,109 +47,109 @@ function [bwmask, traces] = select_ROI(movie, nrows, ncols, t, colors, mask, map
 
 % Initialize variables
 traces = [];
+traces_ca = [];
 bwmask = zeros(nrows,ncols);
 movie_2D = reshape(movie, ncols, nrows, []);
+movie_2D_ca = reshape(movie_ca, ncols_ca, nrows_ca, []);
+map_merge = [map; map_ca];
 
 % Set current figure to full screen and add keypress callback
 fig = gcf;
 set(fig,'Position',get(0,'Screensize'));
 set(gcf, 'KeyPressFcn', @(src, event) set_space_pressed(event, fig));
 
-% Display sensitivity map if provided
-if ~isempty(map)
-    subplot(1,2,1);
+% plot figure
+if ~isempty(map) && ~isempty(map_ca)
+    subplot(2,3,[1,4]);
+    imagesc(map_merge);
+    title('Sensitivity Map');
     map_axe = gca;
-    imagesc(map);
-    colorbar;
-    title(sprintf('Sensitivity MAP\n\nPress SPACE to continue\nPress ENTER to end'));
     hold on;
-    axis image;
-
-    % Display fluorescent image
-    subplot(2,2,2);
-    image_axe = gca;
-    im_adj = imadjust(uint16(mean(movie_2D, 3)));
-    imshow(im_adj);
-    hold on;
-    title('Fluorescent Image');
 
     % Plot Trace
-    subplot(2,2,4);
+    subplot(2,3,[2,3]);
     trace_axe = gca;
     hold on;
     xlabel('Time (s)');
-    ylabel('Intensity');
-
-else
-% Display fluorescent image without map
-    subplot(1,2,1);
-    image_axe = gca;
-    im_adj = imadjust(uint16(mean(movie_2D, 3)));
-    imshow(im_adj);
+    ylabel('Voltage Intensity');
     hold on;
-    title('Fluorescent Image');
 
-    % Plot Trace
-    subplot(1,2,2);
-    trace_axe = gca;
+    subplot(2,3,[5,6]);
+    trace_axe_ca = gca;
     hold on;
     xlabel('Time (s)');
-    ylabel('Intensity');
+    ylabel('Calcium Intensity');
+    hold on;
 end
 
+% % Mask provided, overlay ROI and traces
+% if ~isempty(mask)
+%     bwmask = mask;
+%     num_roi = max(bwmask(:));
+%     for i = 1:num_roi
+%         roi = (bwmask == i);
+%         trace = mean(movie(roi, :),1);
+%         traces = [traces trace'];
+%         boundary = bwboundaries(roi);
+%         plot(boundary{1}(:, 2), boundary{1}(:, 1), 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'LineWidth', 2, 'Parent', image_axe);
+%         plot(t, trace, 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'Parent', trace_axe);
+%     end
 
-% Mask provided, overlay ROI and traces
-if ~isempty(mask)
-    bwmask = mask;
-    num_roi = max(bwmask(:));
-    for i = 1:num_roi
-        roi = (bwmask == i);
-        trace = mean(movie(roi, :),1);
-        traces = [traces trace'];
-        boundary = bwboundaries(roi);
-        plot(boundary{1}(:, 2), boundary{1}(:, 1), 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'LineWidth', 2, 'Parent', image_axe);
-        plot(t, trace, 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'Parent', trace_axe);
-    end
-
-else
+% else
     % ROI selection process
     while true
-        num_roi = max(bwmask(:)) + 1;
-        if ~isempty(map)
-            roi_mask = drawpolygon('Color', colors(mod(num_roi, length(colors)) + 1, :), 'LineWidth', 1, 'Parent', map_axe);
-        else
-            roi_mask = drawpolygon('Color', colors(mod(num_roi, length(colors)) + 1, :), 'LineWidth', 1, 'Parent', image_axe);
-        end
-        mask = poly2mask(roi_mask.Position(:, 1), roi_mask.Position(:, 2), size(im_adj, 1), size(im_adj, 2));
-        bwmask(mask) = num_roi;
 
+        num_roi = max(bwmask(:)) + 1;
+        roi_mask = drawpolygon('Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 1, 'Parent', map_axe);
+        
+        if mean(roi_mask.Position(:,2)) > ncols
+            % select in calcium map
+            mask = poly2mask(roi_mask.Position(:, 1), roi_mask.Position(:, 2)-ncols, ncols, nrows);
+            boundary = bwboundaries(mask);
+            % draw in voltage map
+            plot(boundary{1}(:, 2), boundary{1}(:, 1), ...
+                'Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 1, 'Parent', map_axe);hold on;
+        else
+            % select in voltage map
+            mask = poly2mask(roi_mask.Position(:, 1), roi_mask.Position(:, 2), ncols, nrows);
+            boundary = bwboundaries(mask);
+            % draw in calcium map
+            plot(boundary{1}(:, 2), boundary{1}(:, 1) + ncols, ...
+                'Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 1, 'Parent', map_axe);hold on;
+        end
+
+        % save_mask
+        bwmask(mask) = num_roi;
+        
+        % save trace
         trace = mean(movie(mask, :));
         traces = [traces trace'];
+        trace_ca = mean(movie_ca(mask, :));
+        traces_ca = [traces_ca trace_ca'];
 
-        boundary = bwboundaries(mask);
-        if ~isempty(map)
-            plot(boundary{1}(:, 2), boundary{1}(:, 1), 'Color', colors(mod(num_roi - 1, length(colors)) + 1, :), 'LineWidth', 1, 'Parent', image_axe);
-        end
-        plot(t, trace, 'Color', colors(mod(num_roi - 1, length(colors)) + 1, :), 'Parent', trace_axe);
-
+        % plot trace
+        plot(t, trace, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe); hold on;
+        plot(t_ca, trace_ca, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe_ca); hold on;
+        
         % Wait for user input
-        fig.UserData = [];
+        fig.UserData.space = [];
         waitfor(fig, 'UserData');
-        if strcmp(fig.UserData, 'stop')
+        if strcmp(fig.UserData.space, 'stop')
             break;
-        elseif strcmp(fig.UserData, 'spacePressed')
+        elseif strcmp(fig.UserData.space, 'spacePressed')
             continue;
         end
     end
 
-end
+% end
 fprintf('Finished ROI selection\n');
 end
 
 function set_space_pressed(event, fig)
 if strcmp(event.Key, 'space')
-    fig.UserData = 'spacePressed';
+    fig.UserData.space = 'spacePressed';
 elseif strcmp(event.Key, 'return')
-    fig.UserData = 'stop';
+    fig.UserData.space = 'stop';
 end
+
 end

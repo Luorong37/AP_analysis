@@ -37,7 +37,7 @@ fprintf('Loading...\n')
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
 folder_path = 'C:\Users\DELL\Downloads\20240403';
-file = '20240403-174429!';  % must add format.
+file = '20240403-171944!';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 freq_ca = 10; % Hz
@@ -109,6 +109,7 @@ end
 map_path = ''; % define as ''
 if isempty(map_path)
     map = [];
+    map_ca = [];
 else
     map_filename = fullfile(map_path, '0_Sensitivity_Map.mat');
     map = load(map_filename);
@@ -118,6 +119,7 @@ end
 mask_path = ''; % define as ''
 if isempty(mask_path)
     mask = []; 
+    mask_ca = [];
 else
     mask_path = 'E:\Data\20230810\20230810-161506recordSCN_Analysis\2023-11-06 09-12-40';
     mask_filename = fullfile(mask_path, '1_raw_ROI.mat');
@@ -127,7 +129,7 @@ end
 t2 = toc(t1); % Get the elapsed time
 % -----------------------------------------------------------
 
-%% Create a map (optional)
+%% Create a map 
 t1 = tic; % Start a timer
 fprintf('Creating...\n')
 % if SNR is low, please large the bin.
@@ -163,11 +165,50 @@ save(mat_filename, 'map','map_ca');
 
 t2 = toc(t1); % Get the elapsed time
 fprintf('Finished mask creating after %d s\n',round(t2))
+%% Photobleaching correction
+
+mean_movie = mean(movie,1);
+mean_movie_ca = mean(movie_ca,1);
+
+% fit
+[~, fitted_curves] = fit_exp1(mean_movie');
+[~, fitted_curves_ca] = fit_exp1(mean_movie_ca');
+
+% plot
+fig = figure();
+set(fig,'Position',get(0,'Screensize'));
+v_axe = subplot(2,1,1);
+ca_axe = subplot(2,1,2);
+
+plot(t,mean_movie,'LineWidth',2,'Parent',v_axe);
+hold(v_axe, 'on');
+plot(t,fitted_curves,'r','LineWidth',2,'Parent',v_axe);
+hold(v_axe, 'on');
+plot(t_ca,mean_movie_ca,'LineWidth',2,'Parent',ca_axe);
+hold(ca_axe, 'on');
+plot(t_ca,fitted_curves_ca,'r','LineWidth',2,'Parent',ca_axe);
+hold(v_axe, 'on');
+
+% note
+title(v_axe, 'Voltage trace');
+title(ca_axe, 'Calcium trace');
+
+fig_filename = fullfile(save_path, '2_fitted_trace.fig');
+png_filename = fullfile(save_path, '2_fitted_trace.png');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+
+fprintf('Finished exp1 fit\n')
 %% Select ROI
 t1 = tic; % Start a timer
 
+movie_corrected = movie ./ fitted_curves';
+movie_corrected_ca = movie_ca ./ fitted_curves_ca';
+
 % with or wihout Mask and Map
-[rois, traces] = select_ROI(movie, nrows, ncols, t, colors, mask, map);
+[bwmask, traces] = select_ROI_dual(movie_corrected, movie_corrected_ca, ...
+    nrows, ncols, nrows_ca, ncols_ca, t, t_ca, colors, mask, map, mask_ca, map_ca);
 
 fig_filename = fullfile(save_path, '1_raw_trace.fig');
 png_filename = fullfile(save_path, '1_raw_trace.png');
@@ -175,7 +216,7 @@ roi_filename = fullfile(save_path, '1_raw_ROI.mat');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-save(roi_filename, 'rois');
+save(roi_filename, 'bwmask');
 
 traces_input = zeros(size(traces,1),size(traces,2)-1);
 background = traces(:,end);
@@ -187,39 +228,6 @@ end
 
 t2 = toc(t1); % Get the elapsed time
 fprintf('Saved ROI figure after %d s\n',round(t2))
-
-%% Photobleaching correction
-
-% fit
-[traces_corrected, fitted_curves] = fit_exp1(traces_input);
-
-% plot
-fig = figure();
-set(fig,'Position',get(0,'Screensize'));
-fit_axe = subplot(2,1,1);
-fited_axe = subplot(2,1,2);
-
-for i = 1: size(traces_corrected,2)
-    plot(t,traces_input(:,i),'Color',colors(i,:),'Parent',fit_axe);
-    hold(fit_axe, 'on');
-    plot(t,fitted_curves(:,i),'Color',colors(i,:),'LineWidth',2,'Parent',fit_axe);
-    hold(fit_axe, 'on');
-    plot(t,traces_corrected(:,i),'Color',colors(i,:),'Parent',fited_axe);
-    hold(fited_axe, 'on');
-end
-
-% note
-title(fit_axe, 'Original and Fitted Curves');
-title(fited_axe, 'Corrected Traces');
-legend(fit_axe, 'Original Trace', 'Fitted Curve');
-
-fig_filename = fullfile(save_path, '2_fitted_trace.fig');
-png_filename = fullfile(save_path, '2_fitted_trace.png');
-
-saveas(gcf, fig_filename, 'fig');
-saveas(gcf, png_filename, 'png');
-
-fprintf('Finished exp1 fit\n')
 
 %% Peak finding (optional)
 peakfinding = true; % defined as true

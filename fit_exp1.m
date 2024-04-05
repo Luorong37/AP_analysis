@@ -50,10 +50,10 @@ for i = 1:size(traces, 2)
     current_trace = traces(:, i);
     
     % Fit the exponential decay model to the trace
-    [fit_params,~] = fit(time', current_trace, 'exp1'); % 'exp1' is a model type for a single-term exponential
-    
+    [fit_params,~] = fit(time', current_trace,'exp2'); 
+
     % Generate the fitted curve from the fit parameters
-    fitted_curve = fit_params.a * exp(fit_params.b * time);
+    fitted_curve = fit_params.a * exp(fit_params.b * time) + fit_params.c * exp(fit_params.d * time);
     fitted_curves(:, i) = fitted_curve;
     
     % Correct the original trace by dividing by the fitted curve to mitigate photobleaching effect
