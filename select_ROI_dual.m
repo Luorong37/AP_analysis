@@ -1,5 +1,5 @@
-function [bwmask, traces] = select_ROI_dual(movie, movie_ca, ...
-    nrows, ncols, nrows_ca, ncols_ca, t, t_ca, colors, mask, map, mask_ca, map_ca)
+function [bwmask, bwmask_ca, traces, traces_ca] = select_ROI_dual(movie, movie_ca, ...
+    nrows, ncols, t, t_ca, colors, mask, map, mask_ca, map_ca, type)
 % 
 % ----------Write by Liu-Yang Luorong and ChatGPT----------
 % ----------POWERED by Zoulab in Peking University----------
@@ -45,12 +45,15 @@ function [bwmask, traces] = select_ROI_dual(movie, movie_ca, ...
 % See also IMAGESC, IMSHOW, DRAWPOLYGON, POLY2MASK, MEAN.
 
 
+if nargin < 12
+    type = 'once';
+end
+
 % Initialize variables
 traces = [];
 traces_ca = [];
 bwmask = zeros(nrows,ncols);
-movie_2D = reshape(movie, ncols, nrows, []);
-movie_2D_ca = reshape(movie_ca, ncols_ca, nrows_ca, []);
+bwmask_ca = zeros(nrows,ncols);
 map_merge = [map; map_ca];
 
 % Set current figure to full screen and add keypress callback
@@ -100,27 +103,42 @@ end
     while true
 
         num_roi = max(bwmask(:)) + 1;
-        roi_mask = drawpolygon('Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 1, 'Parent', map_axe);
+        roi_mask = drawpolygon('Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 2, 'Parent', map_axe);
         
-        if mean(roi_mask.Position(:,2)) > ncols
-            % select in calcium map
-            mask = poly2mask(roi_mask.Position(:, 1), roi_mask.Position(:, 2)-ncols, ncols, nrows);
-            boundary = bwboundaries(mask);
-            % draw in voltage map
-            plot(boundary{1}(:, 2), boundary{1}(:, 1), ...
-                'Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 1, 'Parent', map_axe);hold on;
-        else
+        if strcmp(type,'once')
+            if mean(roi_mask.Position(:,2)) > ncols
+                % select in calcium map
+                mask = poly2mask(roi_mask.Position(:, 1), roi_mask.Position(:, 2)-ncols, ncols, nrows);
+                boundary = bwboundaries(mask);
+                % draw in voltage map
+                plot(boundary{1}(:, 2), boundary{1}(:, 1), ...
+                    'Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 2, 'Parent', map_axe);hold on;
+            else
+                % select in voltage map
+                mask = poly2mask(roi_mask.Position(:, 1), roi_mask.Position(:, 2), ncols, nrows);
+                boundary = bwboundaries(mask);
+                % draw in calcium map
+                plot(boundary{1}(:, 2), boundary{1}(:, 1) + ncols, ...
+                    'Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 2, 'Parent', map_axe);hold on;
+            end
+        elseif strcmp(type,'twice')
             % select in voltage map
             mask = poly2mask(roi_mask.Position(:, 1), roi_mask.Position(:, 2), ncols, nrows);
             boundary = bwboundaries(mask);
             % draw in calcium map
             plot(boundary{1}(:, 2), boundary{1}(:, 1) + ncols, ...
                 'Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 1, 'Parent', map_axe);hold on;
+            roi_mask_ca = drawpolygon('Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 2, 'Parent', map_axe);
+            % generate mask and boundary
+            mask_ca = poly2mask(roi_mask_ca.Position(:, 1), roi_mask_ca.Position(:, 2)-ncols, ncols, nrows);
+            % boundary = bwboundaries(mask);
+            % boundary_ca = bwboundaries(mask_ca);
         end
 
         % save_mask
         bwmask(mask) = num_roi;
-        
+        bwmask_ca(mask_ca) = num_roi;
+
         % save trace
         trace = mean(movie(mask, :));
         traces = [traces trace'];
