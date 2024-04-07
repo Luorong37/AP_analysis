@@ -208,7 +208,7 @@ movie_corrected_ca = movie_ca ./ fitted_curves_ca';
 
 % with or wihout Mask and Map
 [bwmask, bwmask_ca, traces, traces_ca] = select_ROI_dual(movie_corrected, movie_corrected_ca, ...
-    nrows, ncols, t, t_ca, colors, mask, map, mask_ca, map_ca,'twice');
+    nrows, ncols, t, t_ca, colors, mask, map, mask_ca, map_ca,1);
 
 fig_filename = fullfile(save_path, '1_raw_trace.fig');
 png_filename = fullfile(save_path, '1_raw_trace.png');
@@ -230,6 +230,10 @@ t2 = toc(t1); % Get the elapsed time
 fprintf('Saved ROI figure after %d s\n',round(t2))
 
 %% plot stacked figure
+figure()
+plot(t_ca,gradient(traces_ca(:,3)*100)); hold on ;
+plot(t, traces(:,3)-1.5);hold on
+
 
 %% Save parameter
 % 定义保存路径和文件名

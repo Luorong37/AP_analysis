@@ -1,5 +1,5 @@
 function [bwmask, bwmask_ca, traces, traces_ca] = select_ROI_dual(movie, movie_ca, ...
-    nrows, ncols, t, t_ca, colors, mask, map, mask_ca, map_ca, type)
+    nrows, ncols, t, t_ca, colors, mask, map, mask_ca, map_ca, correct)
 % 
 % ----------Write by Liu-Yang Luorong and ChatGPT----------
 % ----------POWERED by Zoulab in Peking University----------
@@ -46,7 +46,7 @@ function [bwmask, bwmask_ca, traces, traces_ca] = select_ROI_dual(movie, movie_c
 
 
 if nargin < 12
-    type = 'once';
+    correct = false;
 end
 
 % Initialize variables
@@ -55,6 +55,10 @@ traces_ca = [];
 bwmask = zeros(nrows,ncols);
 bwmask_ca = zeros(nrows,ncols);
 map_merge = [map; map_ca];
+corrected = false;
+
+x_offset = 0;
+y_offset = 0;
 
 % Set current figure to full screen and add keypress callback
 fig = gcf;
@@ -65,7 +69,7 @@ set(gcf, 'KeyPressFcn', @(src, event) set_space_pressed(event, fig));
 if ~isempty(map) && ~isempty(map_ca)
     subplot(2,3,[1,4]);
     imagesc(map_merge);
-    title('Sensitivity Map');
+    title('Sensitivity Map/nStart with voltage for offset correction');
     map_axe = gca;
     hold on;
 
@@ -103,36 +107,56 @@ end
     while true
 
         num_roi = max(bwmask(:)) + 1;
-        roi_mask = drawpolygon('Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 2, 'Parent', map_axe);
-        
-        if strcmp(type,'once')
-            if mean(roi_mask.Position(:,2)) > ncols
+        roi = drawpolygon('Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 2, 'Parent', map_axe);       
+
+        if ~correct || corrected
+            if mean(roi.Position(:,2)) > ncols
                 % select in calcium map
-                mask = poly2mask(roi_mask.Position(:, 1), roi_mask.Position(:, 2)-ncols, ncols, nrows);
-                boundary = bwboundaries(mask);
+                roi_ca = roi;
+                mask_ca = poly2mask(roi_ca.Position(:, 1), roi_ca.Position(:, 2)-ncols, ncols, nrows);
+                boundary_ca = cell2mat(bwboundaries(mask_ca));
                 % draw in voltage map
-                plot(boundary{1}(:, 2), boundary{1}(:, 1), ...
+                roi_v.Position = translate(polyshape(roi.Position),[x_offset,y_offset-ncols]).Vertices;
+                mask = poly2mask(roi_v.Position(:, 1), roi_v.Position(:, 2), ncols, nrows);
+                boundary =  cell2mat(bwboundaries(mask));
+                plot(boundary(:, 2), boundary(:, 1), ...
                     'Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 2, 'Parent', map_axe);hold on;
             else
                 % select in voltage map
-                mask = poly2mask(roi_mask.Position(:, 1), roi_mask.Position(:, 2), ncols, nrows);
-                boundary = bwboundaries(mask);
+                mask = poly2mask(roi.Position(:, 1), roi.Position(:, 2), ncols, nrows);
+                boundary = cell2mat(bwboundaries(mask));
                 % draw in calcium map
-                plot(boundary{1}(:, 2), boundary{1}(:, 1) + ncols, ...
-                    'Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 2, 'Parent', map_axe);hold on;
+                roi_ca.Position = translate(polyshape(roi.Position),[-x_offset,-y_offset+ncols]).Vertices;
+                mask_ca = poly2mask(roi_ca.Position(:, 1), roi_ca.Position(:, 2)-ncols, ncols, nrows);
+                boundary_ca =  cell2mat(bwboundaries(mask_ca));
+                plot(boundary_ca(:, 2), boundary_ca(:, 1) + ncols, ...
+                    'Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 2, 'Parent', map_axe);hold on;             
             end
-        elseif strcmp(type,'twice')
+
+        else
             % select in voltage map
-            mask = poly2mask(roi_mask.Position(:, 1), roi_mask.Position(:, 2), ncols, nrows);
-            boundary = bwboundaries(mask);
+            mask = poly2mask(roi.Position(:, 1), roi.Position(:, 2), ncols, nrows);
+            boundary =  cell2mat(bwboundaries(mask));
             % draw in calcium map
-            plot(boundary{1}(:, 2), boundary{1}(:, 1) + ncols, ...
-                'Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 1, 'Parent', map_axe);hold on;
-            roi_mask_ca = drawpolygon('Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 2, 'Parent', map_axe);
-            % generate mask and boundary
-            mask_ca = poly2mask(roi_mask_ca.Position(:, 1), roi_mask_ca.Position(:, 2)-ncols, ncols, nrows);
-            % boundary = bwboundaries(mask);
-            % boundary_ca = bwboundaries(mask_ca);
+            plot(boundary(:, 2), boundary(:, 1) + ncols, ...
+                'Color', 'r', 'LineWidth', 1, 'Parent', map_axe);hold on;
+
+            % select calcium ROI
+            roi_ca = drawpolygon('Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 2, 'Parent', map_axe);hold on;   
+            mask_ca = poly2mask(roi_ca.Position(:, 1), roi_ca.Position(:, 2)-ncols, ncols, nrows);
+            boundary_ca = cell2mat(bwboundaries(mask_ca));
+
+            % calculate centroid for each roi
+            [cent.x, cent.y] = centroid(polyshape(roi.Position));
+            [cent_ca.x, cent_ca.y] = centroid(polyshape(roi_ca.Position));
+
+            % calculate offset
+            offset = [cent.x, cent.y] - [cent_ca.x, cent_ca.y - ncols] ;
+            x_offset = offset(1);
+            y_offset = offset(2);
+            plot([cent.x,cent_ca.x],[cent.y+ ncols, cent_ca.y ],'black','LineWidth',3,'Marker','o');hold on;   
+            fprintf('offset = %f, %f\n',offset)
+            corrected = true;
         end
 
         % save_mask
