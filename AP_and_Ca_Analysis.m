@@ -36,8 +36,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'F:\20240403';
-file = '20240403-174429!';  % must add format.
+folder_path = 'E:\1_Data\Luorong\430_5min';
+file = '20240430-172447_5min_2';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 freq_ca = 10; % Hz
@@ -203,12 +203,13 @@ fprintf('Finished exp2 fit\n')
 %% Select ROI
 t1 = tic; % Start a timer
 
-movie_corrected = movie ./ fitted_curves';
-movie_corrected_ca = movie_ca ./ fitted_curves_ca';
+movie = movie ./ fitted_curves';
+movie_ca = movie_ca ./ fitted_curves_ca';
 
 % with or wihout Mask and Map
-[bwmask, bwmask_ca, traces, traces_ca] = select_ROI_dual(movie_corrected, movie_corrected_ca, ...
-    nrows, ncols, t, t_ca, colors, mask, map, mask_ca, map_ca,1);
+correct = true; % true for correct offset
+[bwmask, bwmask_ca, traces, traces_ca] = select_ROI_dual(movie, movie_ca, ...
+    nrows, ncols, t, t_ca, colors, mask, map, mask_ca, map_ca, correct);
 
 fig_filename = fullfile(save_path, '1_raw_trace.fig');
 png_filename = fullfile(save_path, '1_raw_trace.png');
@@ -230,9 +231,7 @@ t2 = toc(t1); % Get the elapsed time
 fprintf('Saved ROI figure after %d s\n',round(t2))
 
 %% plot stacked figure
-figure()
-plot(t_ca,gradient(traces_ca(:,3)*100)); hold on ;
-plot(t, traces(:,3)-1.5);hold on
+
 
 
 %% Save parameter

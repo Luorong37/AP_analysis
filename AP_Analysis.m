@@ -36,8 +36,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\TEST';
-file = '20240322-161555right!';  % must add format.
+folder_path = 'E:\1_Data\zsy\20240425 525';
+file = 'mpImage(23).tif';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
@@ -49,7 +49,7 @@ save_path = fullfile(folder_path, [file_name, '_Analysis'], nowtime);
 mkdir(save_path);
 
 % when read a folder
-if isempty(file_extension)
+if isfolder(file_path)
     file_extension = 'tif';
 end
 

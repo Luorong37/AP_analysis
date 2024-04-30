@@ -103,7 +103,7 @@ if isfolder(file_path)
     end
 
 
-elseif isequal(file_extension,'tif') || isequal(file_extension,'tiff')
+elseif isequal(file_extension,'.tif') || isequal(file_extension,'.tiff')
     % Read TIFF movie
     info = imfinfo(file_path);
     [ncols, nrows] = size(imread(file_path, 1));
