@@ -1,4 +1,4 @@
-function [quick_map] = create_map(movie, num_rows, num_cols, bin, mode)
+function [quick_map] = create_map(movie, nrows, ncols, bin, mode)
 
 % ----------Write by Liu-Yang Luorong and ChatGPT----------
 % ----------POWERED by Zoulab in Peking University----------
@@ -44,55 +44,54 @@ end
 
 % cut the size
 cut = false;
-nrow = num_rows;
-ncol = num_cols;
-if mod(nrow,bin) ~= 0
-    nrow = nrow - mod(nrow,bin);
+if mod(nrows,bin) ~= 0
+    nrows = nrows - mod(nrows,bin);
     cut = true;
 end
-if mod(ncol,bin) ~= 0
-    ncol = ncol - mod(ncol,bin);
+if mod(ncols,bin) ~= 0
+    ncols = ncols - mod(ncols,bin);
     cut = true;
 end
 if cut == true
-    temp = reshape(movie,num_cols,num_rows,[]);
-    movie = temp(1:ncol,1:nrow,:);
+    temp = reshape(movie,ncols,nrows,[]);
+    movie = temp(1:ncols,1:nrows,:);
 end
 movie_size = size(movie);
 nframe = movie_size(end);
 
 % Initialize matrix to store cell labels
-quick_map = zeros(ncol/bin * nrow/bin,1);
+quick_map = zeros(ncols/bin * nrows/bin,1);
 
 % reshape to high dimension for each bin
-movie_5D = reshape(movie,bin,ncol/bin,bin,nrow/bin,[]);
+movie_5D = reshape(movie,bin,ncols/bin,bin,nrows/bin,[]);
 % average across x y
 movie_ave = squeeze(mean(mean(movie_5D,1),3));
 
 % reshape to binned
-movie_binned = reshape(movie_ave,nrow/bin*ncol/bin,nframe);
+movie_binned = reshape(movie_ave,nrows/bin*ncols/bin,nframe);
 npixels = size(movie_binned,1);
 
 % Apply avg_intensity curve to correct photobleaching from each pixel (recommend)
 avg_trace = mean(movie_binned,1);
-[fit_result, gof] = fit([1:nframe]' ,avg_trace', 'exp1' );
-fit_trace = fit_result.a * exp(fit_result.b * [1: nframe]);
+[~, fitted_curves] = fit_exp2(avg_trace');
+
+movie_binned_corrected = movie_binned  ./ fitted_curves';
 
 for i = 1:npixels
-    fprintf('Processing %d / %d\n', i, npixels );
-    pixel_trace_correct = movie_binned(i, :) ./ fit_trace;
-    baseline = mean(pixel_trace_correct) ;
+    %fprintf('Processing %d / %d\n', i, npixels );
+    pixel_trace_corrected = movie_binned_corrected(i, :);
+    baseline = mean(pixel_trace_corrected) ;
     if strcmp(mode,'voltage')
-        quick_map(i) = (max(abs(pixel_trace_correct- baseline))) ; % ./ baseline ; % do not judge polarity
+        quick_map(i) = max(abs(pixel_trace_corrected - baseline)/baseline) ; % ./ baseline ; % do not judge polarity
     elseif strcmp(mode,'calcium')
-        quick_map(i) = std(pixel_trace_correct);
+        quick_map(i) = std(pixel_trace_corrected);
     end
 end
 
 % converse to Z score
-baseline = mean(quick_map);
-quick_map = (quick_map - baseline) ./ std(quick_map);
-quick_map = reshape(quick_map,ncol/bin,nrow/bin, 1);
-quick_map = imresize(quick_map,[ncol,nrow] );
+% baseline = mean(quick_map);
+% quick_map = (quick_map - baseline) ./ std(quick_map);
+quick_map = reshape(quick_map,ncols/bin,nrows/bin, 1);
+quick_map = imresize(quick_map,[ncols,nrows] );
 end
 

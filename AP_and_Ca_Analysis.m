@@ -37,7 +37,7 @@ fprintf('Loading...\n')
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
 folder_path = 'E:\1_Data\Luorong\430_5min';
-file = '20240430-172447_5min_2';  % must add format.
+file = '20240430-172306_5min_2';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 freq_ca = 10; % Hz
@@ -136,10 +136,12 @@ fprintf('Creating...\n')
 bin = 4; % defined bin = 4
 [quick_map] = create_map(movie, nrows, ncols, bin);
 map = quick_map;
+fprintf('Finished voltage map\n')
 
 bin_ca = 2; % defined bin_ca = 2
 [quick_map] = create_map(movie_ca, nrows_ca, ncols_ca, bin_ca,'calcium');
 map_ca = quick_map;
+fprintf('Finished calcium map\n')
 
 % Visualize correlation coefficients as heatmap
 figure()
@@ -171,8 +173,8 @@ mean_movie = mean(movie,1);
 mean_movie_ca = mean(movie_ca,1);
 
 % fit
-[~, fitted_curves] = fit_exp2(mean_movie');
-[~, fitted_curves_ca] = fit_exp2(mean_movie_ca');
+[traces_corrected, fitted_curves] = fit_exp2(mean_movie');
+[traces_corrected_ca, fitted_curves_ca] = fit_exp2(mean_movie_ca');
 
 % plot
 fig = figure();
@@ -203,8 +205,8 @@ fprintf('Finished exp2 fit\n')
 %% Select ROI
 t1 = tic; % Start a timer
 
-movie = movie ./ fitted_curves';
-movie_ca = movie_ca ./ fitted_curves_ca';
+% movie = movie ./ fitted_curves';
+% movie_ca = movie_ca ./ fitted_curves_ca';
 
 % with or wihout Mask and Map
 correct = true; % true for correct offset

@@ -1,4 +1,4 @@
-function [traces_corrected, fitted_curves] = fit_exp1(traces)
+function [traces_corrected, fitted_curves] = fit_exp2(traces)
 % ----------Write by Liu-Yang Luorong and ChatGPT----------
 % ----------POWERED by Zoulab in Peking University----------
 % Date: 23.11.16
