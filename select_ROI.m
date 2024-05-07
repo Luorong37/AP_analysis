@@ -124,7 +124,7 @@ else
 
         trace = mean(movie(mask, :));
         traces = [traces trace'];
-        [trace_corrected, ~] = fit_exp2(trace);
+        [trace_corrected, ~] = fit_exp2(trace');
 
         boundary = bwboundaries(mask);
         if ~isempty(map)

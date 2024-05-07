@@ -54,7 +54,7 @@ traces = [];
 traces_ca = [];
 bwmask = zeros(nrows,ncols);
 bwmask_ca = zeros(nrows,ncols);
-map_merge = [map; map_ca];
+map_merge = [normalize(map); normalize(map_ca)];
 corrected = false;
 
 x_offset = 0;
@@ -74,14 +74,14 @@ if ~isempty(map) && ~isempty(map_ca)
     hold on;
 
     % Plot Trace
-    subplot(2,3,[2,3]);
+    v = subplot(2,3,[2,3]);
     trace_axe = gca;
     hold on;
     xlabel('Time (s)');
     ylabel('Voltage Intensity');
     hold on;
 
-    subplot(2,3,[5,6]);
+    ca = subplot(2,3,[5,6]);
     trace_axe_ca = gca;
     hold on;
     xlabel('Time (s)');
@@ -165,16 +165,21 @@ end
 
         % save trace
         trace = mean(movie(mask, :));
-        traces = [traces trace'];
-        [trace_corrected, ~] = fit_exp2(trace);
+        [trace_corrected, fitted_curve] = fit_exp2(trace');
+        traces = [traces normalize(trace_corrected)];
 
         trace_ca = mean(movie_ca(mask, :));
-        traces_ca = [traces_ca trace_ca'];
-        [trace_corrected_ca, ~] = fit_exp2(trace_ca);
+        [trace_corrected_ca, fitted_curve_ca] = fit_exp2(trace_ca');
+        traces_ca = [traces_ca normalize(trace_corrected_ca)];
+
 
         % plot trace
-        plot(t, trace_corrected, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe); hold on;
-        plot(t_ca, trace_corrected_ca, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe_ca); hold on;
+        cla(v);
+        cla(ca);
+        plot(t, trace, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe);  hold on;
+        plot(t_ca, trace_ca, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe_ca);  hold on;
+        plot(t, fitted_curve, 'Color', 'r', 'Parent', trace_axe);  hold on;
+        plot(t_ca, fitted_curve_ca, 'Color', 'r', 'Parent', trace_axe_ca);  hold on;
         
         % plot(t, trace, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe); hold on;
         % plot(t_ca, trace_ca, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe_ca); hold on;

@@ -37,7 +37,7 @@ fprintf('Loading...\n')
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
 folder_path = 'E:\1_Data\Luorong\430_5min';
-file = '20240430-172306_5min_2';  % must add format.
+file = '[]20240430-172306_5min_merge';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 freq_ca = 10; % Hz
@@ -221,18 +221,15 @@ saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(roi_filename, 'bwmask');
 
-traces_input = zeros(size(traces,1),size(traces,2)-1);
-background = traces(:,end);
-
-% remove background
-for i = 1: size(traces,2)-1
-    traces_input(:,i) = traces(:,i) - background;
-end
-
 t2 = toc(t1); % Get the elapsed time
 fprintf('Saved ROI figure after %d s\n',round(t2))
 
 %% plot stacked figure
+figure()
+subplot(1,2,1)
+stackedplot(t,traces); 
+subplot(1,2,2)
+stackedplot(t_ca,traces_ca); 
 
 
 

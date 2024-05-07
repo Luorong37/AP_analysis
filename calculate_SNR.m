@@ -1,4 +1,4 @@
-function [SNR_trace,fitted_trace] = calculate_SNR(trace, threshold, polarity)
+function SNR_trace = calculate_SNR(trace)
     % Calculates Signal to Noise Ratio (SNR) using LOWESS smoothing
     % and RMSE calculation.
     %
@@ -6,29 +6,13 @@ function [SNR_trace,fitted_trace] = calculate_SNR(trace, threshold, polarity)
     % trace: the input signal trace for a single ROI
     % threshold: the threshold value to exclude peaks in noise calculation
 
+    % extract baseline
+    trace_abs = abs(trace);
+    baseline = trace_abs(trace_abs < prctile(trace_abs,95)); % defined extract 95%
     
-    % % Apply LOWESS smoothing to the trace
-    % smooth_trace = smooth(trace, span, 'lowess');
-
-    % Apply LOWESS smoothing to the trace
-    [~, fitted_trace] = fit_exp1(trace);
-
-    % Compute the residuals (difference between the trace and smoothed version)
-    residuals = trace - fitted_trace;
+    % Calculate std from the baseline
+    noise = std(baseline);
     
-    % Exclude the residuals that correspond to the peaks above the threshold
-    % Only include data below threshold for noise estimation
-    if nargin > 1
-        if polarity == 1
-            residuals = residuals(trace < threshold);
-        elseif polarity == -1
-            residuals = residuals(trace > threshold);
-        end
-    end
-    
-    % Calculate RMSE from the included residuals
-    rmse_noise = sqrt(mean(residuals.^2));
-    
-    % Compute SNR using the peak amplitude divided by RMSE noise    
-    SNR_trace = (trace - fitted_trace) / rmse_noise;
+    % Calculate SNR 
+    SNR_trace = trace / noise;
 end
