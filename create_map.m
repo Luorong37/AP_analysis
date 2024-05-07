@@ -78,11 +78,12 @@ avg_trace = mean(movie_binned,1);
 movie_binned_corrected = movie_binned  ./ fitted_curves';
 
 for i = 1:npixels
-    %fprintf('Processing %d / %d\n', i, npixels );
+    % fprintf('Processing %d / %d\n', i, npixels );
+    % [pixel_trace_corrected, ~] = fit_exp2(movie_binned(i,:)');
     pixel_trace_corrected = movie_binned_corrected(i, :);
     baseline = mean(pixel_trace_corrected) ;
     if strcmp(mode,'voltage')
-        quick_map(i) = max(abs(pixel_trace_corrected - baseline)/baseline) ; % ./ baseline ; % do not judge polarity
+        quick_map(i) = max(abs(pixel_trace_corrected - baseline)/baseline) ; % do not judge polarity
     elseif strcmp(mode,'calcium')
         quick_map(i) = std(pixel_trace_corrected);
     end

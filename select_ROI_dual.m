@@ -166,13 +166,19 @@ end
         % save trace
         trace = mean(movie(mask, :));
         traces = [traces trace'];
+        [trace_corrected, ~] = fit_exp2(trace);
+
         trace_ca = mean(movie_ca(mask, :));
         traces_ca = [traces_ca trace_ca'];
+        [trace_corrected_ca, ~] = fit_exp2(trace_ca);
 
         % plot trace
-        plot(t, trace, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe); hold on;
-        plot(t_ca, trace_ca, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe_ca); hold on;
+        plot(t, trace_corrected, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe); hold on;
+        plot(t_ca, trace_corrected_ca, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe_ca); hold on;
         
+        % plot(t, trace, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe); hold on;
+        % plot(t_ca, trace_ca, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe_ca); hold on;
+        % 
         % Wait for user input
         fig.UserData.space = [];
         waitfor(fig, 'UserData');

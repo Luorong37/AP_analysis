@@ -138,7 +138,7 @@ bin = 4; % defined bin = 4
 map = quick_map;
 fprintf('Finished voltage map\n')
 
-bin_ca = 2; % defined bin_ca = 2
+bin_ca = 4; % defined bin_ca = 4
 [quick_map] = create_map(movie_ca, nrows_ca, ncols_ca, bin_ca,'calcium');
 map_ca = quick_map;
 fprintf('Finished calcium map\n')
@@ -209,7 +209,7 @@ t1 = tic; % Start a timer
 % movie_ca = movie_ca ./ fitted_curves_ca';
 
 % with or wihout Mask and Map
-correct = true; % true for correct offset
+correct = false; % true for correct offset
 [bwmask, bwmask_ca, traces, traces_ca] = select_ROI_dual(movie, movie_ca, ...
     nrows, ncols, t, t_ca, colors, mask, map, mask_ca, map_ca, correct);
 

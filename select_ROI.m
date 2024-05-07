@@ -124,12 +124,15 @@ else
 
         trace = mean(movie(mask, :));
         traces = [traces trace'];
+        [trace_corrected, ~] = fit_exp2(trace);
 
         boundary = bwboundaries(mask);
         if ~isempty(map)
             plot(boundary{1}(:, 2), boundary{1}(:, 1), 'Color', colors(mod(num_roi - 1, length(colors)) + 1, :), 'LineWidth', 1, 'Parent', image_axe);
         end
-        plot(t, trace, 'Color', colors(mod(num_roi - 1, length(colors)) + 1, :), 'Parent', trace_axe);
+        plot(t, trace_corrected, 'Color', colors(mod(num_roi - 1, length(colors)) + 1, :), 'Parent', trace_axe);
+
+        %plot(t, trace, 'Color', colors(mod(num_roi - 1, length(colors)) + 1, :), 'Parent', trace_axe);
 
         % Wait for user input
         fig.UserData = [];
