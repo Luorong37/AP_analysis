@@ -38,12 +38,15 @@ fprintf('Loading...\n')
 % support for folder, .tif, .tiff, .bin.
 folder_path = 'E:\1_Data\Luorong\430_5min';
 file = '20240430-172306_5min_2';  % must add format.
+file_path = fullfile(folder_path, file);
+file_path_ca = [file_path,'_Green']; % defined name 
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 freq_ca = 10; % Hz
+% ↓↓↓↓↓-------------Prompt user for bin-----------------↓↓↓↓↓
+bin = 2;
+bin_ca = 1;
 % -----------------------------------------------------------
-
-bin = 1;
 
 % Define parameters
 peakfinding = false;
@@ -52,7 +55,6 @@ colors = [lines(7);hsv(5);spring(3);winter(3);gray(3)];
 options.colors = colors;
 
 % read path
-file_path = fullfile(folder_path, file);
 [~, file_name, file_extension] = fileparts(file);
 save_path = fullfile(folder_path, [file_name, '_Analysis'], nowtime);
 mkdir(save_path);
@@ -66,10 +68,28 @@ end
 [movie, ncols, nrows, nframes] = load_movie(file_path,file_extension,100000);
 
 if Calcium_analysis
-    file_path_ca = [file_path,'_Green']; % defined name 
     [movie_ca, ncols_ca, nrows_ca, nframes_ca] = load_movie(file_path_ca,file_extension,100);
-
 end
+
+% Bin arrange
+if bin > bin_ca
+    % reshape to high dimension for each bin
+    movie_ca = reshape(movie_ca,bin,ncols_ca/bin,bin,nrows_ca/bin,[]);
+    % average across x y
+    movie_ca = squeeze(mean(mean(movie_ca,1),3));
+    % reshape to binned
+    %movie_ca = reshape(movie_ca,ncols,nrows,nframe);
+elseif bin < bin_ca
+    movie = reshape(movie,bin_ca,ncols/bin_ca,bin_ca,nrows/bin_ca,[]);
+    % average across x y
+    movie = squeeze(mean(mean(movie,1),3));
+    % reshape to binned
+    %movie_binned = reshape(movie_ave,ncols,nrows,nframe);
+end
+    
+
+
+
 
 % Define parameters
 dt = 1 / freq; % Calculate time axis
