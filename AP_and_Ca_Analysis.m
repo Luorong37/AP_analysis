@@ -37,11 +37,13 @@ fprintf('Loading...\n')
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
 folder_path = 'E:\1_Data\Luorong\430_5min';
-file = '[]20240430-172306_5min_merge';  % must add format.
+file = '20240430-172306_5min_2';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 freq_ca = 10; % Hz
 % -----------------------------------------------------------
+
+bin = 1;
 
 % Define parameters
 peakfinding = false;
@@ -121,7 +123,7 @@ if isempty(mask_path)
     mask = []; 
     mask_ca = [];
 else
-    mask_path = 'E:\Data\20230810\20230810-161506recordSCN_Analysis\2023-11-06 09-12-40';
+    mask_path = 'E:\1_Data\Luorong\430_5min\20240430-172447_5min_2_Analysis\2024-05-07 14-56-01';
     mask_filename = fullfile(mask_path, '1_raw_ROI.mat');
     mask = load(mask_filename);
     mask = mask.rois;
@@ -209,9 +211,11 @@ t1 = tic; % Start a timer
 % movie_ca = movie_ca ./ fitted_curves_ca';
 
 % with or wihout Mask and Map
-correct = false; % true for correct offset
+correct = true; % true for correct offset
 [bwmask, bwmask_ca, traces, traces_ca] = select_ROI_dual(movie, movie_ca, ...
-    nrows, ncols, t, t_ca, colors, mask, map, mask_ca, map_ca, correct);
+    nrows, ncols,nrows_ca, ncols_ca, t, t_ca, colors, mask, map, mask_ca, map_ca, correct);
+
+nrois = size(traces,2);
 
 fig_filename = fullfile(save_path, '1_raw_trace.fig');
 png_filename = fullfile(save_path, '1_raw_trace.png');
@@ -219,19 +223,57 @@ roi_filename = fullfile(save_path, '1_raw_ROI.mat');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-save(roi_filename, 'bwmask');
+save(roi_filename, 'bwmask', 'bwmask_ca');
 
 t2 = toc(t1); % Get the elapsed time
 fprintf('Saved ROI figure after %d s\n',round(t2))
 
 %% plot stacked figure
+% figure()
+% subplot(1,2,1)
+% stackedplot(t,traces); 
+% subplot(1,2,2)
+% stackedplot(t_ca,traces_ca);
+
+% 准备列名
+% numTraces = size(traces_ca, 2);  % 获取数据列数
+% columnNames = cell(1, numTraces);
+% for i = 1:numTraces
+%     columnNames{i} = sprintf('trace%d', i);
+% end
+% trace_Time = [t', traces];
+% trace_ca_Time = [t_ca', traces_ca];
+% 
+% trace_table = array2table(trace_Time,'VariableNames', ['Time', columnNames]);
+% trace_ca_table = array2table(trace_ca_Time,'VariableNames', ['Time', columnNames]);
+% 
+% stackedplot(trace_table,trace_ca_table, 'XVariable', 'Time');
+% 创建一个新图形窗口
 figure()
-subplot(1,2,1)
-stackedplot(t,traces); 
-subplot(1,2,2)
-stackedplot(t_ca,traces_ca); 
+linemaxroi = 5;
+plotlines = floor(nrois/linemaxroi);
+if mod(nrois,5) == 0 
+    plotlines = plotlines;
+else
+    plotlines = plotlines + 1;
+end
+for i = 0: nrois-1
+    index = floor(i/plotlines)*plotlines*2 + mod(i,plotlines) + 1;
+    subplot(linemaxroi*2,plotlines,index)
+    plot(t,traces(:,i+1),'r');xlim;
+    subplot(linemaxroi*2,plotlines,index+plotlines)
+    plot(t_ca,traces_ca(:,i+1),'g');xlim;
+    ylabel(sprintf('ROI %d', i + 1))
 
+end
 
+fig_filename = fullfile(save_path, '2_stacked_trace.fig');
+png_filename = fullfile(save_path, '2_stacked_trace.png');
+trace_filename = fullfile(save_path, '2_stacked_trace.mat');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+save(trace_filename, 't','t_ca','traces','traces_ca');
 
 %% Save parameter
 % 定义保存路径和文件名

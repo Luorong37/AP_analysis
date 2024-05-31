@@ -1,5 +1,5 @@
 function [bwmask, bwmask_ca, traces, traces_ca] = select_ROI_dual(movie, movie_ca, ...
-    nrows, ncols, t, t_ca, colors, mask, map, mask_ca, map_ca, correct)
+    nrows, ncols,nrows_ca, ncols_ca, t, t_ca, colors, mask, map, mask_ca, map_ca, correct)
 % 
 % ----------Write by Liu-Yang Luorong and ChatGPT----------
 % ----------POWERED by Zoulab in Peking University----------
@@ -54,7 +54,15 @@ traces = [];
 traces_ca = [];
 bwmask = zeros(nrows,ncols);
 bwmask_ca = zeros(nrows,ncols);
-map_merge = [normalize(map); normalize(map_ca)];
+if size(map) == size(map_ca)
+    map_merge = [normalize(map); normalize(map_ca)];
+elseif size(map,1) > size(map_ca,1)
+    map_ca = imresize(map_ca,[ncols,nrows]);
+    map_merge = [normalize(map); normalize(map_ca)];
+elseif size(map,1) < size(map_ca,1)
+    map = imresize(map,[ncols_ca,nrows_ca]);
+    map_merge = [normalize(map); normalize(map_ca)];
+end
 corrected = false;
 
 x_offset = 0;

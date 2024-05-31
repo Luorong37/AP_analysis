@@ -36,8 +36,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\TEST\25.05.07_CC';
-file = '1416.tif';  % must add format.
+folder_path = 'E:\1_Data\0_luminos-microscopy\Temple\Unknown username\20240516\005821';
+file = 'frames2.bin';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
