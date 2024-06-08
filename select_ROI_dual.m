@@ -52,21 +52,9 @@ end
 % Initialize variables
 traces = [];
 traces_ca = [];
-binv = false;
-binca = false;
 bwmask = zeros(nrows,ncols);
 bwmask_ca = zeros(nrows,ncols);
-if size(map) == size(map_ca)
-    map_merge = [normalize(map); normalize(map_ca)];
-elseif size(map,1) > size(map_ca,1)
-    binca = true;
-    map_ca = imresize(map_ca,[ncols,nrows]);
-    map_merge = [normalize(map); normalize(map_ca)];
-elseif size(map,1) < size(map_ca,1)
-    binv = true;
-    map = imresize(map,[ncols_ca,nrows_ca]);
-    map_merge = [normalize(map); normalize(map_ca)];
-end
+map_merge = [normalize(map); normalize(map_ca)];
 corrected = false;
 
 x_offset = 0;

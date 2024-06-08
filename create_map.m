@@ -68,7 +68,7 @@ movie_5D = reshape(movie,bin,ncols/bin,bin,nrows/bin,[]);
 movie_ave = squeeze(mean(mean(movie_5D,1),3));
 
 % reshape to binned
-movie_binned = reshape(movie_ave,nrows/bin*ncols/bin,nframe);
+movie_binned = reshape(movie_ave,nrows/bin*ncols/bin,[]);
 npixels = size(movie_binned,1);
 
 % Apply avg_intensity curve to correct photobleaching from each pixel (recommend)

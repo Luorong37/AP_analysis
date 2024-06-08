@@ -36,8 +36,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\Luorong\430_5min';
-file = '20240430-172306_5min_2';  % must add format.
+folder_path = 'D:\2024.05.30_dual_P2A';
+file = '20240530-182118POA';  % must add format.
 file_path = fullfile(folder_path, file);
 file_path_ca = [file_path,'_Green']; % defined name 
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
@@ -78,19 +78,21 @@ if bin > bin_ca
     % average across x y
     movie_ca = squeeze(mean(mean(movie_ca,1),3));
     % reshape to binned
-    %movie_ca = reshape(movie_ca,ncols,nrows,nframe);
+    movie_ca = reshape(movie_ca,ncols*nrows,nframes_ca);
+    nrows_ca = nrows_ca/bin;
+    ncols_ca = ncols_ca/bin;
+    fprintf('Voltage signal binned\n');
 elseif bin < bin_ca
     movie = reshape(movie,bin_ca,ncols/bin_ca,bin_ca,nrows/bin_ca,[]);
     % average across x y
     movie = squeeze(mean(mean(movie,1),3));
     % reshape to binned
     %movie_binned = reshape(movie_ave,ncols,nrows,nframe);
+    nrows = nrows/bin_ca;
+    ncols = ncols/bin_ca;
+    fprintf('Calcium signal binned\n');
 end
     
-
-
-
-
 % Define parameters
 dt = 1 / freq; % Calculate time axis
 dt_ca = 1 / freq_ca;
@@ -155,13 +157,13 @@ t2 = toc(t1); % Get the elapsed time
 t1 = tic; % Start a timer
 fprintf('Creating...\n')
 % if SNR is low, please large the bin.
-bin = 4; % defined bin = 4
-[quick_map] = create_map(movie, nrows, ncols, bin);
+mapbin = 4; % defined bin = 4
+[quick_map] = create_map(movie, nrows, ncols, mapbin);
 map = quick_map;
 fprintf('Finished voltage map\n')
 
-bin_ca = 4; % defined bin_ca = 4
-[quick_map] = create_map(movie_ca, nrows_ca, ncols_ca, bin_ca,'calcium');
+mapbin_ca = 4; % defined bin_ca = 4
+[quick_map] = create_map(movie_ca, nrows_ca, ncols_ca, mapbin_ca,'calcium');
 map_ca = quick_map;
 fprintf('Finished calcium map\n')
 
@@ -277,12 +279,15 @@ if mod(nrois,5) == 0
 else
     plotlines = plotlines + 1;
 end
+xlimit = [0,max(max(t_ca),max(t))];
+ylimitv = [min(traces,[],'all'),max(traces,[],'all')];
+ylimitca = [min(traces_ca,[],'all'),max(traces_ca,[],'all')];
 for i = 0: nrois-1
     index = floor(i/plotlines)*plotlines*2 + mod(i,plotlines) + 1;
     subplot(linemaxroi*2,plotlines,index)
-    plot(t,traces(:,i+1),'r');xlim;
+    plot(t,traces(:,i+1),'r');xlim(xlimit);ylim(ylimitv);
     subplot(linemaxroi*2,plotlines,index+plotlines)
-    plot(t_ca,traces_ca(:,i+1),'g');xlim;
+    plot(t_ca,traces_ca(:,i+1),'g');xlim(xlimit);ylim(ylimitca);
     ylabel(sprintf('ROI %d', i + 1))
 
 end

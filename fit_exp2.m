@@ -1,4 +1,4 @@
-function [traces_corrected, fitted_curves] = fit_exp2(traces)
+function [traces_corrected, fitted_curves, params] = fit_exp2(traces)
 % ----------Write by Liu-Yang Luorong and ChatGPT----------
 % ----------POWERED by Zoulab in Peking University----------
 % Date: 23.11.16
@@ -43,6 +43,7 @@ time = 1:size(traces, 1);
 % Initialize corrected traces matrix and fitted curves matrix if required
 traces_corrected = zeros(size(traces));
 fitted_curves = zeros(size(traces));
+params = zeros(size(traces,2),1);
 
 % Perform photobleaching correction for each ROI
 for i = 1:size(traces, 2)
@@ -51,6 +52,7 @@ for i = 1:size(traces, 2)
     
     % Fit the exponential decay model to the trace
     [fit_params,~] = fit(time', current_trace,'exp2'); 
+    params(i) = fit_params;
 
     % Generate the fitted curve from the fit parameters
     fitted_curve = fit_params.a * exp(fit_params.b * time) + fit_params.c * exp(fit_params.d * time);
