@@ -44,6 +44,7 @@ function [bwmask, bwmask_ca, traces, traces_ca] = select_ROI_dual(movie, movie_c
 %
 % See also IMAGESC, IMSHOW, DRAWPOLYGON, POLY2MASK, MEAN.
 
+colors = lines(100);
 
 if nargin < 12
     correct = false;
@@ -181,6 +182,10 @@ end
         plot(t, fitted_curve, 'Color', 'r', 'Parent', trace_axe);  hold on;
         plot(t_ca, fitted_curve_ca, 'Color', 'r', 'Parent', trace_axe_ca);  hold on;
         
+        % 标注ROI编号
+        text(mean(boundary(:, 2)), mean(boundary(:, 1)), num2str(num_roi), 'Color', 'k', 'FontSize', 12, 'Parent', map_axe); hold on;
+        text(mean(boundary_ca(:, 2)), mean(boundary_ca(:, 1)) + ncols, num2str(num_roi), 'Color', 'k', 'FontSize', 12, 'Parent', map_axe); hold on;
+
         % plot(t, trace, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe); hold on;
         % plot(t_ca, trace_ca, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe_ca); hold on;
         % 

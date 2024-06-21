@@ -36,7 +36,7 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'D:\2024.05.30_dual_P2A';
+folder_path = 'G:\2024.05.30_dual_P2A';
 file = '20240530-182118POA';  % must add format.
 file_path = fullfile(folder_path, file);
 file_path_ca = [file_path,'_Green']; % defined name 
@@ -283,13 +283,13 @@ xlimit = [0,max(max(t_ca),max(t))];
 ylimitv = [min(traces,[],'all'),max(traces,[],'all')];
 ylimitca = [min(traces_ca,[],'all'),max(traces_ca,[],'all')];
 for i = 0: nrois-1
-    index = floor(i/plotlines)*plotlines*2 + mod(i,plotlines) + 1;
-    subplot(linemaxroi*2,plotlines,index)
+    % lines passed + corss index
+    index = floor(i/linemaxroi)*linemaxroi*2 + mod(i,linemaxroi) + 1;
+    subplot(plotlines*2,linemaxroi,index)
     plot(t,traces(:,i+1),'r');xlim(xlimit);ylim(ylimitv);
-    subplot(linemaxroi*2,plotlines,index+plotlines)
+    subplot(plotlines*2,linemaxroi,index+linemaxroi)
     plot(t_ca,traces_ca(:,i+1),'g');xlim(xlimit);ylim(ylimitca);
     ylabel(sprintf('ROI %d', i + 1))
-
 end
 
 fig_filename = fullfile(save_path, '2_stacked_trace.fig');
@@ -375,10 +375,10 @@ figure()
 ylimitv = [min(voltage_accumulated,[],'all'),max(voltage_accumulated,[],'all')];
 ylimitca = [min(calcium_normalized,[],'all'),max(calcium_normalized,[],'all')];
 for i = 0: nrois-1
-    index = floor(i/plotlines)*plotlines*2 + mod(i,plotlines) + 1;
-    subplot(linemaxroi*2,plotlines,index)
+    index = floor(i/linemaxroi)*linemaxroi*2 + mod(i,linemaxroi) + 1;
+    subplot(plotlines*2,linemaxroi,index)
     plot(voltage_accumulated(:,i+1),'r');ylim(ylimitv);
-    subplot(linemaxroi*2,plotlines,index+plotlines)
+    subplot(plotlines*2,linemaxroi,index+linemaxroi)
     plot(calcium_normalized(:,i+1),'g');ylim(ylimitca);
     ylabel(sprintf('ROI %d', i+1))
 end
@@ -404,8 +404,8 @@ end
 random_corrtest = zeros(nrois);
 random_speartest = zeros(nrois);
 
-for i = 1:length(simuset)
-    for j = 1:length(simuset)
+for i = 1:nrois
+    for j = 1:nrois
         if i ~= j
             random_corrtest(i, j) = corr(voltage_accumulated(:,i), calcium_normalized(:,j));
             random_speartest(i, j) = corr(voltage_accumulated(:,i), calcium_normalized(:,j), 'Type', 'Spearman');
@@ -416,14 +416,21 @@ end
 random_corrtest(random_corrtest == 0) = [];
 random_speartest(random_speartest == 0) = [];
 
+% Perform significance tests
+[~, p_corr] = ttest2(paired_corrtest, random_corrtest);
+[~, p_spcorr] = ttest2(paired_spcorrtest, random_speartest);
+
+% Create figure and boxplots
 figure;
 subplot(1, 2, 1);
 boxplot([paired_corrtest(:); random_corrtest(:)], [repmat({'Paired'}, size(paired_corrtest(:))); repmat({'Random'}, size(random_corrtest(:)))]);
 title('Correlation');
+text(1.5, max([paired_corrtest(:); random_corrtest(:)])*0.95, sprintf('p = %.3f', p_corr), 'HorizontalAlignment', 'center');
 
 subplot(1, 2, 2);
 boxplot([paired_spcorrtest(:); random_speartest(:)], [repmat({'Paired'}, size(paired_spcorrtest(:))); repmat({'Random'}, size(random_speartest(:)))]);
 title('Spearman Correlation');
+text(1.5, max([paired_spcorrtest(:); random_speartest(:)])*0.95, sprintf('p = %.3f', p_spcorr), 'HorizontalAlignment', 'center');
 
 fig_filename = fullfile(save_path, '4_Correlation_analysis.fig');
 png_filename = fullfile(save_path, '4_Correlation_analysis.png');
@@ -432,6 +439,46 @@ mat_filename = fullfile(save_path, '4_Correlation_analysis.mat');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(mat_filename,'paired_corrtest','random_corrtest','paired_spcorrtest','random_speartest');
+
+
+
+%% Heat Map
+heatmap_corrtest = zeros(nrois);
+heatmap_speartest = zeros(nrois);
+
+for i = 1:nrois
+    for j = 1:nrois
+        heatmap_corrtest(i, j) = corr(voltage_accumulated(:,i), calcium_normalized(:,j));
+        heatmap_speartest(i, j) = corr(voltage_accumulated(:,i), calcium_normalized(:,j), 'Type', 'Spearman');
+    end
+end
+
+figure;
+subplot(1, 2, 1);
+imagesc(heatmap_corrtest);
+colorbar;
+colormap('jet');  % 设定颜色图
+axis square;
+xlabel('ROI Index');
+ylabel('ROI Index');
+title('Correlation Coefficient Heatmap');
+
+subplot(1, 2, 2);
+imagesc(heatmap_speartest);
+colorbar;
+colormap('jet');  % 设定颜色图
+axis square;
+xlabel('ROI Index');
+ylabel('ROI Index');
+title('Spearman Correlation Coefficient Heatmap');
+
+fig_filename = fullfile(save_path, '5_Correlation_heatmap.fig');
+png_filename = fullfile(save_path, '5_Correlation_heatmap.png');
+mat_filename = fullfile(save_path, '5_Correlation_heatmap.mat');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+save(mat_filename,'heatmap_corrtest',"heatmap_speartest");
 
 
 %% Save parameter
