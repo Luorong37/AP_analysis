@@ -425,9 +425,9 @@ subplot(1, 2, 2);
 boxplot([paired_spcorrtest(:); random_speartest(:)], [repmat({'Paired'}, size(paired_spcorrtest(:))); repmat({'Random'}, size(random_speartest(:)))]);
 title('Spearman Correlation');
 
-fig_filename = fullfile(save_path, '4_Corelation_analysis.fig');
-png_filename = fullfile(save_path, '4_Corelation_analysis.png');
-mat_filename = fullfile(save_path, '4_Corelation_analysis.mat');
+fig_filename = fullfile(save_path, '4_Correlation_analysis.fig');
+png_filename = fullfile(save_path, '4_Correlation_analysis.png');
+mat_filename = fullfile(save_path, '4_Correlation_analysis.mat');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
