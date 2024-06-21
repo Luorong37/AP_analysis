@@ -300,6 +300,140 @@ saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(trace_filename, 't','t_ca','traces','traces_ca');
 
+
+%% Accumulate Voltage signal
+% 显示示例轨迹
+% sele = 8;
+% figure;
+% subplot(1, 2, 1);
+% trace = -traces(:, sele);
+% trace_nol = normalize(trace,'range');
+% plot(trace_nol,'Color','r');
+% title('Normalized Voltage');
+% subplot(1, 2, 2);
+% trace_ca = traces_ca(:, sele);
+% trace_ca_nol = normalize(trace_ca,'range');
+% plot(trace_ca_nol, 'Color', 'g');
+% title('Normalized Calcium Signaling');
+
+% 累积电压信号
+% set parameter
+g = 20;
+k = 0.8;
+gthr = 0.5;
+kth = 0.21;
+
+ftest = @(x, v) x + (g * max(v - gthr, 0) - k * max(x - kth, 0)) * 1/200;
+
+voltage_accumulated = cell(1, nrois);
+calcium_normalized = zeros(size(traces_ca));
+
+for i = 1:nrois
+    % Normalize voltage and calcium signals
+    volsele = normalize(-traces(:, i),'range');
+    calsele = normalize(traces_ca(:, i),'range');
+    
+    % Initialize accumulation array
+    volaccum = zeros(length(volsele), 1);
+
+    % Accumulate voltage signal
+    for j = 2:length(volsele)
+        volaccum(j) = ftest(volaccum(j-1), volsele(j));
+    end
+
+    % 计算滑动窗口大小
+    window_size = round(length(volaccum) / length(calsele));
+    if window_size < 1
+        window_size = 1;
+    end
+    
+    % 滑动窗口平均
+    volaccum_smoothed = movmean(volaccum, window_size);
+    
+    % 插值使得长度相同
+    volaccum_resampled = interp1(linspace(1, length(volaccum), length(volaccum)), volaccum_smoothed, linspace(1, length(volaccum), length(calsele)))';
+
+   % 归一化插值后的信号
+    voltage_accumulated{i} = normalize(volaccum_resampled, 'range');
+    calcium_normalized(:,i) = calsele;
+end
+
+voltage_accumulated = cell2mat(voltage_accumulated);
+
+% 保存累积电压信号,和钙对比结果
+% for i = 1:length(calculated_set)
+%     fig = figure;
+%     hold on;
+%     plot(t_ca,voltage_accumulated{i}, 'b');
+%     plot(t_ca,voltage_accumulated{i} + 1, 'r');
+%     legend({'Integral Voltage', 'Calcium'});
+%     hold off;
+% end
+
+figure()
+
+ylimitv = [min(voltage_accumulated,[],'all'),max(voltage_accumulated,[],'all')];
+ylimitca = [min(calcium_normalized,[],'all'),max(calcium_normalized,[],'all')];
+for i = 0: nrois-1
+    index = floor(i/plotlines)*plotlines*2 + mod(i,plotlines) + 1;
+    subplot(linemaxroi*2,plotlines,index)
+    plot(voltage_accumulated(:,i+1),'r');ylim(ylimitv);
+    subplot(linemaxroi*2,plotlines,index+plotlines)
+    plot(calcium_normalized(:,i+1),'g');ylim(ylimitca);
+    ylabel(sprintf('ROI %d', i+1))
+end
+
+
+fig_filename = fullfile(save_path, '3_Integral_trace.fig');
+png_filename = fullfile(save_path, '3_Integral_trace.png');
+trace_filename = fullfile(save_path, '3_Integral_trace.mat');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+save(trace_filename,'voltage_accumulated','calcium_normalized' );
+
+%% 统计分析
+paired_corrtest = zeros(1,nrois);
+paired_spcorrtest = zeros(1,nrois);
+for i = 1:nrois
+    paired_corrtest(i) = corr(voltage_accumulated(:,i),calcium_normalized(:,i));
+    paired_spcorrtest(i) = corr(voltage_accumulated(:,i),calcium_normalized(:,i),'Type', 'Spearman');
+
+end
+
+random_corrtest = zeros(nrois);
+random_speartest = zeros(nrois);
+
+for i = 1:length(simuset)
+    for j = 1:length(simuset)
+        if i ~= j
+            random_corrtest(i, j) = corr(voltage_accumulated(:,i), calcium_normalized(:,j));
+            random_speartest(i, j) = corr(voltage_accumulated(:,i), calcium_normalized(:,j), 'Type', 'Spearman');
+        end
+    end
+end
+
+random_corrtest(random_corrtest == 0) = [];
+random_speartest(random_speartest == 0) = [];
+
+figure;
+subplot(1, 2, 1);
+boxplot([paired_corrtest(:); random_corrtest(:)], [repmat({'Paired'}, size(paired_corrtest(:))); repmat({'Random'}, size(random_corrtest(:)))]);
+title('Correlation');
+
+subplot(1, 2, 2);
+boxplot([paired_spcorrtest(:); random_speartest(:)], [repmat({'Paired'}, size(paired_spcorrtest(:))); repmat({'Random'}, size(random_speartest(:)))]);
+title('Spearman Correlation');
+
+fig_filename = fullfile(save_path, '4_Corelation_analysis.fig');
+png_filename = fullfile(save_path, '4_Corelation_analysis.png');
+mat_filename = fullfile(save_path, '4_Corelation_analysis.mat');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+save(mat_filename,'paired_corrtest','random_corrtest','paired_spcorrtest','random_speartest');
+
+
 %% Save parameter
 % 定义保存路径和文件名
 save_filename = fullfile(save_path, '-1_workspace_variables.mat');

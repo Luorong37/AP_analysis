@@ -36,8 +36,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\0_luminos-microscopy\Temple\Unknown username\20240516\005821';
-file = 'frames2.bin';  % must add format.
+folder_path = 'E:\1_Data\Luorong\20240619_DUEPLEX';
+file = 'cortex+gabazine';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
@@ -50,7 +50,7 @@ mkdir(save_path);
 
 % when read a folder
 if isfolder(file_path)
-    file_extension = 'tif';
+    file_extension = '.tif';
 end
 
 % Load image file
