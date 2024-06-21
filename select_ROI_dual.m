@@ -54,7 +54,7 @@ traces = [];
 traces_ca = [];
 bwmask = zeros(nrows,ncols);
 bwmask_ca = zeros(nrows,ncols);
-map_merge = [normalize(map); normalize(map_ca)];
+map_merge = [normalize(map,'range'); normalize(map_ca,'range')];
 corrected = false;
 
 x_offset = 0;
