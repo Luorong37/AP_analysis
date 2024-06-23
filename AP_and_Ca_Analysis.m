@@ -102,7 +102,7 @@ t_ca = (1:nframes_ca) * dt_ca;
 % Save code
 code_path = fullfile(save_path,'Code');
 mkdir(code_path);
-currentScript = which("AP_Analysis.m");
+currentScript = which("AP_and_Ca_Analysis.m");
 
 % 获取当前脚本依赖的所有文件
 [requiredFiles, ~] = matlab.codetools.requiredFilesAndProducts(currentScript);
@@ -392,6 +392,7 @@ saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(trace_filename,'voltage_accumulated','calcium_normalized' );
 
+
 %% 统计分析
 paired_corrtest = zeros(1,nrois);
 paired_spcorrtest = zeros(1,nrois);
@@ -440,6 +441,35 @@ saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(mat_filename,'paired_corrtest','random_corrtest','paired_spcorrtest','random_speartest');
 
+%% save trace for each ROI
+traces_path = fullfile(save_path,'eachROI');
+mkdir(traces_path);
+
+for i = 1:nrois
+    % plot aligned each trace of each ROI
+    fig = figure();
+    subplot(3,1,1);
+    plot(t,traces(:,i),'r');xlim(xlimit);
+    ylabel('Original Voltage')
+    title(sprintf('ROI %d',i),sprintf('Correlation effector = %f',paired_corrtest(i)))
+    subplot(3,1,2);
+    plot(t_ca,voltage_accumulated(:,i),'r');xlim(xlimit);
+    ylabel('Integral Voltage')
+    subplot(3,1,3);
+    plot(t_ca,calcium_normalized(:,i),'g');xlim(xlimit);
+    ylabel('Calcium')
+    xlabel('Time')
+    
+    % save the figure
+    fig_filename = fullfile(traces_path, sprintf('ROI %d.fig', i));
+    png_filename = fullfile(traces_path, sprintf('ROI %d.png', i));
+    saveas(gcf, fig_filename, 'fig');
+    saveas(gcf, png_filename, 'png');
+    close;
+end
+
+print('Traces of each ROI are saved\n')
+
 
 
 %% Heat Map
@@ -459,8 +489,8 @@ imagesc(heatmap_corrtest);
 colorbar;
 colormap('jet');  % 设定颜色图
 axis square;
-xlabel('ROI Index');
-ylabel('ROI Index');
+ylabel('Voltage Index');
+xlabel('Calcium Index');
 title('Correlation Coefficient Heatmap');
 
 subplot(1, 2, 2);
@@ -468,8 +498,8 @@ imagesc(heatmap_speartest);
 colorbar;
 colormap('jet');  % 设定颜色图
 axis square;
-xlabel('ROI Index');
-ylabel('ROI Index');
+ylabel('Voltage Index');
+xlabel('Calcium Index');
 title('Spearman Correlation Coefficient Heatmap');
 
 fig_filename = fullfile(save_path, '5_Correlation_heatmap.fig');
