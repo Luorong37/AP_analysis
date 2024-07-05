@@ -55,14 +55,16 @@ colors = [lines(7);hsv(5);spring(3);winter(3);gray(3)];
 options.colors = colors;
 
 % read path
+file_path = fullfile(folder_path, file);
 [~, file_name, file_extension] = fileparts(file);
-save_path = fullfile(folder_path, [file_name, '_Analysis'], nowtime);
-mkdir(save_path);
-
 % when read a folder
-if isempty(file_extension)
+if isfolder(file_path)
     file_extension = 'tif';
 end
+
+% create a folder for analysis
+save_path = fullfile(folder_path, [file_name, '_Analysis'], nowtime);
+mkdir(save_path);
 
 % Load image file
 [movie, ncols, nrows, nframes] = load_movie(file_path,file_extension,100000);
