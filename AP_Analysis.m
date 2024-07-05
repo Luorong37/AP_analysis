@@ -36,8 +36,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\Luorong\20240619_DUEPLEX';
-file = 'cortex+gabazine';  % must add format.
+folder_path = 'E:\1_Data\zsy\20240627 608\slice3';
+file = 'mpImage(2).tif';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------

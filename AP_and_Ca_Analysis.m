@@ -468,7 +468,7 @@ for i = 1:nrois
     close;
 end
 
-print('Traces of each ROI are saved\n')
+fprintf('Traces of each ROI are saved\n')
 
 
 

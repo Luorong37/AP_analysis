@@ -55,7 +55,7 @@ traces = [];
 traces_ca = [];
 bwmask = zeros(nrows,ncols);
 bwmask_ca = zeros(nrows,ncols);
-map_merge = [normalize(map,'range'); normalize(map_ca,'range')];
+map_merge = [normalize_matrix(map); normalize_matrix(map_ca)];
 corrected = false;
 
 x_offset = 0;
@@ -210,4 +210,12 @@ elseif strcmp(event.Key, 'return')
     fig.UserData.space = 'stop';
 end
 
+end
+
+function matrix_normalized = normalize_matrix(matrix)
+min_value = min(matrix(:));
+max_value = max(matrix(:));
+
+% 全局归一化矩阵到 [0, 1]
+matrix_normalized = (matrix - min_value) / (max_value - min_value);
 end
