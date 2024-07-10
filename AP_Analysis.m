@@ -36,8 +36,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\zsy\20240627 608\slice3';
-file = 'mpImage(2).tif';  % must add format.
+folder_path = 'E:\1_Data\Luorong\20240709_optopatch\';
+file = 'Aftersti90%4';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
@@ -45,17 +45,17 @@ freq = 400; % Hz
 % read path
 file_path = fullfile(folder_path, file);
 [~, file_name, file_extension] = fileparts(file);
-% when read a folder
-if isfolder(file_path)
-    file_extension = 'tif';
-end
+% % when read a folder
+% if isfolder(file_path)
+%     file_extension = '.tif';
+% end
 
 % create a folder for analysis
 save_path = fullfile(folder_path, [file_name, '_Analysis'], nowtime);
 mkdir(save_path);
 
 % Load image file
-[movie, ncols, nrows, nframes] = load_movie(file_path,file_extension,100000);
+[movie, ncols, nrows, nframes] = load_movie(file_path,100000);
 
 % Define parameters
 dt = 1 / freq; % Calculate time axis
@@ -68,10 +68,8 @@ options.colors = colors;
 code_path = fullfile(save_path,'Code');
 mkdir(code_path);
 currentScript = which("AP_Analysis.m");
-
 % 获取当前脚本依赖的所有文件
 [requiredFiles, ~] = matlab.codetools.requiredFilesAndProducts(currentScript);
-
 % 复制当前脚本和所有依赖文件到目标文件夹
 for k = 1:length(requiredFiles)
     [~, name, ext] = fileparts(requiredFiles{k});
