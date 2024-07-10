@@ -1,4 +1,4 @@
-function create_tiff_stack(file_path, batch_size, max_file_size)
+function create_tiff_stack(file_path, save_path, batch_size, max_file_size)
     % CREATE_TIFF_STACK Loads single TIFF images and saves them as a stack of TIFF images.
     % The resulting stack is split into multiple files if the size exceeds max_file_size.
     %
@@ -9,12 +9,19 @@ function create_tiff_stack(file_path, batch_size, max_file_size)
     %
     % Example:
     % create_tiff_stack('path/to/tiff/files/', 500, 4*1024^3);
+    
+    [file_dir, file_base, ~] = fileparts(file_path);
+    stack_dir = file_dir;
 
     if nargin < 2
+        save_path = stack_dir;
+    end
+
+    if nargin < 3
         batch_size = 4000;
     end
-    if nargin < 3
-        max_file_size = 4 * 1024^3; % 4GB
+    if nargin < 4
+        max_file_size = 3.6 * 1024^3; % 4GB
     end
 
     % Get all TIFF file names in folder
@@ -39,22 +46,21 @@ function create_tiff_stack(file_path, batch_size, max_file_size)
     prev_percentage = -1;
     
     % Get directory path and base name for the stack files
-    [file_dir, file_base, ~] = fileparts(file_path);
-    stack_dir = file_dir;
     stack_base = [file_base '_stack'];
     
-    tiff_file_name = fullfile(stack_dir, sprintf('%s%02d.tif', stack_base, file_counter));
-    t = Tiff(tiff_file_name, 'w');
-    
+    tiff_file_name = fullfile(save_path, sprintf('%s%02d.tif', stack_base, file_counter));
+    t = Tiff(tiff_file_name, 'w8'); % 'w' might can not save stack that more than 4GB.
+    current_file_size = 0;
+
     % Loop through all TIF files and create TIFF stack
     tic;
     while batch_start <= num_files
         % Load batch of TIF files
         batch_end = min(batch_start + batch_size - 1, num_files);
         batch_range = batch_start:batch_end;
-        current_file_size = 0;
 
         for i = batch_range
+            try
             % Read the current image
             current_image = imread(fullfile(file_path, file_names{i}));
             current_image = uint16(current_image);  % Convert to appropriate type
@@ -62,21 +68,23 @@ function create_tiff_stack(file_path, batch_size, max_file_size)
             % Get the size of the current image
             im_info = whos('current_image');
             im_size = im_info.bytes;
-
+            
             % Check if adding this image exceeds max_file_size
             if current_file_size + im_size > max_file_size
                 t.close();
                 file_counter = file_counter + 1;
-                tiff_file_name = fullfile(stack_dir, sprintf('%s%02d.tif', stack_base, file_counter));
-                t = Tiff(tiff_file_name, 'w');
+                tiff_file_name = fullfile(save_path, sprintf('%s%02d.tif', stack_base, file_counter));
+                t = Tiff(tiff_file_name, 'w8');
                 current_file_size = 0;
                 stack_counter = 1;
+                fprintf('Creating new stack file: %s\n', tiff_file_name);
             end
 
             % Write the current image to the TIFF stack
             if stack_counter > 1
                 t.writeDirectory();
             end
+
             t.setTag('ImageLength', nrows);
             t.setTag('ImageWidth', ncols);
             t.setTag('Photometric', Tiff.Photometric.MinIsBlack);
@@ -100,6 +108,11 @@ function create_tiff_stack(file_path, batch_size, max_file_size)
                 fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
                     i - 1, num_files, current_percentage, remaining);
                 prev_percentage = current_percentage;
+            end
+            catch ME
+                t.close()
+                fprintf('Error processing file %s: %s\n', file_names{i}, ME.message);
+                continue;
             end
         end
 
