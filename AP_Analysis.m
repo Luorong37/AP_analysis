@@ -81,6 +81,13 @@ fprintf('All codes have been copied to %s\n', code_path);
 
 % ----------------------Optional part------------------------
 
+% Save folder 
+save_stack = true;
+if save_stack
+    create_tiff_stack(file_path);
+end
+
+
 % Save loaded movie (optional)
 save_movie = false; % defined as false
 if save_movie
