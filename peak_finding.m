@@ -1,4 +1,5 @@
-function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = peak_finding(traces_corrected, t, colors, nroi)
+function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = ...
+                                            peak_finding(traces_corrected)
     %PEAK_FINDING 寻找给定ROI信号中的峰值。
     %
     %   [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = 
@@ -23,16 +24,17 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
 
 
     % 初始化变量
-    peak_polarity = zeros(1,nroi);
-    peak_threshold = zeros(1,nroi);
-    peaks_amplitude = cell(1, nroi);
-    peaks_index = cell(1, nroi);
-    peaks_sensitivity = cell(1, nroi);
+    nrois = size(traces_corrected,2);
+    peak_polarity = zeros(1,nrois);
+    peak_threshold = zeros(1,nrois);
+    peaks_amplitude = cell(1, nrois);
+    peaks_index = cell(1, nrois);
+    peaks_sensitivity = cell(1, nrois);
     MinPeakProminence_factor = 0.4; % 定义最小峰值显著性因子
     figure; 
     set(gcf,'Position',get(0,'Screensize'));
     % 对每个ROI进行峰值检测
-    for i = 1:nroi
+    for i = 1:nrois
         clf;
 
         % 确定峰值极性
@@ -46,18 +48,19 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
         % plot trace
         
         plot_trace = traces_corrected(:,i) * peak_polarity(i);
-        plot(t, plot_trace, 'Color', colors(i,:)); hold on;
+        plot(plot_trace, 'Color', colors(i,:)); hold on;
         title(sprintf('ROI %d', i));
 
         % set threshold
         [~, peak_threshold(i)] = ginput(1);
-        plot(t,ones(1,length(t)).*peak_threshold(i),'Color',colors(i,:),'LineWidth',2);
+        plot(ones(1,peak_threshold).*peak_threshold(i),'Color',colors(i,:),'LineWidth',2);
         hold off;
         
 
         % 寻找峰值
         MinPeakProminence = (max(plot_trace)-mean(plot_trace)) * MinPeakProminence_factor;
-        [peak_y, peak_x] = findpeaks(plot_trace, 'MinPeakProminence', MinPeakProminence, 'MinPeakHeight', peak_threshold(i));
+        [peak_y, peak_x] = findpeaks(plot_trace, 'MinPeakProminence', ...
+            MinPeakProminence, 'MinPeakHeight', peak_threshold(i));
         peaks_index{i} = peak_x;
         current_trace = traces_corrected(:,i);
         peaks_amplitude{i} = current_trace(peak_x);

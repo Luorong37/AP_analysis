@@ -173,10 +173,8 @@ save(roi_filename, 'rois');
 % plot
 fig = figure();
 set(fig,'Position',get(0,'Screensize'));
-fit_axe = subplot(3,1,1);
-fited_axe = subplot(3,1,2);
-SNR_axe = subplot(3,1,3);
-traces_SNR = zeros(size(traces_corrected));
+fit_axe = subplot(2,1,1);
+fited_axe = subplot(2,1,2);
 
 % plot
 for i = 1: size(traces_corrected,2)
@@ -186,16 +184,12 @@ for i = 1: size(traces_corrected,2)
     hold(fit_axe, 'on');
     plot(t,traces_corrected(:,i),'Color',colors(i,:),'Parent',fited_axe);
     hold(fited_axe, 'on');
-    traces_SNR(:,i) = calculate_SNR(traces_corrected(:,i));
-    plot(t,traces_SNR(:,i),'Color',colors(i,:),'Parent',SNR_axe);
-    hold(SNR_axe, 'on');
 end
 hold off;
 
 % note
 title(fit_axe, 'Original and Fitted Curves');
 title(fited_axe, 'Corrected Traces');
-title(SNR_axe, 'SNR Traces');
 legend(fit_axe, 'Original Trace', 'Fitted Curve');
 
 fig_filename = fullfile(save_path, '2_fitted_trace.fig');
@@ -206,13 +200,14 @@ saveas(gcf, png_filename, 'png');
 
 fprintf('Finished expotential fit\n')
 
-%% Peak finding (optional)
+%% Peak finding
 peakfinding = true; % defined as true
 
 if peakfinding
 
     AP_window_width = 40 ; % number of frames to for AP window (defined = 40)
-    [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = peak_finding(traces_corrected, t, colors, nrois);
+    [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = ...
+                                            peak_finding(traces_corrected);
 
     % plot trace
     fig = figure();
