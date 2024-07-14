@@ -239,7 +239,8 @@ saveas(gcf, png_filename, 'png');
 fig = figure();
 set(fig,'Position',get(0,'Screensize'));
 sentivity_trace = zeros(nframes,nrois);
-SNR_trace = zeros(nframes,nrois);
+SNR_traces = zeros(nframes,nrois);
+baselines = zeros(nframes,nrois);
 
  % plot sensitivity
 sensitivity_axe = subplot(1,2,1);
@@ -256,24 +257,26 @@ SNR_axe = subplot(1,2,2);
 title('SNR');
 hold on;
 
+
 for i = 1 : nrois
     % Calculate SNR
     if peakfinding
-        SNR_trace(:,i)  = calculate_SNR(traces_corrected(:,i),peaks_index{i},AP_window_width);
+        [SNR_traces(:,i),baselines(i)]  = calculate_SNR(traces_corrected(:,i),peaks_index{i},AP_window_width);
     else
-        SNR_trace(:,i)  = calculate_SNR(traces_corrected(:,i));
+        [SNR_traces(:,i),baselines(i)]  = calculate_SNR(traces_corrected(:,i));
     end
-    [~] = offset_plot(SNR_trace,t);
+    [~] = offset_plot(SNR_traces,t);
 end
 
 fig_filename = fullfile(save_path, '4_SNR.fig');
 png_filename = fullfile(save_path, '4_SNR.png');
 trace_filename = fullfile(save_path, '4_SNR.mat');
 
-save(trace_filename,"sentivity_trace",'SNR_trace');
+save(trace_filename,"sentivity_trace",'SNR_traces');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-%% Statistic AP
+
+% Statistic AP
 AP_list = cell(1, nrois);
 each_AP = struct('Trace', [], 'AP_number', [], 'AP_index',[],'AP_amp',[], ...
     'Amplitude', [],'FWHM',[], 'AP_sensitivity',[],'Sensitivity',[], ...
@@ -284,10 +287,9 @@ for i = 1:nrois % i for trace
     peaks_num = length(peaks_index{i});
     peaks_index_i = peaks_index{i};
     peaks_amp_i = peaks_amplitude{i};
-    each_trace_amp = traces(:,i)*peaks_polarity(i);
+    each_trace_amp = SNR_traces(:,i)*peaks_polarity(i);
     each_trace_sensitivity = sentivity_trace(:,i);
-    each_trace_SNR = SNR_trace(:,i);
-    each_trace_smooth = fitted_trace(:,i);
+    each_trace_SNR = SNR_traces(:,i);
     AP_list{i} = cell(1, length(peaks_index{i}));
 
     % each peak
@@ -304,33 +306,29 @@ for i = 1:nrois % i for trace
         AP_amp = each_trace_amp(AP_start_index:AP_end_index)';
         AP_sensitivity = each_trace_sensitivity(AP_start_index:AP_end_index)';
         AP_SNR = each_trace_SNR(AP_start_index:AP_end_index)';
-        AP_smooth = each_trace_smooth(AP_start_index:AP_end_index)';
 
         % fill NaN
         if 0 > peak_index_ij - AP_window_width
             AP_amp = [NaN(1,0 - (peak_index_ij - AP_window_width)+1), AP_amp];
             AP_sensitivity = [NaN(1,0 - (peak_index_ij - AP_window_width)+1),AP_sensitivity];
             AP_SNR = [NaN(1,0 - (peak_index_ij - AP_window_width)+1),AP_SNR];
-            AP_smooth = [NaN(1,0 - (peak_index_ij - AP_window_width)+1),AP_smooth];
         elseif nframes < peak_index_ij + AP_window_width
             AP_amp = [AP_amp, NaN(1,peak_index_ij + AP_window_width - nframes)];
             AP_sensitivity = [AP_sensitivity, NaN(1,peak_index_ij + AP_window_width - nframes)];
             AP_SNR = [AP_SNR, NaN(1,peak_index_ij + AP_window_width - nframes)];
-            AP_smooth = [AP_smooth, NaN(1,peak_index_ij + AP_window_width - nframes)];
         end
 
         % Calculate;
         Amplitude = abs(peak_amp_ij);
         Sensitivity = AP_sensitivity(AP_window_width+1) - 1 ;
         SNR = abs(AP_SNR(AP_window_width+1));
-        baseline = mean(AP_smooth,'omitnan');
-        FWHM = calculate_FWHM(AP_sensitivity, dt, AP_window_width, baseline, peaks_polarity(i));
+        FWHM = calculate_FWHM(AP_amp, dt, AP_window_width, baselines(i), peaks_polarity(i));
 
         % save AP data
         each_AP = struct('Trace', i, 'AP_number', j, 'AP_index',AP_index, ...
             'AP_amp',AP_amp,'Amplitude', Amplitude,'FWHM',FWHM, ...
             'AP_sensitivity',AP_sensitivity,'Sensitivity',Sensitivity, ...
-            'AP_SNR', AP_SNR, 'SNR', SNR,'baseline',baseline);
+            'AP_SNR', AP_SNR, 'SNR', SNR);
         AP_list{i}{j} = each_AP;
     end
 end
@@ -397,7 +395,7 @@ set(gcf,'Position',get(0,'Screensize'));
 plot_cols = sum(cellfun('isempty',AP_list)==0)+1;
 plot_col = 0;
 
-for i = 1:length(rois)-1 % i for trace
+for i = 1:nrois % i for trace
     %判断是否为有AP的trace
     peaks_num = length(peaks_index{i});
     if cellfun('isempty',AP_list{i}) == 0
@@ -442,7 +440,9 @@ png_filename = fullfile(save_path, '5_average_AP_sensitivity.png');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-%% Plot average AP SNR
+
+
+% Plot average AP SNR
 % plot
 figure();
 title('Statistic AP');
@@ -454,7 +454,7 @@ plot_col = 0;
 subplot(1,plot_cols,plot_cols);
 
 
-for i = 1:length(rois)-1
+for i = 1:nrois
     %判断是否为有AP的trace
     peaks_num = length(peaks_index{i});
     if cellfun('isempty',AP_list{i}) == 0
@@ -531,6 +531,44 @@ png_filename = fullfile(save_path, '7_firing_rate.png');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
+
+%% Heat Map
+heatmap_corrtest = zeros(nrois);
+heatmap_speartest = zeros(nrois);
+
+for i = 1:nrois
+    for j = 1:nrois
+        heatmap_corrtest(i, j) = corr(SNR_traces(:,i), SNR_traces(:,j));
+        heatmap_speartest(i, j) = corr(SNR_traces(:,i), SNR_traces(:,j), 'Type', 'Spearman');
+    end
+end
+
+figure;
+subplot(1, 2, 1);
+imagesc(heatmap_corrtest);
+colorbar;
+colormap('jet');  % 设定颜色图
+axis square;
+ylabel('Voltage Index 1');
+xlabel('Voltage Index 2');
+title('Correlation Coefficient Heatmap');
+
+subplot(1, 2, 2);
+imagesc(heatmap_speartest);
+colorbar;
+colormap('jet');  % 设定颜色图
+axis square;
+ylabel('Voltage Index 1');
+xlabel('Voltage Index 2');
+title('Spearman Correlation Coefficient Heatmap');
+
+fig_filename = fullfile(save_path, '8_Correlation_heatmap.fig');
+png_filename = fullfile(save_path, '8_Correlation_heatmap.png');
+mat_filename = fullfile(save_path, '8_Correlation_heatmap.mat');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+save(mat_filename,'heatmap_corrtest',"heatmap_speartest");
 
 %% Save parameter
 % 定义保存路径和文件名

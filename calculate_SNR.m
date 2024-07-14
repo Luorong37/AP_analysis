@@ -1,4 +1,4 @@
-function SNR_trace = calculate_SNR(trace,peak_index,AP_window_width)
+function [SNR_trace,avg_baseline] = calculate_SNR(trace,peak_index,AP_window_width)
     % Calculates Signal to Noise Ratio (SNR) using LOWESS smoothing
     % and RMSE calculation.
     %
@@ -24,12 +24,12 @@ function SNR_trace = calculate_SNR(trace,peak_index,AP_window_width)
         
         % 提取离群值
         baseline = trace(inlierIndices);
-
+        avg_baseline = mean(baseline);
         % Calculate std from the baseline
         noise = std(baseline);
     
         % Calculate SNR 
-        SNR_trace = (trace-mean(baseline)) / noise;
+        SNR_trace = (trace-avg_baseline) / noise;
     else
         logicindex = true(size(trace));
         for i = 1:numel(peak_index)
@@ -39,9 +39,9 @@ function SNR_trace = calculate_SNR(trace,peak_index,AP_window_width)
         end
         baseline = trace(logicindex);
         noise = std(baseline);
-    
+        avg_baseline = mean(baseline);
         % Calculate SNR 
-        SNR_trace = (trace-mean(baseline)) / noise;
+        SNR_trace = (trace-avg_baseline) / noise;
     end
 end
 
