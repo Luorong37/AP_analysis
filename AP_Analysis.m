@@ -36,8 +36,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\Luorong\20240709_optopatch\';
-file = 'Aftersti90%4';  % must add format.
+folder_path = 'E:\1_Data\Luorong\2024.07.12_dueplex\1：10\\';
+file = '50%488-1';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
@@ -55,7 +55,9 @@ save_path = fullfile(folder_path, [file_name, '_Analysis'], nowtime);
 mkdir(save_path);
 
 % Load image file
-[movie, ncols, nrows, nframes] = load_movie(file_path,100000);
+
+[movie, ncols, nrows, nframes] = load_movie(file_path);
+
 
 % Define parameters
 dt = 1 / freq; % Calculate time axis
@@ -82,11 +84,10 @@ fprintf('All codes have been copied to %s\n', code_path);
 % ----------------------Optional part------------------------
 
 % Save folder 
-save_stack = true;
+save_stack = false;
 if save_stack
     create_tiff_stack(file_path);
 end
-
 
 % Save loaded movie (optional)
 save_movie = false; % defined as false
@@ -177,7 +178,7 @@ fprintf('Saved ROI figure after %d s\n',round(t2))
 %% Photobleaching correction
 
 % fit
-[traces_corrected, fitted_curves] = fit_exp1(traces_input);
+[traces_corrected, fitted_curves] = fit_exp2(traces_input);
 
 % plot
 fig = figure();
@@ -205,7 +206,7 @@ png_filename = fullfile(save_path, '2_fitted_trace.png');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 
-fprintf('Finished exp1 fit\n')
+fprintf('Finished expotential fit\n')
 
 %% Peak finding (optional)
 peakfinding = true; % defined as true

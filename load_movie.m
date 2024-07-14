@@ -1,9 +1,9 @@
 function [movie,ncols,nrows,nframes] = ...
-    load_movie(file_path, batch_size, integrate)
+    load_movie(file_path)
 
 % ----------Write by Liu-Yang Luorong and ChatGPT----------
 % ----------POWERED by Zoulab in Peking University----------
-% Date: 24.07.10
+% Date: 24.07.14
 % MATLAB Version: R2023a
 %
 % LOAD_MOVIE Loads movie data from various file formats and computes the intensity time series.
@@ -43,87 +43,58 @@ function [movie,ncols,nrows,nframes] = ...
 %
 % See also IMREAD, IMFINFO, FOPEN, FREAD, RESHAPE.
 
-
-if nargin < 2
-    batch_size = 1000;
-end
-
-if nargin < 3
-    integrate = false;
-end
-
 nrows = NaN;
 ncols = NaN;
 nframes = NaN;
-max_file_size = 4 * 1024^3
 
 % Check if folder_path is a folder or path to a tif movie
 if isfolder(file_path)
     % Get all TIFF file names in folder
     file_list = dir(fullfile(file_path, '*.tif'));
     file_names = {file_list.name};
-    
 
-    % Extract numbers from file names using a regular expression
-    % Handle both cases: filenames with only numbers and filenames with _number
+    % Sort file names
+    % other wise, will be like [4, 40, 400, 4000, 4001]
     file_nums = cellfun(@(x) extractFileNumber(x), file_names);
     [~, idx] = sort(file_nums);
-    file_names = file_names(idx);
+    file_sortedaddress = fullfile(file_path,file_names(idx));
 
-    % Load first image to get dimensions
-    im = imread(fullfile(file_path, file_names{1}));
-    [nrows, ncols] = size(im);
-    num_files = numel(file_list);
-    movie = zeros(nrows*ncols, num_files, 'double');
-    nframes = num_files;
+    % Load first image
+    first_im = fullfile(file_path, file_names{1});
+    t = Tiff(first_im, 'r');
+    tifsize = gettifsize(t);
+    nrows = tifsize(1);
+    ncols = tifsize(2);
 
-    % Loop through all TIF files and populate intensity time series parameter
-    batch_start = 1;
-    prev_percentage = -1; % Initialize with -1 so the first update is always printed
-
-    tic;
-    while batch_start <= num_files
-        % Load batch of TIF files
-        batch_end = min(batch_start + batch_size - 1, num_files);
-        batch_range = batch_start:batch_end;
-
-        for i = batch_range
-            % Read the current image, store the image directly in 'movie'
-            current_image = imread(fullfile(file_path, file_names{i}));
-            movie(:, i) = double(reshape(current_image, nrows*ncols, 1));
-
-            % Calculate and display progress if percentage changes
-            current_percentage = floor(((i - 1) / num_files) * 100);
-            if current_percentage > prev_percentage
-                elapsed = toc;
-                remaining = elapsed / ((i-1) / num_files) - elapsed;
-                fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
-                    i - 1, num_files, current_percentage, remaining);
-                prev_percentage = current_percentage;
-            end
-
+    % judge to merge single tifs or tif stacks
+    if t.lastDirectory()
+        [movie, nframes] = readsingletifs(file_sortedaddress,tifsize);
+        fprintf('All single frame tifs movie loaded\n')
+    else
+        stacks_num = numel(file_sortedaddress);
+        movie = [];
+        nframes = 0;
+        for i = 1:stacks_num
+            fprintf('Loading %s\n',file_sortedaddress{i})
+            [current_movie, current_nframes] = readstacktifs(file_sortedaddress{i},tifsize);
+            movie = cat(2,movie,current_movie);
+            nframes = nframes + current_nframes;
+            fprintf('%s loaded\n',file_sortedaddress{i})
         end
-
-        % Update batch start and end indices
-        batch_start = batch_end + 1;
+        fprintf('All stacked frame tifs movie merged\n')
     end
 
 else
     [~, ~, file_extension] = fileparts(file_path);
     if isequal(file_extension,'.tif') || isequal(file_extension,'.tiff')
-        % Read TIFF movie
-        info = imfinfo(file_path);
-        [ncols, nrows] = size(imread(file_path, 1));
-        nframes = numel(info);
-        % Initialize parameter containing intensity time series
-        movie = zeros(nrows*ncols, nframes, 'double');
-        % Loop through all frames and populate intensity time series parameter
-        for i = 1:nframes
-            im = imread(file_path, i);
-            movie(:, i) = double(im(:));
-            % Print progress
-            fprintf('Processing frame %d for %d\n', i,nframes)
-        end
+        % Load first image
+        t = Tiff(file_path, 'r');
+        tifsize = gettifsize(t);
+        nrows = tifsize(1);
+        ncols = tifsize(2);
+        t.close();
+        [movie, nframes] = readstacktifs(file_path, tifsize);
+        fprintf('Stacked frame tifs movie loaded\n')
 
     elseif isequal(file_extension,'.bin')
         filename = [fileparts(file_path) '\movie_info.txt'];  % 指定文本文件的名称
@@ -139,21 +110,6 @@ else
             nrows = ROI_info(2);
             ncols = ROI_info(4);
         end
-
-        % read ncol and nrow
-        % while ~feof(fileID)  % 继续读取，直到到达文件末尾
-        %     line = fgetl(fileID);  % 读取文件的下一行
-        %     if contains(line, 'nrow =')  % 检查该行是否包含 'x ='
-        %         % 使用 str2double 和 strtrim 函数从字符串中提取数值
-        %         nrows = str2double(strtrim(extractAfter(line, 'nrow =')));
-        %     elseif contains(line, 'ncol =')  % 检查该行是否包含 'y ='
-        %         % 使用 str2double 和 strtrim 函数从字符串中提取数值
-        %         ncols = str2double(strtrim(extractAfter(line, 'ncol =')));
-        %     end
-        %     if ~isnan(nrows) && ~isnan(ncols)
-        %         break;  % 找到数值后退出循环
-        %     end
-        % end
 
         %open file readBinMov
         % read file into tmp vector
@@ -182,17 +138,101 @@ end
 
 end
 
-function num = extractFileNumber(filename)
+function num = extractFileNumber(file_names)
     % Extract the numeric part of the filename
     % Handle both cases: filenames with only numbers and filenames with _number
     num = [];
-    [~, name, ~] = fileparts(filename);
+    [~, name, ~] = fileparts(file_names);
     if all(isstrprop(name, 'digit'))
         num = str2double(name);
     else
-        tokens = regexp(name, '_([0-9]+)$', 'tokens');
+        tokens = regexp(name, '([0-9]+)$', 'tokens');
+        % tokens = regexp(name, '_([0-9]+)$', 'tokens');
         if ~isempty(tokens)
             num = str2double(tokens{1}{1});
         end
     end
 end
+
+function printloadingpercent(i,num_files)
+    % Calculate and display progress if percentage changes
+    current_percentage = floor(((i - 1) / num_files) * 100);
+    if current_percentage > prev_percentage
+        elapsed = toc;
+        remaining = elapsed / ((i-1) / num_files) - elapsed;
+        fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
+            i - 1, num_files, current_percentage, remaining);
+        prev_percentage = current_percentage;
+    end
+end
+
+function tifsize = gettifsize(t)
+    tifsize = [t.getTag('ImageLength'),t.getTag('ImageWidth')];
+end
+
+function [movie, nframes]= readstacktifs(file_path,tifsize)
+     % Initialize parameter
+    info = imfinfo(file_path);
+    nframes = numel(info);
+    nrows = tifsize(1);
+    ncols = tifsize(2);
+    movie = zeros(nrows*ncols, nframes, 'double');
+    prev_percentage = 0; % Initialize with -1 so the first update is always printed
+
+    tic;
+    for i = 1:nframes
+        % Read TIFF movie
+        current_image = imread(file_path, i);
+        movie(:,i) = double(reshape(current_image, nrows*ncols, 1));
+
+        % Calculate and display progress if percentage changes
+        current_percentage = floor((i / nframes) * 100);
+        if current_percentage > prev_percentage
+            elapsed = toc;
+            remaining = elapsed / (i / nframes) - elapsed;
+            fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
+                i, nframes, current_percentage, remaining);
+            prev_percentage = current_percentage;
+        end
+    end
+end
+
+function [movie, nframes] = readsingletifs(file_sortedaddress, tifsize)
+
+    % Loop through all TIF files and populate intensity time series parameter
+    prev_percentage = 0; % Initialize with -1 so the first update is always printed
+    nframes = numel(file_sortedaddress);
+    nrows = tifsize(1);
+    ncols = tifsize(2);
+    movie = zeros(nrows*ncols,nframes);
+    
+    
+    % Load batch of TIF files
+    tic;
+    for i = 1:nframes
+        % Read the current image, store the image directly in 'movie'
+        current_tif = file_sortedaddress{i};
+        warning('off');
+        t = Tiff(current_tif,'r');
+        warning('on');
+        current_image = t.read();
+        movie(:,i) = double(reshape(current_image, nrows*ncols, 1));
+        t.close();
+        % Calculate and display progress if percentage changes
+        current_percentage = floor((i / nframes) * 100);
+        if current_percentage > prev_percentage
+            elapsed = toc;
+            remaining = elapsed / ( i / nframes) - elapsed;
+            fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
+                i, nframes, current_percentage, remaining);
+            prev_percentage = current_percentage;
+        end
+    
+    end
+end
+
+
+
+
+
+
