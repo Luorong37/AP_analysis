@@ -63,7 +63,7 @@ mkdir(save_path);
 dt = 1 / freq; % Calculate time axis
 colors = [lines(7);hsv(5);spring(3);winter(3);gray(3)];
 t = (1:nframes) * dt;
-peakfinding = false;
+peakfinding = true;
 options.colors = colors;
 
 % Save code
@@ -202,25 +202,28 @@ fprintf('Finished expotential fit\n')
 
 %% Peak finding
 peakfinding = true; % defined as true
-
+AP_window_width = 40 ; % number of frames to for AP window (defined = 40)
+    
 if peakfinding
-
-    AP_window_width = 40 ; % number of frames to for AP window (defined = 40)
-    [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = ...
+    [peaks_polarity, peaks_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = ...
                                             peak_finding(traces_corrected);
+    traces_corr_flipped = traces_corrected.*peaks_polarity + 1 - peaks_polarity;
 
     % plot trace
     fig = figure();
     set(fig,'Position',get(0,'Screensize'));
-    [offset_array] = offset_plot(traces_corrected,t,options);
+    offset_array = offset_plot(traces_corr_flipped,t); 
+    xlim tight
+    sgtitle('Peak finding');
     % plot label
     for i = 1:nrois
         % plot threshold
-        plot(t,ones(1,length(t)).*(peak_threshold(i)*peak_polarity(i)) + offset_array(i),'Color',colors(i,:),'LineWidth',2); hold on;
+        plot(t,ones(1,numel(t)).*(peaks_threshold(i)*peaks_polarity(i)+ 1 -peaks_polarity(i)) ...
+            + offset_array(i),'Color',colors(i,:),'LineWidth',2); hold on;
         % plot peak
         dt = t(2)-t(1);
-        plot(peaks_index{i}.*dt, (1-peaks_sensitivity{i}*peak_polarity(i))+ offset_array(i),'v', ...
-            'Color',colors(i,:),'MarkerFaceColor',colors(i,:)); hold on;
+        plot(peaks_index{i}.*dt, ( peaks_amplitude{i}.*peaks_polarity(i)+ 1 -peaks_polarity(i)) ...
+            + offset_array(i),'v','Color',colors(i,:),'MarkerFaceColor',colors(i,:)); hold on;
     end
 
 end
@@ -235,57 +238,53 @@ saveas(gcf, png_filename, 'png');
 % set up
 fig = figure();
 set(fig,'Position',get(0,'Screensize'));
-intensity_trace = zeros(nframes,length(rois));
-sentivity_trace = zeros(nframes,length(rois));
-SNR_trace = zeros(nframes,length(rois));
-fitted_trace = zeros(nframes,length(rois));
-
+sentivity_trace = zeros(nframes,nrois);
+SNR_trace = zeros(nframes,nrois);
 
  % plot sensitivity
 sensitivity_axe = subplot(1,2,1);
 title('Sensitivity');
 hold on;
-for i = 1 : length(rois)-1
+for i = 1 : nrois
     % Calculate Sensitivity
-    sentivity_trace(:,i) = traces_corrected(:,i)-1;
-    [~] = offset_plot(sentivity_trace,t,options);
+    sentivity_trace(:,i) = traces_corrected(:,i)*peaks_polarity(i)+ 1 -peaks_polarity(i);
 end
+    [~] = offset_plot(sentivity_trace,t);
 
 % plot SNR
 SNR_axe = subplot(1,2,2);
 title('SNR');
 hold on;
 
-for i = 1 : length(rois)-1
+for i = 1 : nrois
     % Calculate SNR
     if peakfinding
-        [SNR_trace(:,i),fitted_trace(:,i)]  = calculate_SNR(traces_corrected(:,i), peak_threshold(i), peak_polarity(i));
+        SNR_trace(:,i)  = calculate_SNR(traces_corrected(:,i),peaks_index{i},AP_window_width);
     else
-        [SNR_trace(:,i),fitted_trace(:,i)]  = calculate_SNR(traces_corrected(:,i));
+        SNR_trace(:,i)  = calculate_SNR(traces_corrected(:,i));
     end
-        
-    [~] = offset_plot(SNR_trace,t,options);
+    [~] = offset_plot(SNR_trace,t);
 end
 
-fig_filename = fullfile(save_path, '4_Sensitivity_figure.fig');
-png_filename = fullfile(save_path, '4_Sensitivity_figure.png');
-trace_filename = fullfile(save_path, '4_Sensitivity_data.mat');
+fig_filename = fullfile(save_path, '4_SNR.fig');
+png_filename = fullfile(save_path, '4_SNR.png');
+trace_filename = fullfile(save_path, '4_SNR.mat');
 
 save(trace_filename,"sentivity_trace",'SNR_trace');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 %% Statistic AP
-AP_list = cell(1, length(rois)-1);
+AP_list = cell(1, nrois);
 each_AP = struct('Trace', [], 'AP_number', [], 'AP_index',[],'AP_amp',[], ...
     'Amplitude', [],'FWHM',[], 'AP_sensitivity',[],'Sensitivity',[], ...
     'AP_SNR', [], 'SNR', []);
 
 % each trace
-for i = 1:length(rois)-1 % i for trace
+for i = 1:nrois % i for trace
     peaks_num = length(peaks_index{i});
     peaks_index_i = peaks_index{i};
     peaks_amp_i = peaks_amplitude{i};
-    each_trace_amp = traces_input(:,i)*peak_polarity(i);
+    each_trace_amp = traces(:,i)*peaks_polarity(i);
     each_trace_sensitivity = sentivity_trace(:,i);
     each_trace_SNR = SNR_trace(:,i);
     each_trace_smooth = fitted_trace(:,i);
@@ -325,7 +324,7 @@ for i = 1:length(rois)-1 % i for trace
         Sensitivity = AP_sensitivity(AP_window_width+1) - 1 ;
         SNR = abs(AP_SNR(AP_window_width+1));
         baseline = mean(AP_smooth,'omitnan');
-        FWHM = calculate_FWHM(AP_sensitivity, dt, AP_window_width, baseline, peak_polarity(i));
+        FWHM = calculate_FWHM(AP_sensitivity, dt, AP_window_width, baseline, peaks_polarity(i));
 
         % save AP data
         each_AP = struct('Trace', i, 'AP_number', j, 'AP_index',AP_index, ...
@@ -406,7 +405,7 @@ for i = 1:length(rois)-1 % i for trace
         subplot(2,ceil(plot_cols/2),plot_col);
 
         % set y axis direction
-        if peak_polarity(i) == -1
+        if peaks_polarity(i) == -1
             set(gca,'YDir','reverse')
             hold on;
         end
@@ -463,7 +462,7 @@ for i = 1:length(rois)-1
         subplot(2,ceil(plot_cols/2),plot_col);
 
         % set y axis direction
-        if peak_polarity(i) == -1
+        if peaks_polarity(i) == -1
             set(gca,'YDir','reverse')
             hold on;
         end
@@ -506,13 +505,13 @@ saveas(gcf, png_filename, 'png');
 window = 1; % second, (def = 1 s)
 num_windows = ceil(nframes / window*dt)-1;
 window_length = ceil(window / dt);
-firing_rate_traces = zeros(num_windows, length(rois));
+firing_rate_traces = zeros(num_windows, nrois);
 t_window = (0:window:num_windows-1)+0.5 * window;
 
 % 统计不为空的trace数目
 figure();
 shift_firingrate = 0;
-for i = 1:length(rois)-1
+for i = 1:nrois
     %判断是否为有AP的trace
     peaks_num = length(peaks_index{i});
     firing_rate_traces(:,i) = calculate_firing_rate(peaks_index{i}, window,num_windows, window_length);

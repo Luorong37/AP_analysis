@@ -102,11 +102,12 @@ if ~isempty(mask)
     bwmask = mask;
     num_roi = max(bwmask(:));
     for i = 1:num_roi
+        color = colors(mod(i - 1, length(colors)) + 1, :);
         roi = (bwmask == i);
         trace = mean(movie(roi, :),1);
         traces = [traces trace'];
-        boundary = bwboundaries(roi);
-        plot(boundary{1}(:, 2), boundary{1}(:, 1), 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'LineWidth', 2, 'Parent', image_axe);
+        boundary = cell2mat(bwboundaries(roi));
+        plot(boundary(:, 2), boundary(:, 1), 'Color', color, 'LineWidth', 2, 'Parent', image_axe);
         plot(t, trace, 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'Parent', trace_axe);
     end
 
@@ -114,10 +115,11 @@ else
     % ROI selection process
     while true
         num_roi = max(bwmask(:)) + 1;
+        color = colors(mod(num_roi - 1, length(colors)) + 1, :);
         if ~isempty(map)
-            roi_mask = drawpolygon('Color', colors(mod(num_roi, length(colors)) + 1, :), 'LineWidth', 1, 'Parent', map_axe);
+            roi_mask = drawpolygon('Color', color, 'LineWidth', 1, 'Parent', map_axe);
         else
-            roi_mask = drawpolygon('Color', colors(mod(num_roi, length(colors)) + 1, :), 'LineWidth', 1, 'Parent', image_axe);
+            roi_mask = drawpolygon('Color', color, 'LineWidth', 1, 'Parent', image_axe);
         end
         mask = poly2mask(roi_mask.Position(:, 1), roi_mask.Position(:, 2), size(im_adj, 1), size(im_adj, 2));
         bwmask(mask) = num_roi;
@@ -126,11 +128,14 @@ else
         traces = [traces trace'];
         [trace_corrected, ~] = fit_exp2(trace');
 
-        boundary = bwboundaries(mask);
+        boundary = cell2mat(bwboundaries(mask));
         if ~isempty(map)
-            plot(boundary{1}(:, 2), boundary{1}(:, 1), 'Color', colors(mod(num_roi - 1, length(colors)) + 1, :), 'LineWidth', 1, 'Parent', image_axe);
+            plot(boundary(:, 2), boundary(:, 1), 'Color', color, 'LineWidth', 1, 'Parent', image_axe);
         end
-        plot(t, trace_corrected, 'Color', colors(mod(num_roi - 1, length(colors)) + 1, :), 'Parent', trace_axe);
+        plot(t, trace_corrected, 'Color', color, 'Parent', trace_axe);
+        
+        % 标注ROI编号
+        text(mean(boundary(:, 2)), mean(boundary(:, 1)), num2str(num_roi), 'Color', color, 'FontSize', 12, 'Parent', map_axe); hold on;
 
         %plot(t, trace, 'Color', colors(mod(num_roi - 1, length(colors)) + 1, :), 'Parent', trace_axe);
 

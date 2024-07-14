@@ -25,6 +25,7 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
 
     % 初始化变量
     nrois = size(traces_corrected,2);
+    colors = lines(100);
     peak_polarity = zeros(1,nrois);
     peak_threshold = zeros(1,nrois);
     peaks_amplitude = cell(1, nrois);
@@ -41,20 +42,23 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
         if abs(min(traces_corrected(:,i)) - mean(traces_corrected(:,i))) < ...
             max(abs(traces_corrected(:,i)) - mean(traces_corrected(:,i)))
             peak_polarity(i) = 1;
+            polarity = 'Positive';        
         else
             peak_polarity(i) = -1;
+            polarity = 'Negative';
         end
 
         % plot trace
         
-        plot_trace = traces_corrected(:,i) * peak_polarity(i);
+        plot_trace = traces_corrected(:,i) * peak_polarity(i)+ 1 -peak_polarity(i) ;
         plot(plot_trace, 'Color', colors(i,:)); hold on;
         title(sprintf('ROI %d', i));
 
         % set threshold
-        [~, peak_threshold(i)] = ginput(1);
-        plot(ones(1,peak_threshold).*peak_threshold(i),'Color',colors(i,:),'LineWidth',2);
-        hold off;
+        [~, peak_threshold(i)] = ginput(1) ;
+        plot(ones(1,size(traces_corrected,1)).*peak_threshold(i),'Color',colors(i,:),'LineWidth',2);
+        peak_threshold(i) = (peak_threshold(i) + peak_polarity(i) -1)/peak_polarity(i);
+        hold on;
         
 
         % 寻找峰值
@@ -63,9 +67,18 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
             MinPeakProminence, 'MinPeakHeight', peak_threshold(i));
         peaks_index{i} = peak_x;
         current_trace = traces_corrected(:,i);
-        peaks_amplitude{i} = current_trace(peak_x);
-        peaks_sensitivity{i} = peak_y;
+        peaks_sensitivity{i} = abs(current_trace(peak_x)-mean(current_trace));
+
+        peaks_amplitude{i}  = peak_y;
+        plot(peak_x, (peaks_amplitude{i}),'v','Color',colors(i,:),'MarkerFaceColor',colors(i,:));
+        hold off;
+        peaks_amplitude{i} = (peaks_amplitude{i} + peak_polarity(i) -1)/peak_polarity(i);
+        
+
+        fprintf('%d peaks found in ROI %d, Polarity : %s\n',numel(peak_x),i,polarity)
+
         pause(0.5);
     end
     close;
+    fprintf('All peaks found.\n')
 end

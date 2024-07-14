@@ -1,25 +1,47 @@
-function [offset_array] = offset_plot(traces,t,options)
+function [offset_array] = offset_plot(traces,t)
 
-if nargin > 2
-    if isfield(options, 'colors')
-        colors= options.colors;
-    else
-        colors = lines; % 默认值
-    end
 
-end
+
+colors = lines(100);
 offset_array = zeros(size(traces,2));
-offset = 0;
+
 for i = 1:size(traces,2)
-    offset_array(i) = offset;
+    
     % plot trace
-    trace = (traces(:,i)-1)*-1 + offset;
-    plot(t,  trace ,'Color',colors(i,:)); hold on;
-    offset_current = (max(trace(:))-min(trace(:)))*1;
-    offset = offset + offset_current;
+    % if polarity(i) == -1
+    trace = traces(:,i);
+    if i == 1
+        offset_current = - min(trace);
+        offset = offset_current;
+    else
+        offset_current = max(traces(:,i-1)) - min(traces(:,i-1)) + mean(trace)- 2 * min(trace) ;
+        offset = offset_array(i-1) + min(traces(:,i-1)) + offset_current;
+    end
+    offset_array(i) = offset;
+    
+
+    plot(t,  trace + offset,'Color',colors(i,:)); hold on;
+    % elseif polarity(i) == 1
+    %     trace = (traces(:,i) - mean(traces(:,i))) + offset;
+    %     plot(t,  trace ,'Color',colors(i,:)); hold on;
+    %     offset_current = (max(trace(:))-min(trace(:)));
+    %     offset = offset + offset_current;
 end
-ylim tight
-xlim tight
-sgtitle('Peak finding');
-hold on;
 end
+% 创建stackedplot
+
+
+% traces_flipped =  traces .* polarity + 2 - polarity;
+% sp = stackedplot(t, traces_flipped);
+% 
+% % 统一y轴刻度范围
+% minY = min(traces_flipped,[],'all'); % 统一的最小值
+% maxY = max(traces_flipped,[],'all'); % 统一的最大值
+% 
+% % 获取所有的AxesProperties
+% allAxesProperties = sp.AxesProperties;
+% 
+% % 设置每个轴的y轴范围
+% for k = 1:length(allAxesProperties)
+%     allAxesProperties(k).YLimits = [minY maxY];
+% end
