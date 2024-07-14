@@ -180,19 +180,28 @@ function [movie, nframes]= readstacktifs(file_path,tifsize)
     prev_percentage = 0; % Initialize with -1 so the first update is always printed
 
     tic;
-    for i = 1:nframes
-        % Read TIFF movie
-        current_image = imread(file_path, i);
-        movie(:,i) = double(reshape(current_image, nrows*ncols, 1));
+    batchsize = 2000;
+    batchstart = 1;
+    while batchstart < nframes
+        batchend = batchstart+batchsize;
+        for i = batchstart:min(batchend,nframes)
+            % Read TIFF movie
+            current_image = imread(file_path, i);
+            movie(:,i) = double(reshape(current_image, nrows*ncols, 1));
 
-        % Calculate and display progress if percentage changes
-        current_percentage = floor((i / nframes) * 100);
-        if current_percentage > prev_percentage
-            elapsed = toc;
-            remaining = elapsed / (i / nframes) - elapsed;
-            fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
-                i, nframes, current_percentage, remaining);
-            prev_percentage = current_percentage;
+            % Calculate and display progress if percentage changes
+            current_percentage = floor((i / nframes) * 100);
+            if current_percentage > prev_percentage
+                elapsed = toc;
+                remaining = elapsed / (i / nframes) - elapsed;
+                fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
+                    i, nframes, current_percentage, remaining);
+                prev_percentage = current_percentage;
+            end
+        end
+        batchstart = batchend + 1;
+        if batchstart > nframes
+            break
         end
     end
 end
@@ -222,7 +231,7 @@ function [movie, nframes] = readsingletifs(file_sortedaddress, tifsize)
         current_percentage = floor((i / nframes) * 100);
         if current_percentage > prev_percentage
             elapsed = toc;
-            remaining = elapsed / ( i / nframes) - elapsed;
+            remaining = (elapsed / i) * (nframes-i) ;
             fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
                 i, nframes, current_percentage, remaining);
             prev_percentage = current_percentage;

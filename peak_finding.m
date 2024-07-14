@@ -52,12 +52,11 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
         
         plot_trace = traces_corrected(:,i) * peak_polarity(i)+ 1 -peak_polarity(i) ;
         plot(plot_trace, 'Color', colors(i,:)); hold on;
-        title(sprintf('ROI %d', i));
+        title(fprintf('ROI %d, polarity = %s\nIf no peaks, click a point above trace\n ', i , polarity));
 
         % set threshold
         [~, peak_threshold(i)] = ginput(1) ;
         plot(ones(1,size(traces_corrected,1)).*peak_threshold(i),'Color',colors(i,:),'LineWidth',2);
-        peak_threshold(i) = (peak_threshold(i) + peak_polarity(i) -1)/peak_polarity(i);
         hold on;
         
 
@@ -65,6 +64,8 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
         MinPeakProminence = (max(plot_trace)-mean(plot_trace)) * MinPeakProminence_factor;
         [peak_y, peak_x] = findpeaks(plot_trace, 'MinPeakProminence', ...
             MinPeakProminence, 'MinPeakHeight', peak_threshold(i));
+        
+        peak_threshold(i) = (peak_threshold(i) + peak_polarity(i) -1)/peak_polarity(i);
         peaks_index{i} = peak_x;
         current_trace = traces_corrected(:,i);
         peaks_sensitivity{i} = abs(current_trace(peak_x)-mean(current_trace));

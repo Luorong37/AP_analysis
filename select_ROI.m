@@ -106,9 +106,15 @@ if ~isempty(mask)
         roi = (bwmask == i);
         trace = mean(movie(roi, :),1);
         traces = [traces trace'];
+        [trace_corrected, ~] = fit_exp2(trace');
+
         boundary = cell2mat(bwboundaries(roi));
         plot(boundary(:, 2), boundary(:, 1), 'Color', color, 'LineWidth', 2, 'Parent', image_axe);
-        plot(t, trace, 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'Parent', trace_axe);
+        plot(t, trace_corrected, 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'Parent', trace_axe);
+         % 标注ROI编号
+        text(mean(boundary(:, 2)), mean(boundary(:, 1)), num2str(i), ...
+            'Color', color, 'FontSize', 12, 'Parent', image_axe); hold on;
+
     end
 
 else
@@ -135,8 +141,11 @@ else
         plot(t, trace_corrected, 'Color', color, 'Parent', trace_axe);
         
         % 标注ROI编号
-        text(mean(boundary(:, 2)), mean(boundary(:, 1)), num2str(num_roi), 'Color', color, 'FontSize', 12, 'Parent', map_axe); hold on;
-
+        if ~isempty(map)
+            text(mean(boundary(:, 2)), mean(boundary(:, 1)), num2str(num_roi), 'Color', color, 'FontSize', 12, 'Parent', map_axe); hold on;
+        else
+            text(mean(boundary(:, 2)), mean(boundary(:, 1)), num2str(num_roi), 'Color', color, 'FontSize', 12, 'Parent', image_axe); hold on;
+        end
         %plot(t, trace, 'Color', colors(mod(num_roi - 1, length(colors)) + 1, :), 'Parent', trace_axe);
 
         % Wait for user input

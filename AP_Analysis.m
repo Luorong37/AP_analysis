@@ -24,10 +24,11 @@
 %
 % See also calculate_firing_rate, calculate_FWHM, create_map, calculate_SNR, fit_exp1, highpassfilter, select_ROI
 
-clear;
-clc;
+clear; clc;
 
 %% Loading raw data
+clear; clc;
+
 t1 = tic; % Start a timer
 nowtime = string(datetime('now'));
 % Replace colons with hyphens to get the desired output format
@@ -37,7 +38,7 @@ fprintf('Loading...\n')
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
 folder_path = 'E:\1_Data\Luorong\2024.07.12_dueplex\1：10\\';
-file = '50%488-1';  % must add format.
+file = '50%488-20uMgabazine-3';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
@@ -61,7 +62,8 @@ mkdir(save_path);
 
 % Define parameters
 dt = 1 / freq; % Calculate time axis
-colors = [lines(7);hsv(5);spring(3);winter(3);gray(3)];
+% colors = [lines(7);hsv(5);spring(3);winter(3);gray(3)];
+colors = lines(100);
 t = (1:nframes) * dt;
 peakfinding = true;
 options.colors = colors;
@@ -117,7 +119,6 @@ mask_path = ''; % define as ''
 if isempty(mask_path)
     mask = []; 
 else
-    mask_path = 'E:\Data\20230810\20230810-161506recordSCN_Analysis\2023-11-06 09-12-40';
     mask_filename = fullfile(mask_path, '1_raw_ROI.mat');
     mask = load(mask_filename);
     mask = mask.rois;
