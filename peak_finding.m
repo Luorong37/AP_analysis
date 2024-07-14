@@ -1,4 +1,4 @@
-function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = peak_finding(traces_corrected, t, colors, rois)
+function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = peak_finding(traces_corrected, t, colors, nroi)
     %PEAK_FINDING 寻找给定ROI信号中的峰值。
     %
     %   [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = 
@@ -23,20 +23,21 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
 
 
     % 初始化变量
-    peak_polarity = zeros(1,length(rois));
-    peak_threshold = zeros(1,length(rois));
-    peaks_amplitude = cell(1, length(rois)-1);
-    peaks_index = cell(1, length(rois)-1);
-    peaks_sensitivity = cell(1, length(rois)-1);
+    peak_polarity = zeros(1,nroi);
+    peak_threshold = zeros(1,nroi);
+    peaks_amplitude = cell(1, nroi);
+    peaks_index = cell(1, nroi);
+    peaks_sensitivity = cell(1, nroi);
     MinPeakProminence_factor = 0.4; % 定义最小峰值显著性因子
     figure; 
     set(gcf,'Position',get(0,'Screensize'));
     % 对每个ROI进行峰值检测
-    for i = 1:length(rois)-1
+    for i = 1:nroi
         clf;
 
         % 确定峰值极性
-        if abs(min(traces_corrected(:,i))-mean(traces_corrected(:,i))) < max(abs(traces_corrected(:,i)) - mean(traces_corrected(:,i)))
+        if abs(min(traces_corrected(:,i)) - mean(traces_corrected(:,i))) < ...
+            max(abs(traces_corrected(:,i)) - mean(traces_corrected(:,i)))
             peak_polarity(i) = 1;
         else
             peak_polarity(i) = -1;

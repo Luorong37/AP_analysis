@@ -8,11 +8,17 @@ function SNR_trace = calculate_SNR(trace)
 
     % extract baseline
     trace_abs = abs(trace);
-    baseline = trace_abs(trace_abs < prctile(trace_abs,95)); % defined extract 95%
+    baseline = trace_abs(trace_abs < prctile(trace_abs,90)); % defined extract 95%, means max frequence as 40 Hz
     
     % Calculate std from the baseline
     noise = std(baseline);
-    
+
     % Calculate SNR 
-    SNR_trace = trace / noise;
+    SNR_trace = (trace-mean(trace)) / noise;
 end
+
+
+
+
+
+

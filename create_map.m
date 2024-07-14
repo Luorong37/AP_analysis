@@ -85,7 +85,8 @@ for i = 1:npixels
     if strcmp(mode,'voltage')
         quick_map(i) = max(abs(pixel_trace_corrected - baseline)/baseline) ; % do not judge polarity
     elseif strcmp(mode,'calcium')
-        quick_map(i) = std(pixel_trace_corrected);
+        % quick_map(i) = std(pixel_trace_corrected);
+        quick_map(i) = (max(pixel_trace_corrected)-baseline) /std(pixel_trace_corrected);
     end
 end
 

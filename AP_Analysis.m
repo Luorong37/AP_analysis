@@ -155,6 +155,7 @@ t1 = tic; % Start a timer
 
 % with or wihout Mask and Map
 [rois, traces] = select_ROI(movie, nrows, ncols, t, colors, mask, map);
+nrois = max(rois,[],'all');
 
 fig_filename = fullfile(save_path, '1_raw_trace.fig');
 png_filename = fullfile(save_path, '1_raw_trace.png');
@@ -164,40 +165,37 @@ saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(roi_filename, 'rois');
 
-traces_input = zeros(size(traces,1),size(traces,2)-1);
-background = traces(:,end);
-
-% remove background
-for i = 1: size(traces,2)-1
-    traces_input(:,i) = traces(:,i) - background;
-end
-
-t2 = toc(t1); % Get the elapsed time
-fprintf('Saved ROI figure after %d s\n',round(t2))
-
-%% Photobleaching correction
+%% Correction
 
 % fit
-[traces_corrected, fitted_curves] = fit_exp2(traces_input);
+[traces_corrected, fitted_curves] = fit_exp2(traces);
 
 % plot
 fig = figure();
 set(fig,'Position',get(0,'Screensize'));
-fit_axe = subplot(2,1,1);
-fited_axe = subplot(2,1,2);
+fit_axe = subplot(3,1,1);
+fited_axe = subplot(3,1,2);
+SNR_axe = subplot(3,1,3);
+traces_SNR = zeros(size(traces_corrected));
 
+% plot
 for i = 1: size(traces_corrected,2)
-    plot(t,traces_input(:,i),'Color',colors(i,:),'Parent',fit_axe);
+    plot(t,traces(:,i),'Color',colors(i,:),'Parent',fit_axe);
     hold(fit_axe, 'on');
     plot(t,fitted_curves(:,i),'Color',colors(i,:),'LineWidth',2,'Parent',fit_axe);
     hold(fit_axe, 'on');
     plot(t,traces_corrected(:,i),'Color',colors(i,:),'Parent',fited_axe);
     hold(fited_axe, 'on');
+    traces_SNR(:,i) = calculate_SNR(traces_corrected(:,i));
+    plot(t,traces_SNR(:,i),'Color',colors(i,:),'Parent',SNR_axe);
+    hold(SNR_axe, 'on');
 end
+hold off;
 
 % note
 title(fit_axe, 'Original and Fitted Curves');
 title(fited_axe, 'Corrected Traces');
+title(SNR_axe, 'SNR Traces');
 legend(fit_axe, 'Original Trace', 'Fitted Curve');
 
 fig_filename = fullfile(save_path, '2_fitted_trace.fig');
@@ -214,16 +212,16 @@ peakfinding = true; % defined as true
 if peakfinding
 
     AP_window_width = 40 ; % number of frames to for AP window (defined = 40)
-    [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = peak_finding(traces_corrected, t, colors, rois);
+    [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = peak_finding(traces_corrected, t, colors, nrois);
 
     % plot trace
     fig = figure();
     set(fig,'Position',get(0,'Screensize'));
     [offset_array] = offset_plot(traces_corrected,t,options);
     % plot label
-    for i = 1:length(rois)-1
+    for i = 1:nrois
         % plot threshold
-        plot(t,ones(1,length(t)).*(1-peak_threshold(i)*peak_polarity(i)) + offset_array(i),'Color',colors(i,:),'LineWidth',2); hold on;
+        plot(t,ones(1,length(t)).*(peak_threshold(i)*peak_polarity(i)) + offset_array(i),'Color',colors(i,:),'LineWidth',2); hold on;
         % plot peak
         dt = t(2)-t(1);
         plot(peaks_index{i}.*dt, (1-peaks_sensitivity{i}*peak_polarity(i))+ offset_array(i),'v', ...
