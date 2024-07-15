@@ -32,15 +32,25 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
     peaks_index = cell(1, nrois);
     peaks_sensitivity = cell(1, nrois);
     MinPeakProminence_factor = 0.4; % 定义最小峰值显著性因子
-    figure; 
+    fig = figure; 
     set(gcf,'Position',get(0,'Screensize'));
+
+    i = 0;
+    set(gcf, 'KeyPressFcn', @(src, event) set_space_pressed(event, fig));
+    reselect = false;
     % 对每个ROI进行峰值检测
-    for i = 1:nrois
+    while i < nrois
+        if reselect
+            i = i;
+            reselect = false;
+        else
+            i = i + 1;
+        end
         clf;
+        current_trace = traces_corrected(:,i);
 
         % 确定峰值极性
-        if abs(min(traces_corrected(:,i)) - mean(traces_corrected(:,i))) < ...
-            max(abs(traces_corrected(:,i)) - mean(traces_corrected(:,i)))
+        if abs(min(current_trace) - mean(current_trace)) < max(abs(current_trace) - mean(current_trace))
             peak_polarity(i) = 1;
             polarity = 'Positive';        
         else
@@ -49,10 +59,11 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
         end
 
         % plot trace
-        
-        plot_trace = traces_corrected(:,i) * peak_polarity(i)+ 1 -peak_polarity(i) ;
+        plot_trace = current_trace * peak_polarity(i)+ 1 -peak_polarity(i) ;
         plot(plot_trace, 'Color', colors(i,:)); hold on;
-        title(fprintf('ROI %d, polarity = %s\nIf no peaks, click a point above trace\n ', i , polarity));
+        title(sprintf(['ROI %d, polarity = %s\n' ...
+            'If no peaks, click a point above trace\n' ...
+            'Press SPACE for continue, Press ENTER for end, Press R for reselect\n'], i , polarity));
 
         % set threshold
         [~, peak_threshold(i)] = ginput(1) ;
@@ -67,7 +78,7 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
         
         peak_threshold(i) = (peak_threshold(i) + peak_polarity(i) -1)/peak_polarity(i);
         peaks_index{i} = peak_x;
-        current_trace = traces_corrected(:,i);
+        current_trace = current_trace;
         peaks_sensitivity{i} = abs(current_trace(peak_x)-mean(current_trace));
 
         peaks_amplitude{i}  = peak_y;
@@ -78,8 +89,28 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
 
         fprintf('%d peaks found in ROI %d, Polarity : %s\n',numel(peak_x),i,polarity)
 
-        pause(0.5);
+        % Wait for user input
+        fig.UserData = [];
+        waitfor(fig, 'UserData');
+        if strcmp(fig.UserData, 'stop')
+            break;
+        elseif strcmp(fig.UserData, 'spacePressed')
+            continue;
+        elseif strcmp(fig.UserData,'reselect')
+            reselect = true;
+            continue
+        end
     end
     close;
     fprintf('All peaks found.\n')
+end
+
+function set_space_pressed(event, fig)
+if strcmp(event.Key, 'space')
+    fig.UserData = 'spacePressed';
+elseif strcmp(event.Key, 'return')
+    fig.UserData = 'stop';
+elseif strcmp(event.Key, 'r')
+    fig.UserData = 'reselect';
+end
 end

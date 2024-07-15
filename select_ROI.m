@@ -1,4 +1,4 @@
-function [bwmask, traces] = select_ROI(movie, nrows, ncols, t, colors, mask, map)
+function [bwmask, traces] = select_ROI(movie, nrows, ncols, t, mask, map)
 % 
 % ----------Write by Liu-Yang Luorong and ChatGPT----------
 % ----------POWERED by Zoulab in Peking University----------
@@ -48,6 +48,8 @@ function [bwmask, traces] = select_ROI(movie, nrows, ncols, t, colors, mask, map
 traces = [];
 bwmask = zeros(nrows,ncols);
 movie_2D = reshape(movie, ncols, nrows, []);
+colors = lines(100);
+
 
 % Set current figure to full screen and add keypress callback
 fig = gcf;
@@ -77,7 +79,7 @@ if ~isempty(mask)
         plot(boundary(:, 2), boundary(:, 1), 'Color', color, 'LineWidth', 2, 'Parent', image_axe);
         plot(t, trace_corrected, 'Color', color, 'Parent', trace_axe);
          % 标注ROI编号
-        text(mean(boundary(:, 2)), mean(boundary(:, 1)), num2str(i), ...
+        text(mean(boundary(:, 2)) + 12, mean(boundary(:, 1)) - 12, num2str(i), ...
             'Color', color, 'FontSize', 12, 'Parent', image_axe); hold on;
 
     end
@@ -104,9 +106,9 @@ else
         % draw ROI in image and 标注ROI编号
         if ~isempty(map)
             plot(boundary(:, 2), boundary(:, 1), 'Color', color, 'LineWidth', 1, 'Parent', image_axe);
-            text(mean(boundary(:, 2)), mean(boundary(:, 1)), num2str(num_roi), 'Color', color, 'FontSize', 12, 'Parent', map_axe); hold on;
+            text(mean(boundary(:, 2)) + 12, mean(boundary(:, 1)) - 12, num2str(num_roi), 'Color', color, 'FontSize', 12, 'Parent', map_axe); hold on;
         end
-        text(mean(boundary(:, 2)), mean(boundary(:, 1)), num2str(num_roi), 'Color', color, 'FontSize', 12, 'Parent', image_axe); hold on;
+        text(mean(boundary(:, 2)) + 12, mean(boundary(:, 1)) - 12, num2str(num_roi), 'Color', color, 'FontSize', 12, 'Parent', image_axe); hold on;
         plot(t, trace_corrected, 'Color', color, 'Parent', trace_axe);
 
         % Wait for user input

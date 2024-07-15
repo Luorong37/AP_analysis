@@ -144,8 +144,12 @@ fprintf('Finished mask creating after %d s\n',round(t2))
 t1 = tic; % Start a timer
 
 % with or wihout Mask and Map
-[bwmask, traces] = select_ROI(movie, nrows, ncols, t, colors, mask, map);
+[bwmask, traces] = select_ROI(movie, nrows, ncols, t, mask, map);
 nrois = max(bwmask,[],'all');
+
+% if do not need a map, run the following code:
+% map = [];
+% [bwmask, traces] = select_ROI(movie, nrows, ncols, t, mask, map);
 
 fig_filename = fullfile(save_path, '1_raw_trace.fig');
 png_filename = fullfile(save_path, '1_raw_trace.png');
@@ -232,22 +236,36 @@ sentivity_trace = zeros(nframes,nrois);
 SNR_traces = zeros(nframes,nrois);
 baselines = zeros(nframes,nrois);
 
- % plot sensitivity
-sensitivity_axe = subplot(1,2,1);
+% plot fluorescent image
+f_axe = subplot(1,3,1);
+f_im = reshape(movie, ncols, nrows, []);hold on;
+im_adj = uint16(mean(f_im, 3));
+imshow(im_adj,[min(im_adj,[],'all'),max(im_adj,[],'all')]);
+for i = 1:nrois
+    roi = (bwmask == i);
+    boundary = cell2mat(bwboundaries(roi));
+    plot(boundary(:, 2), boundary(:, 1), 'Color', colors(i,:), 'LineWidth', 2, 'Parent', f_axe);hold on;
+            text(mean(boundary(:, 2)) + 12, mean(boundary(:, 1)) - 12, num2str(i), ...
+            'Color', colors(i,:), 'FontSize', 12, 'Parent', f_axe); hold on;
+end
+hold on;
+title('Fluorescent Image');
+
+% plot sensitivity
+sensitivity_axe = subplot(1,3,2);
 title('Sensitivity');
 hold on;
 for i = 1 : nrois
     % Calculate Sensitivity
-    sentivity_trace(:,i) = traces_corrected(:,i)*peaks_polarity(i)+ 1 -peaks_polarity(i);
+    % sentivity_trace(:,i) = traces_corrected(:,i)*peaks_polarity(i)+ 1 -peaks_polarity(i);
+    sentivity_trace(:,i) = traces_corrected(:,i) - 1 ;
 end
     [~] = offset_plot(sentivity_trace,t);
 
 % plot SNR
-SNR_axe = subplot(1,2,2);
+SNR_axe = subplot(1,3,3);
 title('SNR');
 hold on;
-
-
 for i = 1 : nrois
     % Calculate SNR
     if peakfinding
@@ -265,6 +283,7 @@ trace_filename = fullfile(save_path, '4_SNR.mat');
 save(trace_filename,"sentivity_trace",'SNR_traces');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
+%% 
 
 % Statistic AP
 AP_list = cell(1, nrois);
@@ -380,7 +399,6 @@ fprintf('Finished statistic AP\n')
 
 %% Plot average AP sensitivity
 figure();
-set(gcf,'Position',get(0,'Screensize'));
 % 统计不为空的trace数目
 plot_cols = sum(cellfun('isempty',AP_list)==0)+1;
 plot_col = 0;
@@ -479,7 +497,8 @@ for i = 1:nrois
         hold on;
     end
 end
-
+title('Averaged of All');
+hold on;
 sgtitle('Average SNR');
 hold on;
 
