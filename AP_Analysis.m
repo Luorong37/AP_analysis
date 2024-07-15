@@ -38,7 +38,7 @@ fprintf('Loading...\n')
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
 folder_path = 'E:\1_Data\Luorong\2024.07.12_dueplex\1：10\\';
-file = '50%488-20uMgabazine-3';  % must add format.
+file = '50%488-1';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
@@ -82,28 +82,17 @@ end
 
 % 提示完成
 fprintf('All codes have been copied to %s\n', code_path);
+t2 = toc(t1); % Get the elapsed time
+fprintf('Finished loading after %d s\n',round(t2))
+
 
 % ----------------------Optional part------------------------
 
-% Save folder 
+% Save data
 save_stack = false;
 if save_stack
     create_tiff_stack(file_path);
 end
-
-% Save loaded movie (optional)
-save_movie = false; % defined as false
-if save_movie
-    t1 = tic; % Start a timer
-    fprintf('Saving...\n')
-    raw_filename = fullfile(save_path, '0_Raw_data.mat');
-    save(raw_filename,"movie",'ncols','nrows','nframes','freq');
-    t2 = toc(t1); % Get the elapsed time
-    fprintf('Finished saving movie after %d s\n',round(t2))
-end
-
-t2 = toc(t1); % Get the elapsed time
-fprintf('Finished loading after %d s\n',round(t2))
 
 % Load saved map or mask (optional)
 map_path = ''; % define as ''
@@ -155,8 +144,8 @@ fprintf('Finished mask creating after %d s\n',round(t2))
 t1 = tic; % Start a timer
 
 % with or wihout Mask and Map
-[rois, traces] = select_ROI(movie, nrows, ncols, t, colors, mask, map);
-nrois = max(rois,[],'all');
+[bwmask, traces] = select_ROI(movie, nrows, ncols, t, colors, mask, map);
+nrois = max(bwmask,[],'all');
 
 fig_filename = fullfile(save_path, '1_raw_trace.fig');
 png_filename = fullfile(save_path, '1_raw_trace.png');
@@ -164,7 +153,7 @@ roi_filename = fullfile(save_path, '1_raw_ROI.mat');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-save(roi_filename, 'rois');
+save(roi_filename, 'bwmask');
 
 %% Correction
 

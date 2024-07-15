@@ -54,46 +54,11 @@ fig = gcf;
 set(fig,'Position',get(0,'Screensize'));
 set(gcf, 'KeyPressFcn', @(src, event) set_space_pressed(event, fig));
 
-% Display sensitivity map if provided
+% Generate GUI for ROI selection
 if ~isempty(map)
-    subplot(1,2,1);
-    map_axe = gca;
-    imagesc(map);
-    colorbar;
-    title(sprintf('Sensitivity MAP\n\nPress SPACE to continue\nPress ENTER to end'));
-    hold on;
-    axis image;
-
-    % Display fluorescent image
-    subplot(2,2,2);
-    image_axe = gca;
-    im_adj = imadjust(uint16(mean(movie_2D, 3)));
-    imshow(im_adj);
-    hold on;
-    title('Fluorescent Image');
-
-    % Plot Trace
-    subplot(2,2,4);
-    trace_axe = gca;
-    hold on;
-    xlabel('Time (s)');
-    ylabel('Intensity');
-
+    [map_axe, image_axe, im_adj, trace_axe] = GUIwithmap(map, movie_2D);
 else
-% Display fluorescent image without map
-    subplot(1,2,1);
-    image_axe = gca;
-    im_adj = imadjust(uint16(mean(movie_2D, 3)));
-    imshow(im_adj);
-    hold on;
-    title('Fluorescent Image');
-
-    % Plot Trace
-    subplot(1,2,2);
-    trace_axe = gca;
-    hold on;
-    xlabel('Time (s)');
-    ylabel('Intensity');
+    [image_axe, im_adj, trace_axe] = GUIwithoutmap(movie_2D);
 end
 
 
@@ -110,7 +75,7 @@ if ~isempty(mask)
 
         boundary = cell2mat(bwboundaries(roi));
         plot(boundary(:, 2), boundary(:, 1), 'Color', color, 'LineWidth', 2, 'Parent', image_axe);
-        plot(t, trace_corrected, 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'Parent', trace_axe);
+        plot(t, trace_corrected, 'Color', color, 'Parent', trace_axe);
          % 标注ROI编号
         text(mean(boundary(:, 2)), mean(boundary(:, 1)), num2str(i), ...
             'Color', color, 'FontSize', 12, 'Parent', image_axe); hold on;
@@ -135,18 +100,14 @@ else
         [trace_corrected, ~] = fit_exp2(trace');
 
         boundary = cell2mat(bwboundaries(mask));
+
+        % draw ROI in image and 标注ROI编号
         if ~isempty(map)
             plot(boundary(:, 2), boundary(:, 1), 'Color', color, 'LineWidth', 1, 'Parent', image_axe);
-        end
-        plot(t, trace_corrected, 'Color', color, 'Parent', trace_axe);
-        
-        % 标注ROI编号
-        if ~isempty(map)
             text(mean(boundary(:, 2)), mean(boundary(:, 1)), num2str(num_roi), 'Color', color, 'FontSize', 12, 'Parent', map_axe); hold on;
-        else
-            text(mean(boundary(:, 2)), mean(boundary(:, 1)), num2str(num_roi), 'Color', color, 'FontSize', 12, 'Parent', image_axe); hold on;
         end
-        %plot(t, trace, 'Color', colors(mod(num_roi - 1, length(colors)) + 1, :), 'Parent', trace_axe);
+        text(mean(boundary(:, 2)), mean(boundary(:, 1)), num2str(num_roi), 'Color', color, 'FontSize', 12, 'Parent', image_axe); hold on;
+        plot(t, trace_corrected, 'Color', color, 'Parent', trace_axe);
 
         % Wait for user input
         fig.UserData = [];
@@ -159,6 +120,7 @@ else
     end
 
 end
+close()
 fprintf('Finished ROI selection\n');
 end
 
@@ -168,4 +130,49 @@ if strcmp(event.Key, 'space')
 elseif strcmp(event.Key, 'return')
     fig.UserData = 'stop';
 end
+end
+
+function [map_axe, image_axe, im_adj, trace_axe] = GUIwithmap(map, movie_2D)
+    subplot(1,2,1);
+    map_axe = gca;
+    imagesc(map);
+    colorbar;
+    title(sprintf('Sensitivity MAP\n\nPress SPACE to continue\nPress ENTER to end'));
+    hold on;
+    axis image;
+    
+    % Display fluorescent image
+    subplot(2,2,2);
+    image_axe = gca;
+    % im_adj = imadjust(uint16(mean(movie_2D, 3)));
+    % imshow(im_adj);
+    im_adj = uint16(mean(movie_2D, 3));
+    imshow(im_adj,[min(im_adj,[],'all'),max(im_adj,[],'all')]);
+    hold on;
+    title('Fluorescent Image');
+    
+    % Plot Trace
+    subplot(2,2,4);
+    trace_axe = gca;
+    hold on;
+    xlabel('Time (s)');
+    ylabel('Intensity');
+end
+
+function [image_axe, im_adj, trace_axe] = GUIwithoutmap(movie_2D)
+    % Display fluorescent image without map
+    subplot(1,2,1);
+    image_axe = gca;
+    % im_adj = imadjust(uint16(mean(movie_2D, 3)));
+    im_adj = uint16(mean(movie_2D, 3));
+    imshow(im_adj,[min(im_adj,[],'all'),max(im_adj,[],'all')]);
+    hold on;
+    title('Fluorescent Image');
+    
+    % Plot Trace
+    subplot(1,2,2);
+    trace_axe = gca;
+    hold on;
+    xlabel('Time (s)');
+    ylabel('Intensity');
 end
