@@ -283,9 +283,7 @@ trace_filename = fullfile(save_path, '4_SNR.mat');
 save(trace_filename,"sentivity_trace",'SNR_traces');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-%% 
-
-% Statistic AP
+%% Statistic AP
 AP_list = cell(1, nrois);
 each_AP = struct('Trace', [], 'AP_number', [], 'AP_index',[],'AP_amp',[], ...
     'Amplitude', [],'FWHM',[], 'AP_sensitivity',[],'Sensitivity',[], ...
@@ -296,7 +294,7 @@ for i = 1:nrois % i for trace
     peaks_num = length(peaks_index{i});
     peaks_index_i = peaks_index{i};
     peaks_amp_i = peaks_amplitude{i};
-    each_trace_amp = SNR_traces(:,i)*peaks_polarity(i);
+    each_trace_amp = traces(:,i);
     each_trace_sensitivity = sentivity_trace(:,i);
     each_trace_SNR = SNR_traces(:,i);
     AP_list{i} = cell(1, length(peaks_index{i}));
@@ -331,7 +329,7 @@ for i = 1:nrois % i for trace
         Amplitude = abs(peak_amp_ij);
         Sensitivity = AP_sensitivity(AP_window_width+1) - 1 ;
         SNR = abs(AP_SNR(AP_window_width+1));
-        FWHM = calculate_FWHM(AP_amp, dt, AP_window_width, baselines(i), peaks_polarity(i));
+        FWHM = calculate_FWHM(AP_amp, dt, peaks_polarity(i));
 
         % save AP data
         each_AP = struct('Trace', i, 'AP_number', j, 'AP_index',AP_index, ...
@@ -351,6 +349,10 @@ avg_SNR = zeros(length(AP_list), 1);
 AP_number = zeros(length(AP_list), 1);
 ROI_number = zeros(length(AP_list), 1);
 
+figure()
+FWHM_axe = subplot(1,3,2);hold on;xlim([0,nrois+1]);
+amp_axe = subplot(1,3,3);hold on;xlim([0,nrois+1]);
+num_axe = subplot(1,3,1);hold on;xlim([0,nrois+1]);
 % 计算所有AP的SNR数据并存储在tables中
 table_name = fullfile(save_path,'AP_data.xlsx');
 for i = 1:length(AP_list)
@@ -373,6 +375,22 @@ for i = 1:length(AP_list)
             SNR_i(j)  = each_AP.SNR;
         end
 
+        % plot AP parameters
+        scatter(i,FWHM_i,'filled','Parent',FWHM_axe);hold on;
+        xlabel('ROI number','Parent',FWHM_axe);
+        ylabel('FWHM(ms)','Parent',FWHM_axe);
+       
+        
+        scatter(i,amp_i,'filled','Parent',amp_axe);hold on;
+        xlabel('ROI number','Parent',amp_axe);
+        ylabel('Amplitude','Parent',amp_axe);
+        
+
+        scatter(i,number_i,'filled','Parent',num_axe);hold on;
+        xlabel('ROI number','Parent',num_axe);
+        ylabel('AP number','Parent',num_axe);
+        
+
         % 为当前trace创建一个表格
         T = table(number_i, amp_i, FWHM_i, sensitivity_i, SNR_i, ...
             'VariableNames', {'Number', 'Amplitude', 'FWHM (ms)', 'Sensitivity', 'SNR'});
@@ -390,6 +408,13 @@ for i = 1:length(AP_list)
         ROI_number(i) = i;
     end
 end
+
+sgtitle('AP statistic');
+fig_filename = fullfile(save_path, '5_AP statistic.fig');
+png_filename = fullfile(save_path, '5_AP statistic.png');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
 
 T_ave = table(ROI_number, AP_number, avg_amp, avg_FWHM, avg_sensitivity, avg_SNR, ...
     'VariableNames', {'ROI Number','AP Number', 'Average Amplitude', 'Average FWHM (ms)', 'Average Sensitivity', 'Average SNR'});
@@ -443,8 +468,8 @@ title('Averaged of All');
 hold on;
 sgtitle('Averaged Sensitivity');
 hold on;
-fig_filename = fullfile(save_path, '5_average_AP_sensitivity.fig');
-png_filename = fullfile(save_path, '5_average_AP_sensitivity.png');
+fig_filename = fullfile(save_path, '6_average_AP_sensitivity.fig');
+png_filename = fullfile(save_path, '6_average_AP_sensitivity.png');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');

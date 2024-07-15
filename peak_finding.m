@@ -79,7 +79,7 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
         peak_threshold(i) = (peak_threshold(i) + peak_polarity(i) -1)/peak_polarity(i);
         peaks_index{i} = peak_x;
         current_trace = current_trace;
-        peaks_sensitivity{i} = abs(current_trace(peak_x)-mean(current_trace));
+        peaks_sensitivity{i} = current_trace(peak_x)-mean(current_trace);
 
         peaks_amplitude{i}  = peak_y;
         plot(peak_x, (peaks_amplitude{i}),'v','Color',colors(i,:),'MarkerFaceColor',colors(i,:));
