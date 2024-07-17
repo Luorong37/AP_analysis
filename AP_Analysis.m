@@ -37,15 +37,21 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\Luorong\2024.07.12_dueplex\1：10\\';
-file = '50%488-1';  % must add format.
+folder_path = 'E:\1_Data\Luorong\20240709_optopatch\\';
+file = 'sti90%\';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
 
 % read path
 file_path = fullfile(folder_path, file);
-[~, file_name, file_extension] = fileparts(file);
+if isfolder(file_path)
+    file_name = file;
+    file_dir = dir(file_path);
+    [~, ~, file_extension] = fileparts(file_dir.name(1));
+else
+    [~, file_name, file_extension] = fileparts(file_path);
+end
 % % when read a folder
 % if isfolder(file_path)
 %     file_extension = '.tif';
@@ -110,7 +116,7 @@ if isempty(mask_path)
 else
     mask_filename = fullfile(mask_path, '1_raw_ROI.mat');
     mask = load(mask_filename);
-    mask = mask.rois;
+    mask = mask.bwmask;
 end
 
 % -----------------------------------------------------------
@@ -559,6 +565,7 @@ end
 
 sgtitle('Firing rate');
 hold on;
+xlabel('Time(s)')
 
 fig_filename = fullfile(save_path, '7_firing_rate.fig');
 png_filename = fullfile(save_path, '7_firing_rate.png');

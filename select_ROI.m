@@ -122,7 +122,6 @@ else
     end
 
 end
-close()
 fprintf('Finished ROI selection\n');
 end
 

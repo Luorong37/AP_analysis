@@ -86,8 +86,11 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
         hold off;
         peaks_amplitude{i} = (peaks_amplitude{i} + peak_polarity(i) -1)/peak_polarity(i);
         
+        if numel(peak_x) == 0
+            peaks_polarity(i) = 'No peaks';
+        end
 
-        fprintf('%d peaks found in ROI %d, Polarity : %s\n',numel(peak_x),i,polarity)
+        fprintf('%d peaks found in ROI %d, Polarity : %s\n',numel(peak_x),i,peaks_polarity(i))
 
         % Wait for user input
         fig.UserData = [];
