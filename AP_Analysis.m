@@ -18,14 +18,14 @@
 %   freq = 400; % Frequency in Hz
 %
 % Author: Liu-Yang Luorong
-% Version: 3.0
-% Date: 2024.03
+% Version: 4.0
+% Date: 2024.07
 % GitHub: https://github.com/Luorong37/AP_analysis
 %
 % See also calculate_firing_rate, calculate_FWHM, create_map, calculate_SNR, fit_exp1, highpassfilter, select_ROI
 
 clear; clc;
-
+ 
 %% Loading raw data
 clear; clc;
 
@@ -37,8 +37,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\Luorong\20240709_optopatch\\';
-file = 'sti90%\';  % must add format.
+folder_path = 'E:\1_Data\CY\20240808_tail_injection_AP\very short barcode\';
+file = '9th';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
@@ -48,14 +48,10 @@ file_path = fullfile(folder_path, file);
 if isfolder(file_path)
     file_name = file;
     file_dir = dir(file_path);
-    [~, ~, file_extension] = fileparts(file_dir.name(1));
+    [~, ~, file_extension] = fileparts(file_dir(3).name);
 else
     [~, file_name, file_extension] = fileparts(file_path);
 end
-% % when read a folder
-% if isfolder(file_path)
-%     file_extension = '.tif';
-% end
 
 % create a folder for analysis
 save_path = fullfile(folder_path, [file_name, '_Analysis'], nowtime);

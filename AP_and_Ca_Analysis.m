@@ -56,10 +56,12 @@ options.colors = colors;
 
 % read path
 file_path = fullfile(folder_path, file);
-[~, file_name, file_extension] = fileparts(file);
-% when read a folder
 if isfolder(file_path)
-    file_extension = 'tif';
+    file_name = file;
+    file_dir = dir(file_path);
+    [~, ~, file_extension] = fileparts(file_dir(3).name);
+else
+    [~, file_name, file_extension] = fileparts(file_path);
 end
 
 % create a folder for analysis
