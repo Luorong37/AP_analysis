@@ -1,221 +1,214 @@
 function [bwmask, bwmask_ca, traces, traces_ca] = select_ROI_dual(movie, movie_ca, ...
-    nrows, ncols,nrows_ca, ncols_ca, t, t_ca, colors, mask, map, mask_ca, map_ca, correct)
-% 
-% ----------Write by Liu-Yang Luorong and ChatGPT----------
-% ----------POWERED by Zoulab in Peking University----------
-% Date: 23.11.16
-% MATLAB Version: R2022b
-% SELECT_ROI Allows for interactive selection of Regions of Interest (ROIs) in a movie data set.
-%
-%   This function is designed for interactive selection and visualization of ROIs in movie data. 
-%   It displays the movie and an optional sensitivity map, allowing the user to draw polygons 
-%   representing ROIs. The function then calculates and returns the mean intensity trace for each ROI.
-%
-%   Syntax:
-%   [rois, traces] = select_ROI(movie, num_rows, num_cols, t, colors, mask, map)
-%
-%   Parameters:
-%   movie - A 2D array representing the movie, with dimensions [ncols*nrows, nframes].
-%   nrows - Number of rows in the movie.
-%   ncols - Number of columns in the movie.
-%   t - Time vector corresponding to the movie frames.
-%   colors - A matrix of RGB values for differentiating multiple ROIs.
-%   mask - (Optional) A predefined set of masks for ROIs. If provided, the function skips manual selection.
-%   map - (Optional) A sensitivity map to be displayed alongside the movie for guidance in ROI selection.
-%
-%   Returns:
-%   rois - A cell array of masks for each selected ROI.
-%   traces - A matrix where each column represents the mean intensity trace of a corresponding ROI.
-%
-%   Description:
-%   - The function displays the movie and sensitivity map (if provided) in separate subplots.
-%   - Users can draw ROIs on the movie (if map were not provided) or sensitivity map. The ROIs are displayed as colored polygons.
-%   - For each ROI, the function calculates the mean intensity trace over time.
-%   - The process continues by user presses 'SPACE' until the user presses the 'Enter' key to end selection.
-%
-%   Example:
-%   [rois, traces] = select_ROI(movie_data, ncols, nrows, time_vector, color_matrix, [], sensitivity_map);
-%
-%   Notes:
-%   - The function requires an interactive MATLAB figure environment to work correctly.
-%   - The 'colors' parameter should have as many rows as the maximum number of ROIs expected to be selected.
-%   - If a 'mask' is provided, the function uses these masks instead of manual ROI selection.
-%   - Press 'Space' to continue drawing ROIs; press 'Enter' to end the selection process.
-%
-% See also IMAGESC, IMSHOW, DRAWPOLYGON, POLY2MASK, MEAN.
+    nrows, ncols, correct, map, map_ca, mask, mask_ca)
 
 colors = lines(100);
-
-if nargin < 12
-    correct = false;
+if nargin < 7, correct = false; 
 end
+% movie_3d = reshape(movie,ncols,nrows,[]);
+% movie_3d_ca = reshape(movie_ca,ncols,nrows,[]);
 
-% Initialize variables
-traces = [];
-traces_ca = [];
-bwmask = zeros(nrows,ncols);
-bwmask_ca = zeros(nrows,ncols);
-map_merge = [normalize_matrix(map); normalize_matrix(map_ca)];
-corrected = false;
+traces = []; traces_ca = [];
+bwmask = zeros(nrows,ncols); bwmask_ca = zeros(nrows,ncols);
+x_offset = 0; y_offset = 0;
+key = '';
 
-x_offset = 0;
-y_offset = 0;
+fig = gcf; set(fig,'Position',get(0,'Screensize'));
+set(gcf, 'KeyPressFcn', @(src, event) set_key_pressed(event, fig));
 
-% Set current figure to full screen and add keypress callback
-fig = gcf;
-set(fig,'Position',get(0,'Screensize'));
-set(gcf, 'KeyPressFcn', @(src, event) set_space_pressed(event, fig));
-
-% plot figure
 if ~isempty(map) && ~isempty(map_ca)
-    subplot(2,3,[1,4]);
-    imagesc(map_merge);
-    title('Sensitivity Map/nStart with voltage for offset correction');
-    map_axe = gca;
-    hold on;
-
-    % Plot Trace
-    v = subplot(2,3,[2,3]);
-    trace_axe = gca;
-    hold on;
-    xlabel('Time (s)');
-    ylabel('Voltage Intensity');
-    hold on;
-
-    ca = subplot(2,3,[5,6]);
-    trace_axe_ca = gca;
-    hold on;
-    xlabel('Time (s)');
-    ylabel('Calcium Intensity');
-    hold on;
+    [map_axe, map_ca_axe, img_axe, img_ca_axe, trace_axe, trace_ca_axe] = ...
+    GUI(map, map_ca, movie, movie_ca, ncols, nrows);
 end
 
-% % Mask provided, overlay ROI and traces
-% if ~isempty(mask)
-%     bwmask = mask;
-%     num_roi = max(bwmask(:));
-%     for i = 1:num_roi
-%         roi = (bwmask == i);
-%         trace = mean(movie(roi, :),1);
-%         traces = [traces trace'];
-%         boundary = bwboundaries(roi);
-%         plot(boundary{1}(:, 2), boundary{1}(:, 1), 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'LineWidth', 2, 'Parent', image_axe);
-%         plot(t, trace, 'Color', colors(mod(i - 1, length(colors)) + 1, :), 'Parent', trace_axe);
-%     end
+if correct
+    [x_offset, y_offset] = handle_manual_correction(map_axe,map_ca_axe, ncols, nrows, img_axe, img_ca_axe);
+    corrected = true;
+else
+    corrected = true;
+end
 
-% else
-    % ROI selection process
-    while true
-
-        num_roi = max(bwmask(:)) + 1;
-        roi = drawpolygon('Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 2, 'Parent', map_axe);       
-
-        if ~correct || corrected
-            if mean(roi.Position(:,2)) > ncols
-                % select in calcium map
-                roi_ca = roi;
-                mask_ca = poly2mask(roi_ca.Position(:, 1), roi_ca.Position(:, 2)-ncols, ncols, nrows);
-                boundary_ca = cell2mat(bwboundaries(mask_ca));
-                % draw in voltage map
-                roi_v.Position = translate(polyshape(roi.Position),[x_offset,y_offset-ncols]).Vertices;
-                mask = poly2mask(roi_v.Position(:, 1), roi_v.Position(:, 2), ncols, nrows);
-                boundary =  cell2mat(bwboundaries(mask));
-                plot(boundary(:, 2), boundary(:, 1), ...
-                    'Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 2, 'Parent', map_axe);hold on;
-            else
-                % select in voltage map
-                mask = poly2mask(roi.Position(:, 1), roi.Position(:, 2), ncols, nrows);
-                boundary = cell2mat(bwboundaries(mask));
-                % draw in calcium map
-                roi_ca.Position = translate(polyshape(roi.Position),[-x_offset,-y_offset+ncols]).Vertices;
-                mask_ca = poly2mask(roi_ca.Position(:, 1), roi_ca.Position(:, 2)-ncols, ncols, nrows);
-                boundary_ca =  cell2mat(bwboundaries(mask_ca));
-                plot(boundary_ca(:, 2), boundary_ca(:, 1) + ncols, ...
-                    'Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 2, 'Parent', map_axe);hold on;             
-            end
-
-        else
-            % select in voltage map
-            mask = poly2mask(roi.Position(:, 1), roi.Position(:, 2), ncols, nrows);
-            boundary =  cell2mat(bwboundaries(mask));
-            % draw in calcium map
-            plot(boundary(:, 2), boundary(:, 1) + ncols, ...
-                'Color', 'r', 'LineWidth', 1, 'Parent', map_axe);hold on;
-
-            % select calcium ROI
-            roi_ca = drawpolygon('Color', colors(mod(num_roi, length(colors)), :), 'LineWidth', 2, 'Parent', map_axe);hold on;   
-            mask_ca = poly2mask(roi_ca.Position(:, 1), roi_ca.Position(:, 2)-ncols, ncols, nrows);
-            boundary_ca = cell2mat(bwboundaries(mask_ca));
-
-            % calculate centroid for each roi
-            [cent.x, cent.y] = centroid(polyshape(roi.Position));
-            [cent_ca.x, cent_ca.y] = centroid(polyshape(roi_ca.Position));
-
-            % calculate offset
-            offset = [cent.x, cent.y] - [cent_ca.x, cent_ca.y - ncols] ;
-            x_offset = offset(1);
-            y_offset = offset(2);
-            plot([cent.x,cent_ca.x],[cent.y+ ncols, cent_ca.y ],'black','LineWidth',3,'Marker','o');hold on;   
-            fprintf('offset = %f, %f\n',offset)
-            corrected = true;
-        end
-
-        % save_mask
-        bwmask(mask) = num_roi;
-        bwmask_ca(mask_ca) = num_roi;
-
-        % save trace
-        trace = mean(movie(mask, :));
-        [trace_corrected, fitted_curve] = fit_exp2(trace');
-        traces = [traces normalize(trace_corrected)];
-
-        trace_ca = mean(movie_ca(mask, :));
-        [trace_corrected_ca, fitted_curve_ca] = fit_exp2(trace_ca');
-        traces_ca = [traces_ca normalize(trace_corrected_ca)];
-
-
-        % plot trace
-        cla(v);
-        cla(ca);
-        plot(t, trace, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe);  hold on;
-        plot(t_ca, trace_ca, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe_ca);  hold on;
-        plot(t, fitted_curve, 'Color', 'r', 'Parent', trace_axe);  hold on;
-        plot(t_ca, fitted_curve_ca, 'Color', 'r', 'Parent', trace_axe_ca);  hold on;
-        
-        % 标注ROI编号
-        text(mean(boundary(:, 2)), mean(boundary(:, 1)), num2str(num_roi), 'Color', 'k', 'FontSize', 12, 'Parent', map_axe); hold on;
-        text(mean(boundary_ca(:, 2)), mean(boundary_ca(:, 1)) + ncols, num2str(num_roi), 'Color', 'k', 'FontSize', 12, 'Parent', map_axe); hold on;
-
-        % plot(t, trace, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe); hold on;
-        % plot(t_ca, trace_ca, 'Color', colors(mod(num_roi, length(colors)), :), 'Parent', trace_axe_ca); hold on;
-        % 
-        % Wait for user input
-        fig.UserData.space = [];
-        waitfor(fig, 'UserData');
-        if strcmp(fig.UserData.space, 'stop')
-            break;
-        elseif strcmp(fig.UserData.space, 'spacePressed')
-            continue;
-        end
+while corrected
+    num_roi = max(bwmask(:)) + 1;
+    color = colors(num_roi,:);
+    waitforbuttonpress;
+    axe1 = gca;
+    if any(strcmp(key, {'v', 'c'}))
+        % plot in img
+        [mask_v, mask_ca, boundary_v, boundary_ca] = handle_offset_select(axe1, x_offset, y_offset, ncols, nrows, img_axe, img_ca_axe, color);
+    else
+        % plot in map
+        [mask_v, mask_ca, boundary_v, boundary_ca] = handle_offset_select(axe1, x_offset, y_offset, ncols, nrows, map_axe, map_ca_axe, color);
     end
+    % Plot corrected ROIs on images
+    [map_roi_v, map_roi_ca, img_roi_v, img_roi_ca, text_v, text_ca, text_img_v, text_img_ca] = ......
+    plotROI(boundary_v, boundary_ca, map_axe, map_ca_axe, img_axe, img_ca_axe, num_roi, color);
 
-% end
+    % save trace and mask
+    bwmask(mask_v) = num_roi; bwmask_ca(mask_ca) = num_roi;
+
+    trace = mean(movie(mask_v(:),:),1);
+    [trace_corrected, ~] = fit_exp2(trace'); traces = [traces trace_corrected];
+    trace_ca = mean(movie_ca(mask_ca(:),:), 1);
+    [trace_corrected_ca, ~] = fit_exp2(trace_ca'); traces_ca = [traces_ca trace_corrected_ca];
+    cla(trace_axe); plot(trace_corrected, 'Color', color, 'Parent', trace_axe);  hold on;
+    cla(trace_ca_axe); plot(trace_corrected_ca, 'Color', color, 'Parent', trace_ca_axe);  hold on;
+
+    % 
+    key = wait_for_key(fig);
+    if strcmp(key, 'return')
+        break;
+    elseif strcmp(key, 'space')
+        continue;
+    elseif any(strcmp(key, {'v', 'c', 'r'}))
+        % reset data
+        num_roi = num_roi - 1;
+        bwmask(mask_v) = 0; bwmask_ca(mask_ca) = 0;
+        traces = traces(:,end-1); traces_ca = traces_ca(:,end-1);
+
+        % reset plot
+        delete(map_roi_v); delete(map_roi_ca); delete(img_roi_v); delete(img_roi_ca); 
+        delete(text_v); delete(text_ca); delete(text_img_v); delete(text_img_ca);  
+        
+        continue;
+    end
+end
 fprintf('Finished ROI selection\n');
 end
 
-function set_space_pressed(event, fig)
-if strcmp(event.Key, 'space')
-    fig.UserData.space = 'spacePressed';
-elseif strcmp(event.Key, 'return')
-    fig.UserData.space = 'stop';
+function set_key_pressed(event, fig)
+if any(strcmp(event.Key, {'space', 'return', 'v', 'c', 'r'}))
+    fig.UserData.space = event.Key;
 end
 
 end
+function key = wait_for_key(fig)
+% Waits for a keypress event to continue or stop ROI selection
 
-function matrix_normalized = normalize_matrix(matrix)
-min_value = min(matrix(:));
-max_value = max(matrix(:));
+    fig.UserData.space = [];
+    waitfor(fig, 'UserData');
+    key = fig.UserData.space;
+end
 
-% 全局归一化矩阵到 [0, 1]
-matrix_normalized = (matrix - min_value) / (max_value - min_value);
+function     [map_axe, map_ca_axe, img_axe, img_ca_axe, trace_axe, trace_ca_axe] = ...
+    GUI(map, map_ca, movie, movie_ca, ncols, nrows)
+
+subplot(2,3,1); imagesc(map); title(sprintf('Sensitivity Map\nclick here before draw ROI\nSelect this first to correct offset if need'));
+map_axe = gca; hold on;
+subplot(2,3,4); imagesc(map_ca); title(sprintf('Sensitivity Map Ca\nclick here before draw ROI\nSelect this second to correct offset if need'));
+map_ca_axe = gca; hold on;
+
+img_axe = subplot(2,3,2); hold on;
+img = reshape(mean(movie,2), ncols, nrows);
+normalized_img = (img - min(img(:))) / (max(img(:)) - min(img(:)));
+imshow(normalized_img);
+title('Voltage image'); hold on;
+
+img_ca_axe = subplot(2,3,5); hold on;
+img_ca = reshape(mean(movie_ca,2), ncols, nrows);
+normalized_img_ca = (img_ca - min(img_ca(:))) / (max(img_ca(:)) - min(img_ca(:)));
+imshow(normalized_img_ca);
+title('Calcium image'); hold on;
+
+subplot(2,3,3); xlabel('Time '); ylabel('Voltage Intensity');
+trace_axe = gca; hold on;
+subplot(2,3,6);  xlabel('Time'); ylabel('Calcium Intensity');
+trace_ca_axe = gca; hold on;
+% set(map_axe, 'ButtonDownFcn', @(~,~) set_gca(gcf, map_axe));
+% set(map_ca_axe, 'ButtonDownFcn', @(~,~) set_gca(gcf, map_ca_axe));
+% set(img_axe, 'ButtonDownFcn', @(~,~) set_gca(gcf, img_axe));
+% set(img_ca_axe, 'ButtonDownFcn', @(~,~) set_gca(gcf, img_ca_axe));
+
+end
+
+function [x_offset, y_offset] = handle_manual_correction(map_axe,map_ca_axe, ncols, nrows, img_axe, img_ca_axe)
+% Handles manual correction for ROIs in both maps and calculates the offset
+    waitforbuttonpress;
+    if map_axe == gca || img_axe == gca
+        first_axe = 'v'; second_axe = 'c';
+    elseif map_ca_axe == gca || img_ca_axe == gca
+        first_axe = 'c'; second_axe = 'v';
+    end
+
+    % Draw ROI in voltage map
+    first_roi = drawpolygon('LineWidth', 2, 'Parent', gca);
+    mask = poly2mask(first_roi.Position(:, 1), first_roi.Position(:, 2), ncols, nrows);
+    boundary = cell2mat(bwboundaries(mask));
+    
+    % Draw corrected ROI in calcium map
+    if map_axe == gca
+        set(gcf, 'CurrentAxes', map_ca_axe);
+    elseif map_ca_axe == gca
+        set(gcf, 'CurrentAxes', map_axe);
+    elseif img_axe == gca
+        set(gcf, 'CurrentAxes', img_ca_axe);
+    elseif img_ca_axe == gca
+        set(gcf, 'CurrentAxes', img_axe);
+    end
+    ref_roi = plot(boundary(:, 2), boundary(:, 1), 'Color', 'r', 'LineWidth', 1, 'Parent', gca); hold on;
+    
+    % Select calcium ROI and calculate offset
+    second_roi = drawpolygon('Color', 'g', 'LineWidth', 2, 'Parent', gca); hold on;
+    % mask_ca = poly2mask(second_roi.Position(:, 1), second_roi.Position(:, 2), ncols, nrows);
+    % boundary_ca = cell2mat(bwboundaries(mask_ca));
+
+    % calculate offset
+    if first_axe == 'v'
+    [cent_v.x, cent_v.y] = centroid(polyshape(first_roi.Position));
+    [cent_ca.x, cent_ca.y] = centroid(polyshape(second_roi.Position));
+    elseif first_axe == 'c'
+    [cent_ca.x, cent_ca.y] = centroid(polyshape(first_roi.Position));
+    [cent_v.x, cent_v.y] = centroid(polyshape(second_roi.Position));
+    end
+    offset = [cent_v.x, cent_v.y] - [cent_ca.x, cent_ca.y];
+    x_offset = offset(1);
+    y_offset = offset(2);
+    plot([cent_v.x, cent_ca.x], [cent_v.y, cent_ca.y], 'black', 'LineWidth', 3, 'Marker', 'o'); hold on;
+    fprintf('offset = %f, %f\n', offset);
+    
+    delete(first_roi);
+    delete(second_roi);
+    delete(ref_roi);
+end
+
+function [mask_v, mask_ca, boundary_v, boundary_ca] = ...
+handle_offset_select(axe1, x_offset, y_offset, ncols, nrows, v_axe, ca_axe, color)
+% Handles ROI selection
+
+    roi1 = drawpolygon('Color', color, 'LineWidth', 2, 'Parent', axe1);
+    mask1 = poly2mask(roi1.Position(:, 1), roi1.Position(:, 2), ncols, nrows);
+    boundary1 = cell2mat(bwboundaries(mask1));
+    
+    % Calculate corresponding ROI
+    if axe1 == v_axe
+        roi2 = translate(polyshape(roi1.Position),[-x_offset, -y_offset]).Vertices;
+    elseif axe1 == ca_axe
+        roi2 = translate(polyshape(roi1.Position),[x_offset, y_offset]).Vertices;
+    end
+    mask2 = poly2mask(roi2(:, 1), roi2(:, 2), ncols, nrows);
+    boundary2 = cell2mat(bwboundaries(mask2));
+    
+    % allocate roi to voltage and calcium
+    if axe1 == v_axe
+        mask_v = mask1; mask_ca = mask2;
+        boundary_v = boundary1; boundary_ca = boundary2;
+    elseif axe1 == ca_axe
+        mask_v = mask2; mask_ca = mask1;
+        boundary_v = boundary2; boundary_ca = boundary1;
+    end
+    delete(roi1);
+end
+
+function [map_roi_v, map_roi_ca, img_roi_v, img_roi_ca, text_v, text_ca, text_img_v, text_img_ca] = ......
+    plotROI(boundary_v, boundary_ca, map_axe, map_ca_axe, img_axe, img_ca_axe, num_roi, color)
+    % Plot corrected ROIs on images
+    map_roi_v = plot(boundary_v(:, 2), boundary_v(:, 1), 'Color', color, 'LineWidth', 1, 'Parent', map_axe); hold on;
+    map_roi_ca = plot(boundary_ca(:, 2), boundary_ca(:, 1), 'Color', color, 'LineWidth', 1, 'Parent', map_ca_axe); hold on;
+    img_roi_v = plot(boundary_v(:, 2), boundary_v(:, 1), 'Color', color, 'LineWidth', 1, 'Parent', img_axe); hold on;
+    img_roi_ca = plot(boundary_ca(:, 2), boundary_ca(:, 1), 'Color', color, 'LineWidth', 1, 'Parent', img_ca_axe); hold on;
+    
+    % 标注ROI编号
+    text_v = text(mean(boundary_v(:, 2)), mean(boundary_v(:, 1)), num2str(num_roi), 'Color', 'k', 'FontSize', 12, 'Parent', map_axe); hold on;
+    text_ca = text(mean(boundary_ca(:, 2)), mean(boundary_ca(:, 1)), num2str(num_roi), 'Color', 'k', 'FontSize', 12, 'Parent', map_ca_axe); hold on;
+    text_img_v = text(mean(boundary_v(:, 2)), mean(boundary_v(:, 1)), num2str(num_roi), 'Color', 'k', 'FontSize', 12, 'Parent', img_axe); hold on;
+    text_img_ca = text(mean(boundary_ca(:, 2)), mean(boundary_ca(:, 1)), num2str(num_roi), 'Color', 'k', 'FontSize', 12, 'Parent', img_ca_axe); hold on;
 end

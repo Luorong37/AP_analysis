@@ -36,8 +36,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'G:\2024.05.30_dual_P2A';
-file = '20240530-182118POA';  % must add format.
+folder_path = 'D:\1_Data\d. Dual-color imaging in SCN\2024.05.30_dual_P2A';
+file = '20240530-merge';  % must add format.
 file_path = fullfile(folder_path, file);
 file_path_ca = [file_path,'_Green']; % defined name 
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
@@ -69,10 +69,10 @@ save_path = fullfile(folder_path, [file_name, '_Analysis'], nowtime);
 mkdir(save_path);
 
 % Load image file
-[movie, ncols, nrows, nframes] = load_movie(file_path,file_extension,100000);
+[movie, ncols, nrows, nframes] = load_movie(file_path);
 
 if Calcium_analysis
-    [movie_ca, ncols_ca, nrows_ca, nframes_ca] = load_movie(file_path_ca,file_extension,100);
+    [movie_ca, ncols_ca, nrows_ca, nframes_ca] = load_movie(file_path_ca);
 end
 
 % Bin arrange
@@ -233,13 +233,14 @@ fprintf('Finished exp2 fit\n')
 %% Select ROI
 t1 = tic; % Start a timer
 
-% movie = movie ./ fitted_curves';
-% movie_ca = movie_ca ./ fitted_curves_ca';
+% pAce sparaly corrected each ROI
+% movie_corrected = movie ./ fitted_curves';
+% movie_ca_corrected = movie_ca ./ fitted_curves_ca';
 
 % with or wihout Mask and Map
-correct = true; % true for correct offset
-[bwmask, bwmask_ca, traces, traces_ca] = select_ROI_dual(movie, movie_ca, ...
-    nrows, ncols,nrows_ca, ncols_ca, t, t_ca, colors, mask, map, mask_ca, map_ca, correct);
+correct = true; %true for correct offset
+[bwmask, bwmask_ca, traces, traces_ca] = select_ROI_dual(movie , movie_ca, ...
+    nrows, ncols, correct, map, map_ca, mask, mask_ca);
 
 nrois = size(traces,2);
 
@@ -513,8 +514,35 @@ mat_filename = fullfile(save_path, '5_Correlation_heatmap.mat');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(mat_filename,'heatmap_corrtest',"heatmap_speartest");
+%% plot fluorescent image
+f = figure();
+vol_img = subplot(1,2,1);
+movie_vol_2D = reshape(mean(movie,2), ncols, nrows, []).*map;
+imshow(imadjust(uint16(movie_vol_2D),stretchlim(uint16(movie_vol_2D))*1.1, []));
+hold on;
 
+cal_img = subplot(1,2,2);
+movie_cal_2D = reshape( uint16(mean(movie_ca,2)), ncols_ca, nrows_ca, []);
+imshow(imadjust(movie_cal_2D,stretchlim(movie_cal_2D)*1.1, []));
+hold on;
 
+for i = 1:nrois
+    roi = (bwmask == i);
+    boundary = cell2mat(bwboundaries(roi));
+    plot(boundary(:, 2), boundary(:, 1), 'Color', 'r', 'LineWidth', 2, 'Parent',vol_img);
+    % 标注ROI编号
+    text(mean(boundary(:, 2)) + 6, mean(boundary(:, 1)) - 6, num2str(i), ...
+        'Color', 'r', 'FontSize', 12, 'Parent', vol_img); hold on;
+
+    roi_ca = (bwmask_ca == i);
+    boundary = cell2mat(bwboundaries(roi_ca));
+    plot(boundary(:, 2), boundary(:, 1), 'Color', 'g', 'LineWidth', 2, 'Parent',cal_img);
+    % 标注ROI编号
+    text(mean(boundary(:, 2)) + 6, mean(boundary(:, 1)) - 6, num2str(i), ...
+        'Color', 'g', 'FontSize', 12, 'Parent', cal_img); hold on;
+end
+%%
+map
 %% Save parameter
 % 定义保存路径和文件名
 save_filename = fullfile(save_path, '-1_workspace_variables.mat');

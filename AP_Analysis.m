@@ -37,8 +37,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\CY\20240808_tail_injection_AP\very short barcode\';
-file = '9th';  % must add format.do not add '\' at last
+folder_path = 'E:\1_Data\Luorong\20240815optopatchmix\VOI1\';
+file = 'foll voi sti50 488';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
