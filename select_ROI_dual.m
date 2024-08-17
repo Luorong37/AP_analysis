@@ -63,7 +63,11 @@ while corrected
         % reset data
         num_roi = num_roi - 1;
         bwmask(mask_v) = 0; bwmask_ca(mask_ca) = 0;
-        traces = traces(:,end-1); traces_ca = traces_ca(:,end-1);
+        if num_roi == 0
+            traces = []; traces_ca = [];
+        else
+            traces = traces(:,end-1); traces_ca = traces_ca(:,end-1);
+        end
 
         % reset plot
         delete(map_roi_v); delete(map_roi_ca); delete(img_roi_v); delete(img_roi_ca); 
@@ -92,9 +96,9 @@ end
 function     [map_axe, map_ca_axe, img_axe, img_ca_axe, trace_axe, trace_ca_axe] = ...
     GUI(map, map_ca, movie, movie_ca, ncols, nrows)
 
-subplot(2,3,1); imagesc(map); title(sprintf('Sensitivity Map\nclick here before draw ROI\nSelect this first to correct offset if need'));
+subplot(2,3,1); imagesc(map); title(sprintf('Sensitivity Map\nclick to draw ROI on this map\nSelect this first to correct offset if need'));
 map_axe = gca; hold on;
-subplot(2,3,4); imagesc(map_ca); title(sprintf('Sensitivity Map Ca\nclick here before draw ROI\nSelect this second to correct offset if need'));
+subplot(2,3,4); imagesc(map_ca); title(sprintf('Sensitivity Map Ca\nclick to draw ROI on this map\nSelect this second to correct offset if need'));
 map_ca_axe = gca; hold on;
 
 img_axe = subplot(2,3,2); hold on;
