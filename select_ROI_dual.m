@@ -39,6 +39,7 @@ while corrected
         % plot in map
         [mask_v, mask_ca, boundary_v, boundary_ca] = handle_offset_select(axe1, x_offset, y_offset, ncols, nrows, map_axe, map_ca_axe, color);
     end
+
     % Plot corrected ROIs on images
     [map_roi_v, map_roi_ca, img_roi_v, img_roi_ca, text_v, text_ca, text_img_v, text_img_ca] = ......
     plotROI(boundary_v, boundary_ca, map_axe, map_ca_axe, img_axe, img_ca_axe, num_roi, color);
@@ -58,6 +59,7 @@ while corrected
     if strcmp(key, 'return')
         break;
     elseif strcmp(key, 'space')
+        key = '';
         continue;
     elseif any(strcmp(key, {'v', 'c', 'r'}))
         % reset data
