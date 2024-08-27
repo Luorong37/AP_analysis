@@ -1,10 +1,10 @@
 function FWHM = calculate_FWHM(AP_amp, dt, polarity)
 
-AP_window_width = (numel(AP_amp)-1)/2;
+AP_window_width = floor((numel(AP_amp)-1)/2);
 
 % normalization
 % AP_amp = AP_amp .* polarity +1 - polarity;
-baseline = mean(AP_amp([1:AP_window_width/2,AP_window_width*3/2:numel(AP_amp)]),'omitnan');
+baseline = mean(AP_amp([1:floor(AP_window_width/2),floor(AP_window_width*3/2):numel(AP_amp)]),'omitnan');
 % baseline = baseline .* polarity +1 - polarity;
 
 % Calculate the baseline and half-maximum value

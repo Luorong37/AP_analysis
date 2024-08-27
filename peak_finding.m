@@ -1,4 +1,4 @@
-function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = ...
+function [peaks_polarity, peaks_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = ...
                                             peak_finding(traces_corrected)
     %PEAK_FINDING 寻找给定ROI信号中的峰值。
     %
@@ -26,12 +26,12 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
     % 初始化变量
     nrois = size(traces_corrected,2);
     colors = lines(100);
-    peak_polarity = zeros(1,nrois);
-    peak_threshold = zeros(1,nrois);
+    peaks_polarity = zeros(1,nrois);
+    peaks_threshold = zeros(1,nrois);
     peaks_amplitude = cell(1, nrois);
     peaks_index = cell(1, nrois);
     peaks_sensitivity = cell(1, nrois);
-    MinPeakProminence_factor = 0.4; % 定义最小峰值显著性因子
+    MinPeakProminence_factor = 0.5; % 定义最小峰值显著性因子
     fig = figure; 
     set(gcf,'Position',get(0,'Screensize'));
 
@@ -51,32 +51,32 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
 
         % 确定峰值极性
         if abs(min(current_trace) - mean(current_trace)) < max(abs(current_trace) - mean(current_trace))
-            peak_polarity(i) = 1;
+            peaks_polarity(i) = 1;
             polarity = 'Positive';        
         else
-            peak_polarity(i) = -1;
+            peaks_polarity(i) = -1;
             polarity = 'Negative';
         end
 
         % plot trace
-        plot_trace = current_trace * peak_polarity(i)+ 1 -peak_polarity(i) ;
+        plot_trace = current_trace * peaks_polarity(i)+ 1 -peaks_polarity(i) ;
         plot(plot_trace, 'Color', colors(i,:)); hold on;
         title(sprintf(['ROI %d, polarity = %s\n' ...
             'If no peaks, click a point above trace\n' ...
             'Press SPACE for continue, Press ENTER for end, Press R for reselect\n'], i , polarity));
 
         % set threshold
-        [~, peak_threshold(i)] = ginput(1) ;
-        plot(ones(1,size(traces_corrected,1)).*peak_threshold(i),'Color',colors(i,:),'LineWidth',2);
+        [~, peaks_threshold(i)] = ginput(1) ;
+        plot(ones(1,size(traces_corrected,1)).*peaks_threshold(i),'Color',colors(i,:),'LineWidth',2);
         hold on;
         
 
         % 寻找峰值
         MinPeakProminence = (max(plot_trace)-mean(plot_trace)) * MinPeakProminence_factor;
         [peak_y, peak_x] = findpeaks(plot_trace, 'MinPeakProminence', ...
-            MinPeakProminence, 'MinPeakHeight', peak_threshold(i));
+            MinPeakProminence, 'MinPeakHeight', peaks_threshold(i));
         
-        peak_threshold(i) = (peak_threshold(i) + peak_polarity(i) -1)/peak_polarity(i);
+        peaks_threshold(i) = (peaks_threshold(i) + peaks_polarity(i) -1)/peaks_polarity(i);
         peaks_index{i} = peak_x;
         current_trace = current_trace;
         peaks_sensitivity{i} = current_trace(peak_x)-mean(current_trace);
@@ -84,10 +84,10 @@ function [peak_polarity, peak_threshold, peaks_index, peaks_amplitude, peaks_sen
         peaks_amplitude{i}  = peak_y;
         plot(peak_x, (peaks_amplitude{i}),'v','Color',colors(i,:),'MarkerFaceColor',colors(i,:));
         hold off;
-        peaks_amplitude{i} = (peaks_amplitude{i} + peak_polarity(i) -1)/peak_polarity(i);
+        peaks_amplitude{i} = (peaks_amplitude{i} + peaks_polarity(i) -1)/peaks_polarity(i);
         
         if numel(peak_x) == 0
-            peaks_polarity(i) = 'No peaks';
+            peaks_polarity(i) = 0;
         end
 
         fprintf('%d peaks found in ROI %d, Polarity : %s\n',numel(peak_x),i,peaks_polarity(i))

@@ -23,8 +23,6 @@
 % GitHub: https://github.com/Luorong37/AP_analysis
 %
 % See also calculate_firing_rate, calculate_FWHM, create_map, calculate_SNR, fit_exp1, highpassfilter, select_ROI
-
-clear; clc;
  
 %% Loading raw data
 clear; clc;
@@ -37,8 +35,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\Luorong\20240815optopatchmix\VOI1\';
-file = 'foll voi sti50 488';  % must add format.do not add '\' at last
+folder_path = 'D:\1_Data\1m. Single color recording in slice';
+file = '\20230317-170518beside';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
@@ -275,8 +273,8 @@ for i = 1 : nrois
     else
         [SNR_traces(:,i),baselines(i)]  = calculate_SNR(traces_corrected(:,i));
     end
-    [~] = offset_plot(SNR_traces,t);
 end
+[~] = offset_plot(SNR_traces,t);
 
 fig_filename = fullfile(save_path, '4_SNR.fig');
 png_filename = fullfile(save_path, '4_SNR.png');

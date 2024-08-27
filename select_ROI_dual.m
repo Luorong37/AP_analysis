@@ -10,34 +10,34 @@ end
 traces = []; traces_ca = [];
 bwmask = zeros(nrows,ncols); bwmask_ca = zeros(nrows,ncols);
 x_offset = 0; y_offset = 0;
-key = '';
+key = ''; 
+selected = false;
 
 fig = gcf; set(fig,'Position',get(0,'Screensize'));
 set(gcf, 'KeyPressFcn', @(src, event) set_key_pressed(event, fig));
+[map_axe, map_ca_axe, img_axe, img_ca_axe, trace_axe, trace_ca_axe] = GUI(map, map_ca, movie, movie_ca, ncols, nrows);
 
-if ~isempty(map) && ~isempty(map_ca)
-    [map_axe, map_ca_axe, img_axe, img_ca_axe, trace_axe, trace_ca_axe] = ...
-    GUI(map, map_ca, movie, movie_ca, ncols, nrows);
+if ~isempty(mask) && ~isempty(mask_ca)
+    [traces, traces_ca, bwmask, bwmask_ca] = select_by_mask(mask, colors, mask_ca, map_axe, map_ca_axe, img_axe, img_ca_axe, movie, traces, movie_ca, traces_ca, trace_axe, trace_ca_axe);
+    selected = true;
 end
 
-if correct
+if correct && ~selected
     [x_offset, y_offset] = handle_manual_correction(map_axe,map_ca_axe, ncols, nrows, img_axe, img_ca_axe);
     corrected = true;
 else
     corrected = true;
 end
 
-while corrected
+while corrected && ~selected
     num_roi = max(bwmask(:)) + 1;
     color = colors(num_roi,:);
-    waitforbuttonpress;
-    axe1 = gca;
     if any(strcmp(key, {'v', 'c'}))
         % plot in img
-        [mask_v, mask_ca, boundary_v, boundary_ca] = handle_offset_select(axe1, x_offset, y_offset, ncols, nrows, img_axe, img_ca_axe, color);
+        [mask_v, mask_ca, boundary_v, boundary_ca] = handle_offset_select(x_offset, y_offset, ncols, nrows, img_axe, img_ca_axe, color);
     else
         % plot in map
-        [mask_v, mask_ca, boundary_v, boundary_ca] = handle_offset_select(axe1, x_offset, y_offset, ncols, nrows, map_axe, map_ca_axe, color);
+        [mask_v, mask_ca, boundary_v, boundary_ca] = handle_offset_select(x_offset, y_offset, ncols, nrows, map_axe, map_ca_axe, color);
     end
 
     % Plot corrected ROIs on images
@@ -177,9 +177,18 @@ function [x_offset, y_offset] = handle_manual_correction(map_axe,map_ca_axe, nco
 end
 
 function [mask_v, mask_ca, boundary_v, boundary_ca] = ...
-handle_offset_select(axe1, x_offset, y_offset, ncols, nrows, v_axe, ca_axe, color)
-% Handles ROI selection
+handle_offset_select(x_offset, y_offset, ncols, nrows, v_axe, ca_axe, color)
 
+% Handles ROI selection 
+    peak = true;
+
+    while peak
+    waitforbuttonpress;
+    axe1 = gca;
+    if isequal(axe1, v_axe) || isequal(axe1, ca_axe)
+        peak = false;
+    end
+    end
     roi1 = drawpolygon('Color', color, 'LineWidth', 2, 'Parent', axe1);
     mask1 = poly2mask(roi1.Position(:, 1), roi1.Position(:, 2), ncols, nrows);
     boundary1 = cell2mat(bwboundaries(mask1));
@@ -217,4 +226,25 @@ function [map_roi_v, map_roi_ca, img_roi_v, img_roi_ca, text_v, text_ca, text_im
     text_ca = text(mean(boundary_ca(:, 2)), mean(boundary_ca(:, 1)), num2str(num_roi), 'Color', 'k', 'FontSize', 12, 'Parent', map_ca_axe); hold on;
     text_img_v = text(mean(boundary_v(:, 2)), mean(boundary_v(:, 1)), num2str(num_roi), 'Color', 'k', 'FontSize', 12, 'Parent', img_axe); hold on;
     text_img_ca = text(mean(boundary_ca(:, 2)), mean(boundary_ca(:, 1)), num2str(num_roi), 'Color', 'k', 'FontSize', 12, 'Parent', img_ca_axe); hold on;
+end
+
+function [traces, traces_ca, bwmask, bwmask_ca] = select_by_mask(mask, colors, mask_ca, map_axe, map_ca_axe, img_axe, img_ca_axe, movie, traces, movie_ca, traces_ca, trace_axe, trace_ca_axe)
+for i = 1: max(mask(:))
+    fprintf('plot ROI %d\n',i);
+    color = colors(i,:);
+    mask_vi = (mask == i);
+    mask_cai = (mask_ca == i);
+    boundary_v = cell2mat(bwboundaries(mask_vi));
+    boundary_ca = cell2mat(bwboundaries(mask_cai));
+    plotROI(boundary_v, boundary_ca, map_axe, map_ca_axe, img_axe, img_ca_axe, i, color);
+    trace = mean(movie(mask_vi(:),:),1);
+    [trace_corrected, ~] = fit_exp2(trace'); traces = [traces trace_corrected];
+    trace_ca = mean(movie_ca(mask_cai(:),:), 1);
+    [trace_corrected_ca, ~] = fit_exp2(trace_ca'); traces_ca = [traces_ca trace_corrected_ca];
+    cla(trace_axe); plot(trace_corrected, 'Color', color, 'Parent', trace_axe);  hold on;
+    cla(trace_ca_axe); plot(trace_corrected_ca, 'Color', color, 'Parent', trace_ca_axe);  hold on;
+    % pause(0.5);
+end
+bwmask = mask;
+bwmask_ca = mask_ca;
 end

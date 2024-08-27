@@ -51,7 +51,7 @@ bin_ca = 1;
 % Define parameters
 peakfinding = false;
 Calcium_analysis = true;
-colors = [lines(7);hsv(5);spring(3);winter(3);gray(3)];
+colors = lines(100);
 options.colors = colors;
 
 % read path
@@ -144,15 +144,15 @@ else
     map = map.map;
 end
 
-mask_path = ''; % define as ''
+mask_path = 'D:\1_Data\d. Dual-color imaging in SCN\2024.05.30_dual_P2A\20240530-merge_Analysis\2024-08-17 15-33-58'; % define as ''
 if isempty(mask_path)
     mask = []; 
     mask_ca = [];
 else
-    mask_path = 'E:\1_Data\Luorong\430_5min\20240430-172447_5min_2_Analysis\2024-05-07 14-56-01';
     mask_filename = fullfile(mask_path, '1_raw_ROI.mat');
-    mask = load(mask_filename);
-    mask = mask.rois;
+    mask_load = load(mask_filename);
+    mask = mask_load.bwmask;
+    mask_ca = mask_load.bwmask_ca;
 end
 t2 = toc(t1); % Get the elapsed time
 % -----------------------------------------------------------
@@ -277,7 +277,7 @@ fprintf('Saved ROI figure after %d s\n',round(t2))
 % stackedplot(trace_table,trace_ca_table, 'XVariable', 'Time');
 % 创建一个新图形窗口
 figure()
-linemaxroi = 5;
+linemaxroi = 3;
 plotlines = floor(nrois/linemaxroi);
 if mod(nrois,5) == 0 
     plotlines = plotlines;
@@ -292,9 +292,22 @@ for i = 0: nrois-1
     index = floor(i/linemaxroi)*linemaxroi*2 + mod(i,linemaxroi) + 1;
     subplot(plotlines*2,linemaxroi,index)
     plot(t,traces(:,i+1),'r');xlim(xlimit);ylim(ylimitv);
+    set(gca, 'YDir', 'reverse');
     subplot(plotlines*2,linemaxroi,index+linemaxroi)
     plot(t_ca,traces_ca(:,i+1),'g');xlim(xlimit);ylim(ylimitca);
     ylabel(sprintf('ROI %d', i + 1))
+end
+
+axesHandles = findall(gcf, 'type', 'axes');
+for i = 1:length(axesHandles)
+    set(axesHandles(i), 'XTickLabel', []);
+    set(axesHandles(i), 'YTickLabel', []);
+    set(axesHandles(i), 'TickLength', [0 0]);
+    set(axesHandles(i), 'Box', 'off');
+    set(axesHandles(i), 'XColor', 'none'); % 隐藏 x 轴线
+    set(axesHandles(i), 'YColor', 'none'); % 隐藏 y 轴线
+    set(axesHandles(i), 'Color', 'none'); % 设置背景为无色
+    ylabel(sprintf('ROI %d', floor(i/2)));
 end
 
 fig_filename = fullfile(save_path, '2_stacked_trace.fig');
@@ -445,6 +458,211 @@ mat_filename = fullfile(save_path, '4_Correlation_analysis.mat');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(mat_filename,'paired_corrtest','random_corrtest','paired_spcorrtest','random_speartest');
+%% Peak finding
+peakfinding = true; % defined as true
+AP_window_width = 40 ; % number of frames to for AP window (defined = 40)
+[peaks_polarity, peaks_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = peak_finding(traces);
+
+
+fig_filename = fullfile(save_path, '5_peak_finding.fig');
+png_filename = fullfile(save_path, '5_peak_finding.png');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+%% Sensitivity and SNR Analysis
+% set up
+fig = figure();
+set(fig,'Position',get(0,'Screensize'));
+sentivity_trace = zeros(nframes,nrois);
+SNR_traces = zeros(nframes,nrois);
+baselines = zeros(nframes,nrois);
+
+% plot fluorescent image
+f_axe = subplot(1,3,1);
+f_im = reshape(movie, ncols, nrows, []);hold on;
+im_adj = uint16(mean(f_im, 3));
+imshow(im_adj,[min(im_adj,[],'all'),max(im_adj,[],'all')]);
+for i = 1:nrois
+    roi = (bwmask == i);
+    boundary = cell2mat(bwboundaries(roi));
+    plot(boundary(:, 2), boundary(:, 1), 'Color', colors(i,:), 'LineWidth', 2, 'Parent', f_axe);hold on;
+            text(mean(boundary(:, 2)) + 12, mean(boundary(:, 1)) - 12, num2str(i), ...
+            'Color', colors(i,:), 'FontSize', 12, 'Parent', f_axe); hold on;
+end
+hold on;
+title('Fluorescent Image');
+
+% plot sensitivity
+sensitivity_axe = subplot(1,3,2);
+title('Sensitivity');
+hold on;
+for i = 1 : nrois
+    % Calculate Sensitivity
+    % sentivity_trace(:,i) = traces_corrected(:,i)*peaks_polarity(i)+ 1 -peaks_polarity(i);
+    sentivity_trace(:,i) = traces(:,i) - 1 ;
+end
+    % [~] = offset_plot(sentivity_trace,t);
+
+% plot SNR
+SNR_axe = subplot(1,3,3);
+title('SNR');
+hold on;
+for i = 1 : nrois
+    % Calculate SNR
+    if peakfinding
+        [SNR_traces(:,i),baselines(i)]  = calculate_SNR(traces(:,i),peaks_index{i},AP_window_width);
+    else
+        [SNR_traces(:,i),baselines(i)]  = calculate_SNR(traces(:,i));
+    end
+    % [~] = offset_plot(SNR_traces,t);
+end
+
+fig_filename = fullfile(save_path, '4_SNR.fig');
+png_filename = fullfile(save_path, '4_SNR.png');
+trace_filename = fullfile(save_path, '4_SNR.mat');
+
+save(trace_filename,"sentivity_trace",'SNR_traces');
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+%% Statistic AP
+AP_list = cell(1, nrois);
+each_AP = struct('Trace', [], 'AP_number', [], 'AP_index',[],'AP_amp',[], ...
+    'Amplitude', [],'FWHM',[], 'AP_sensitivity',[],'Sensitivity',[], ...
+    'AP_SNR', [], 'SNR', []);
+
+% each trace
+for i = 1:nrois % i for trace
+    peaks_num = length(peaks_index{i});
+    peaks_index_i = peaks_index{i};
+    peaks_amp_i = peaks_amplitude{i};
+    each_trace_amp = traces(:,i);
+    each_trace_sensitivity = sentivity_trace(:,i);
+    each_trace_SNR = SNR_traces(:,i);
+    AP_list{i} = cell(1, length(peaks_index{i}));
+
+    % each peak
+    for j = 1:peaks_num % j for peak
+        fprint('Statistic trace %d in %d , AP %d in %d\n',i, nrois , j , peaks_num)
+        peak_index_ij = peaks_index_i(j);
+        peak_amp_ij = peaks_amp_i(j);
+
+        % keep in board
+        AP_start_index = max(1, peak_index_ij - AP_window_width);
+        AP_end_index = min(nframes, peak_index_ij + AP_window_width);
+        AP_index = AP_start_index : AP_end_index;
+
+        % search
+        AP_amp = each_trace_amp(AP_start_index:AP_end_index)';
+        AP_sensitivity = each_trace_sensitivity(AP_start_index:AP_end_index)';
+        AP_SNR = each_trace_SNR(AP_start_index:AP_end_index)';
+
+        % fill NaN
+        if 0 > peak_index_ij - AP_window_width
+            AP_amp = [NaN(1,0 - (peak_index_ij - AP_window_width)+1), AP_amp];
+            AP_sensitivity = [NaN(1,0 - (peak_index_ij - AP_window_width)+1),AP_sensitivity];
+            AP_SNR = [NaN(1,0 - (peak_index_ij - AP_window_width)+1),AP_SNR];
+        elseif nframes < peak_index_ij + AP_window_width
+            AP_amp = [AP_amp, NaN(1,peak_index_ij + AP_window_width - nframes)];
+            AP_sensitivity = [AP_sensitivity, NaN(1,peak_index_ij + AP_window_width - nframes)];
+            AP_SNR = [AP_SNR, NaN(1,peak_index_ij + AP_window_width - nframes)];
+        end
+
+        % Calculate;
+        Amplitude = abs(peak_amp_ij);
+        Sensitivity = AP_sensitivity(AP_window_width+1) - 1 ;
+        SNR = abs(AP_SNR(AP_window_width+1));
+        FWHM = calculate_FWHM(AP_amp, dt, peaks_polarity(i));
+
+        % save AP data
+        each_AP = struct('Trace', i, 'AP_number', j, 'AP_index',AP_index, ...
+            'AP_amp',AP_amp,'Amplitude', Amplitude,'FWHM',FWHM, ...
+            'AP_sensitivity',AP_sensitivity,'Sensitivity',Sensitivity, ...
+            'AP_SNR', AP_SNR, 'SNR', SNR);
+        AP_list{i}{j} = each_AP;
+    end
+end
+
+% write into excel
+% 初始化平均值向量
+avg_amp = zeros(length(AP_list), 1);
+avg_FWHM = zeros(length(AP_list), 1);
+avg_sensitivity = zeros(length(AP_list), 1);
+avg_SNR = zeros(length(AP_list), 1);
+AP_number = zeros(length(AP_list), 1);
+ROI_number = zeros(length(AP_list), 1);
+
+% figure()
+% FWHM_axe = subplot(1,3,2);hold on;xlim([0,nrois+1]);
+% amp_axe = subplot(1,3,3);hold on;xlim([0,nrois+1]);
+% num_axe = subplot(1,3,1);hold on;xlim([0,nrois+1]);
+% 计算所有AP的SNR数据并存储在tables中
+table_name = fullfile(save_path,'AP_data.xlsx');
+for i = 1:length(AP_list)
+    if cellfun('isempty',AP_list{i}) == 0
+        AP_i = AP_list{i}; % 当前trace的所有APs
+
+        % 初始化每个trace的数据向量
+        number_i = zeros(length(AP_i), 1);
+        amp_i = zeros(length(AP_i), 1);
+        FWHM_i = zeros(length(AP_i), 1);
+        sensitivity_i = zeros(length(AP_i), 1);
+        SNR_i = zeros(length(AP_i), 1);
+
+        for j = 1:length(AP_i)
+            each_AP = AP_i{j};
+            number_i(j) = each_AP.AP_number;
+            amp_i(j)  = each_AP.Amplitude;
+            FWHM_i(j)  = each_AP.FWHM;
+            sensitivity_i(j)  = each_AP.Sensitivity;
+            SNR_i(j)  = each_AP.SNR;
+        end
+
+        % % plot AP parameters
+        % scatter(i,FWHM_i,'filled','Parent',FWHM_axe);hold on;
+        % xlabel('ROI number','Parent',FWHM_axe);
+        % ylabel('FWHM(ms)','Parent',FWHM_axe);
+        % 
+        % 
+        % scatter(i,amp_i,'filled','Parent',amp_axe);hold on;
+        % xlabel('ROI number','Parent',amp_axe);
+        % ylabel('Amplitude','Parent',amp_axe);
+        % 
+        % 
+        % scatter(i,number_i,'filled','Parent',num_axe);hold on;
+        % xlabel('ROI number','Parent',num_axe);
+        % ylabel('AP number','Parent',num_axe);
+        
+
+        % 为当前trace创建一个表格
+        T = table(number_i, amp_i, FWHM_i, sensitivity_i, SNR_i, ...
+            'VariableNames', {'Number', 'Amplitude', 'FWHM (ms)', 'Sensitivity', 'SNR'});
+
+        % 将表格写入Excel的一个新工作表
+        sheet_name = string(['ROI ' num2str(i)]);
+        writetable(T,table_name, 'Sheet', sheet_name);
+
+        % save average value
+        avg_amp(i) = mean(amp_i);
+        avg_FWHM(i) = mean(FWHM_i);
+        avg_sensitivity(i) = mean(sensitivity_i);
+        avg_SNR(i) = mean(SNR_i);
+        AP_number(i) = number_i(end);
+        ROI_number(i) = i;
+    end
+end
+
+sgtitle('AP statistic');
+fig_filename = fullfile(save_path, '5_AP statistic.fig');
+png_filename = fullfile(save_path, '5_AP statistic.png');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+
+T_ave = table(ROI_number, AP_number, avg_amp, avg_FWHM, avg_sensitivity, avg_SNR, ...
+    'VariableNames', {'ROI Number','AP Number', 'Average Amplitude', 'Average FWHM (ms)', 'Average Sensitivity', 'Average SNR'});
+writetable(T_ave, table_name, 'Sheet', 'Average');
+
+fprintf('Finished statistic AP\n')
 
 %% save trace for each ROI
 traces_path = fullfile(save_path,'eachROI');
@@ -517,29 +735,31 @@ save(mat_filename,'heatmap_corrtest',"heatmap_speartest");
 %% plot fluorescent image
 f = figure();
 vol_img = subplot(1,2,1);
-movie_vol_2D = reshape(mean(movie,2), ncols, nrows, []).*map;
-imshow(imadjust(uint16(movie_vol_2D),stretchlim(uint16(movie_vol_2D))*1.1, []));
+movie_vol_2D = reshape(mean(movie,2), ncols, nrows, []);
+normalized_img = (movie_vol_2D - min(movie_vol_2D(:))) / (max(movie_vol_2D(:)) - min(movie_vol_2D(:)));
+imshow(normalized_img);
 hold on;
 
 cal_img = subplot(1,2,2);
-movie_cal_2D = reshape( uint16(mean(movie_ca,2)), ncols_ca, nrows_ca, []);
-imshow(imadjust(movie_cal_2D,stretchlim(movie_cal_2D)*1.1, []));
+movie_cal_2D = reshape(mean(movie_ca,2), ncols_ca, nrows_ca, []);
+normalized_img_ca = (movie_cal_2D - min(movie_cal_2D(:))) / (max(movie_cal_2D(:)) - min(movie_cal_2D(:)));
+imshow(normalized_img_ca);
 hold on;
 
 for i = 1:nrois
     roi = (bwmask == i);
     boundary = cell2mat(bwboundaries(roi));
-    plot(boundary(:, 2), boundary(:, 1), 'Color', 'r', 'LineWidth', 2, 'Parent',vol_img);
+    plot(boundary(:, 2), boundary(:, 1), 'Color', 'r', 'LineWidth', 6, 'Parent',vol_img);
     % 标注ROI编号
     text(mean(boundary(:, 2)) + 6, mean(boundary(:, 1)) - 6, num2str(i), ...
-        'Color', 'r', 'FontSize', 12, 'Parent', vol_img); hold on;
+        'Color', 'r', 'FontSize', 36, 'Parent', vol_img); hold on;
 
     roi_ca = (bwmask_ca == i);
     boundary = cell2mat(bwboundaries(roi_ca));
-    plot(boundary(:, 2), boundary(:, 1), 'Color', 'g', 'LineWidth', 2, 'Parent',cal_img);
+    plot(boundary(:, 2), boundary(:, 1), 'Color', 'g', 'LineWidth', 6, 'Parent',cal_img);
     % 标注ROI编号
     text(mean(boundary(:, 2)) + 6, mean(boundary(:, 1)) - 6, num2str(i), ...
-        'Color', 'g', 'FontSize', 12, 'Parent', cal_img); hold on;
+        'Color', 'g', 'FontSize', 36, 'Parent', cal_img); hold on;
 end
 %%
 map
