@@ -1,5 +1,4 @@
-function [movie,ncols,nrows,nframes] = ...
-    load_movie(file_path)
+function [movie,ncols,nrows,nframes] = load_movie(file_path)
 
 % ----------Write by Liu-Yang Luorong and ChatGPT----------
 % ----------POWERED by Zoulab in Peking University----------
@@ -86,52 +85,53 @@ if isfolder(file_path)
 
 else
     [~, ~, file_extension] = fileparts(file_path);
-    if isequal(file_extension,'.tif') || isequal(file_extension,'.tiff')
-        % Load first image
-        t = Tiff(file_path, 'r');
-        tifsize = gettifsize(t);
-        nrows = tifsize(1);
-        ncols = tifsize(2);
-        t.close();
-        [movie, nframes] = readstacktifs(file_path, tifsize);
-        fprintf('Stacked frame tifs movie loaded\n')
+    switch file_extension
+        case {'.tif','.tiff'}
+            % Load first image
+            t = Tiff(file_path, 'r');
+            tifsize = gettifsize(t);
+            nrows = tifsize(1);
+            ncols = tifsize(2);
+            t.close();
+            [movie, nframes] = readstacktifs(file_path, tifsize);
+            fprintf('Stacked frame tifs movie loaded\n')
 
-    elseif isequal(file_extension,'.bin')
-        filename = [fileparts(file_path) '\movie_info.txt'];  % 指定文本文件的名称
-        fileID = fopen(filename, 'r');  % 以读取模式打开文件
-        if fileID == -1
-            filename = [fileparts(file_path) '\movie.txt'];  % 更改文本文件的名称
-            fileID = fopen(filename, 'r');
-        end
-        if fileID == -1
-            %error('Failed to open file. change the txt name manually');
-            movie_info = load(fullfile(fileparts(file_path),'output_data.mat'));
-            ROI_info = movie_info.Device_Data{3}.ROI;
-            nrows = ROI_info(2);
-            ncols = ROI_info(4);
-        end
+        case '.bin'
+            filename = [fileparts(file_path) '\movie_info.txt'];  % 指定文本文件的名称
+            fileID = fopen(filename, 'r');  % 以读取模式打开文件
+            if fileID == -1
+                filename = [fileparts(file_path) '\movie.txt'];  % 更改文本文件的名称
+                fileID = fopen(filename, 'r');
+            end
+            if fileID == -1
+                %error('Failed to open file. change the txt name manually');
+                movie_info = load(fullfile(fileparts(file_path),'output_data.mat'));
+                ROI_info = movie_info.Device_Data{3}.ROI;
+                nrows = ROI_info(2);
+                ncols = ROI_info(4);
+            end
 
-        %open file readBinMov
-        % read file into tmp vector
-        Movid = fopen(file_path);                  % open file
-        Mov = fread(Movid, '*uint16', 'l');       % uint16, little endian
-        fclose(Movid);                            % close file
+            %open file readBinMov
+            % read file into tmp vector
+            Movid = fopen(file_path);                  % open file
+            Mov = fread(Movid, '*uint16', 'l');       % uint16, little endian
+            fclose(Movid);                            % close file
 
-        % reshape vector into appropriately oriented, 3D array
-        nframes = length(Mov)/(nrows*ncols);
-        movie = reshape(Mov, [nrows, ncols, nframes]);
-        movie = permute(movie, [2 1 3]);
-        movie = reshape(movie, [nrows*ncols, nframes]);
-        % fclose(fileID);
+            % reshape vector into appropriately oriented, 3D array
+            nframes = length(Mov)/(nrows*ncols);
+            movie = reshape(Mov, [nrows, ncols, nframes]);
+            movie = permute(movie, [2 1 3]);
+            movie = reshape(movie, [nrows*ncols, nframes]);
+            % fclose(fileID);
 
-    elseif isequal(string(file_extension),'.mat')
+        case '.mat'
 
-        fprintf('Loading saved data...\n')
-        file = load(file_path);
-        movie = file.movie;
-        ncols = file.ncols;
-        nrows = file.nrows;
-        nframes = file.nframes;
+            fprintf('Loading saved data...\n')
+            file = load(file_path);
+            movie = file.movie;
+            ncols = file.ncols;
+            nrows = file.nrows;
+            nframes = file.nframes;
     end
 end
 
@@ -154,56 +154,85 @@ function num = extractFileNumber(file_names)
     end
 end
 
-function printloadingpercent(i,num_files)
-    % Calculate and display progress if percentage changes
-    current_percentage = floor(((i - 1) / num_files) * 100);
-    if current_percentage > prev_percentage
-        elapsed = toc;
-        remaining = elapsed / ((i-1) / num_files) - elapsed;
-        fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
-            i - 1, num_files, current_percentage, remaining);
-        prev_percentage = current_percentage;
-    end
-end
-
 function tifsize = gettifsize(t)
     tifsize = [t.getTag('ImageLength'),t.getTag('ImageWidth')];
 end
 
+function tifframe = gettifframe(t)
+fprintf('Calculating frame...\n')
+while true
+    if t.lastDirectory()
+        tifframe = t.currentDirectory();
+        break
+    else
+        t.nextDirectory()
+    end
+end
+end
+
 function [movie, nframes]= readstacktifs(file_path,tifsize)
      % Initialize parameter
-    info = imfinfo(file_path);
-    nframes = numel(info);
+    t = Tiff(file_path, 'r');
+    % 初始化帧数
+    nframes = gettifframe(t);  % 初始为1，因为至少有一帧
+    t.setDirectory(1);
+
     nrows = tifsize(1);
     ncols = tifsize(2);
-    movie = zeros(nrows*ncols, nframes, 'double');
+    movie = zeros(nrows*ncols, nframes, 'uint16');
     prev_percentage = 0; % Initialize with -1 so the first update is always printed
 
     tic;
-    batchsize = 2000;
-    batchstart = 1;
-    while batchstart < nframes
-        batchend = batchstart+batchsize;
-        for i = batchstart:min(batchend,nframes)
+        for i = 1:nframes
             % Read TIFF movie
-            current_image = imread(file_path, i);
-            movie(:,i) = double(reshape(current_image, nrows*ncols, 1));
+            % current_image = imread(file_path, i);
+            % 跳到当前帧
+            t.setDirectory(i);
+            
+            % 读取当前帧的图像
+            current_image = t.read();
+            movie(:,i) = uint16(reshape(current_image, nrows*ncols, 1));
 
             % Calculate and display progress if percentage changes
-            current_percentage = floor((i / nframes) * 100);
+            current_percentage = floor(((i - 1) / nframes) * 100);
             if current_percentage > prev_percentage
                 elapsed = toc;
-                remaining = elapsed / (i / nframes) - elapsed;
+                remaining = elapsed / ((i - 1) / nframes) - elapsed;
                 fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
-                    i, nframes, current_percentage, remaining);
+                    i - 1, nframes, current_percentage, remaining);
                 prev_percentage = current_percentage;
             end
         end
-        batchstart = batchend + 1;
-        if batchstart > nframes
-            break
-        end
-    end
+    % batchsize = 2000;
+    % batchstart = 1;
+    % while batchstart < nframes
+    %     batchend = batchstart+batchsize;
+    %     for i = batchstart:min(batchend,nframes)
+    %         % Read TIFF movie
+    %         % current_image = imread(file_path, i);
+    %         % 跳到当前帧
+    %         t.setDirectory(i);
+    % 
+    %         % 读取当前帧的图像
+    %         current_image = t.read();
+    %         movie(:,i) = uint16(reshape(current_image, nrows*ncols, 1));
+    % 
+    %         % Calculate and display progress if percentage changes
+    %         current_percentage = floor((i / nframes) * 100);
+    %         if current_percentage > prev_percentage
+    %             elapsed = toc;
+    %             remaining = elapsed / (i / nframes) - elapsed;
+    %             fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
+    %                 i, nframes, current_percentage, remaining);
+    %             prev_percentage = current_percentage;
+    %         end
+    %     end
+    %     batchstart = batchend + 1;
+    %     if batchstart > nframes
+    %         break
+    %     end
+    % end
+    t.close();
 end
 
 function [movie, nframes] = readsingletifs(file_sortedaddress, tifsize)
@@ -213,8 +242,7 @@ function [movie, nframes] = readsingletifs(file_sortedaddress, tifsize)
     nframes = numel(file_sortedaddress);
     nrows = tifsize(1);
     ncols = tifsize(2);
-    movie = zeros(nrows*ncols,nframes);
-    
+    movie = zeros(nrows*ncols,nframes, 'uint16');
     
     % Load batch of TIF files
     tic;
@@ -225,7 +253,7 @@ function [movie, nframes] = readsingletifs(file_sortedaddress, tifsize)
         t = Tiff(current_tif,'r');
         warning('on');
         current_image = t.read();
-        movie(:,i) = double(reshape(current_image, nrows*ncols, 1));
+        movie(:,i) = uint16(reshape(current_image, nrows*ncols, 1));
         t.close();
         % Calculate and display progress if percentage changes
         current_percentage = floor((i / nframes) * 100);

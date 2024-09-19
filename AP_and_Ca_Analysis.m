@@ -28,6 +28,7 @@ clear;
 clc;
 
 %% Loading raw data
+clear;clc;
 t1 = tic; % Start a timer
 nowtime = string(datetime('now'));
 % Replace colons with hyphens to get the desired output format
@@ -36,15 +37,15 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'D:\1_Data\d. Dual-color imaging in SCN\2024.05.30_dual_P2A';
-file = '20240530-merge';  % must add format.
+folder_path = 'E:\1_Data\Luorong\240523mix\';
+file = '20240523-182909SCN';  % must add format.
 file_path = fullfile(folder_path, file);
 file_path_ca = [file_path,'_Green']; % defined name 
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 freq_ca = 10; % Hz
 % ↓↓↓↓↓-------------Prompt user for bin-----------------↓↓↓↓↓
-bin = 2;
+bin = 1;
 bin_ca = 1;
 % -----------------------------------------------------------
 
@@ -144,7 +145,8 @@ else
     map = map.map;
 end
 
-mask_path = 'D:\1_Data\d. Dual-color imaging in SCN\2024.05.30_dual_P2A\20240530-merge_Analysis\2024-08-17 15-33-58'; % define as ''
+% mask_path = 'E:\0_Code\Luorong\Tools'; % define as ''
+mask_path = 'E:\1_Data\Luorong\240523mix\20240523-182909SCN_Analysis\2024-09-18 18-23-35';
 if isempty(mask_path)
     mask = []; 
     mask_ca = [];
@@ -208,20 +210,20 @@ mean_movie_ca = mean(movie_ca,1);
 fig = figure();
 set(fig,'Position',get(0,'Screensize'));
 v_axe = subplot(2,1,1);
-ca_axe = subplot(2,1,2);
+calcium_axe = subplot(2,1,2);
 
 plot(t,mean_movie,'LineWidth',2,'Parent',v_axe);
 hold(v_axe, 'on');
 plot(t,fitted_curves,'r','LineWidth',2,'Parent',v_axe);
 hold(v_axe, 'on');
-plot(t_ca,mean_movie_ca,'LineWidth',2,'Parent',ca_axe);
-hold(ca_axe, 'on');
-plot(t_ca,fitted_curves_ca,'r','LineWidth',2,'Parent',ca_axe);
+plot(t_ca,mean_movie_ca,'LineWidth',2,'Parent',calcium_axe);
+hold(calcium_axe, 'on');
+plot(t_ca,fitted_curves_ca,'r','LineWidth',2,'Parent',calcium_axe);
 hold(v_axe, 'on');
 
 % note
 title(v_axe, 'Voltage trace');
-title(ca_axe, 'Calcium trace');
+title(calcium_axe, 'Calcium trace');
 
 fig_filename = fullfile(save_path, '2_fitted_trace.fig');
 png_filename = fullfile(save_path, '2_fitted_trace.png');
@@ -238,8 +240,8 @@ t1 = tic; % Start a timer
 % movie_ca_corrected = movie_ca ./ fitted_curves_ca';
 
 % with or wihout Mask and Map
-correct = true; %true for correct offset
-[bwmask, bwmask_ca, traces, traces_ca] = select_ROI_dual(movie , movie_ca, ...
+correct = false; %true for correct offset
+[bwmask, bwmask_ca, traces, traces_ca, offset] = select_ROI_dual(movie , movie_ca, ...
     nrows, ncols, correct, map, map_ca, mask, mask_ca);
 
 nrois = size(traces,2);
@@ -250,65 +252,143 @@ roi_filename = fullfile(save_path, '1_raw_ROI.mat');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-save(roi_filename, 'bwmask', 'bwmask_ca');
+save(roi_filename, 'bwmask', 'bwmask_ca','offset');
 
 t2 = toc(t1); % Get the elapsed time
 fprintf('Saved ROI figure after %d s\n',round(t2))
+%% Peak finding (optional)
+peakfinding = true; % defined as true
+AP_window_width = 40 ; % number of frames to for AP window (defined = 40)
+[peaks_polarity, peaks_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = peak_finding(traces);
 
+
+fig_filename = fullfile(save_path, '5_peak_finding.fig');
+png_filename = fullfile(save_path, '5_peak_finding.png');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+%% SNR Analysis
+% set up
+fig = figure();
+set(fig,'Position',get(0,'Screensize'));
+
+SNR_traces = zeros(nframes,nrois);
+baselines = zeros(nframes,nrois);
+
+% plot fluorescent image
+f_axe = subplot(1,3,1);
+f_im = reshape(movie, ncols, nrows, []);hold on;
+im_adj = uint16(mean(f_im, 3));
+imshow(im_adj,[min(im_adj,[],'all'),max(im_adj,[],'all')]);
+for i = 1:nrois
+    roi = (bwmask == i);
+    boundary = cell2mat(bwboundaries(roi));
+    plot(boundary(:, 2), boundary(:, 1), 'Color', colors(i,:), 'LineWidth', 2, 'Parent', f_axe);hold on;
+            text(mean(boundary(:, 2)) + 12, mean(boundary(:, 1)) - 12, num2str(i), ...
+            'Color', colors(i,:), 'FontSize', 12, 'Parent', f_axe); hold on;
+end
+hold on;
+title('Fluorescent Image');
+
+% plot calcium
+calcium_axe = subplot(1,3,2);
+title('calcium');
+hold on;
+
+% 设计低通滤波器
+fs = 10; % 采样频率 (Hz)
+fc = 1; % 截止频率 (Hz)
+[b, a] = butter(4, fc/(fs/2)); % 4阶Butterworth低通滤波器
+traces_smoothed_ca = zeros(size(traces_ca));  % 使用双向滤波器进行零相位滤波
+SNR_traces_ca = zeros(size(traces_ca));
+
+for i = 1 : nrois
+    % Calculate SNR
+    traces_smoothed_ca(:,i) = filtfilt(b, a, traces_ca(:,i));
+    SNR_traces_ca(:,i) = calculate_SNR_Ca(traces_ca(:,i),traces_smoothed_ca(:,i));
+end
+[~] = offset_plot(SNR_traces_ca,t_ca);
+
+% plot SNR
+SNR_axe = subplot(1,3,3);
+title('SNR');
+hold on;
+for i = 1 : nrois
+    % Calculate SNR
+    if peakfinding
+        [SNR_traces(:,i),baselines(i)]  = calculate_SNR(traces(:,i),peaks_index{i},AP_window_width);
+    else
+        [SNR_traces(:,i),baselines(i)]  = calculate_SNR(traces(:,i));
+    end
+% ;
+end
+[~] = offset_plot(SNR_traces,t);
+
+fig_filename = fullfile(save_path, '4_SNR.fig');
+png_filename = fullfile(save_path, '4_SNR.png');
+trace_filename = fullfile(save_path, '4_SNR.mat');
+
+save(trace_filename,"SNR_traces_ca",'SNR_traces');
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
 %% plot stacked figure
-% figure()
-% subplot(1,2,1)
-% stackedplot(t,traces); 
-% subplot(1,2,2)
-% stackedplot(t_ca,traces_ca);
 
-% 准备列名
-% numTraces = size(traces_ca, 2);  % 获取数据列数
-% columnNames = cell(1, numTraces);
-% for i = 1:numTraces
-%     columnNames{i} = sprintf('trace%d', i);
-% end
-% trace_Time = [t', traces];
-% trace_ca_Time = [t_ca', traces_ca];
-% 
-% trace_table = array2table(trace_Time,'VariableNames', ['Time', columnNames]);
-% trace_ca_table = array2table(trace_ca_Time,'VariableNames', ['Time', columnNames]);
-% 
-% stackedplot(trace_table,trace_ca_table, 'XVariable', 'Time');
 % 创建一个新图形窗口
 figure()
-linemaxroi = 3;
+linemaxroi = 3; % 每行最多绘制3个ROI
+% 计算需要绘制的行数
 plotlines = floor(nrois/linemaxroi);
-if mod(nrois,5) == 0 
+if mod(nrois,linemaxroi) == 0 
     plotlines = plotlines;
 else
     plotlines = plotlines + 1;
 end
+
 xlimit = [0,max(max(t_ca),max(t))];
-ylimitv = [min(traces,[],'all'),max(traces,[],'all')];
-ylimitca = [min(traces_ca,[],'all'),max(traces_ca,[],'all')];
+ylimitv = [min(SNR_traces,[],'all'),max(SNR_traces,[],'all')];
+ylimitca = [min(SNR_traces_ca,[],'all'),max(SNR_traces_ca,[],'all')];
+
 for i = 0: nrois-1
-    % lines passed + corss index
     index = floor(i/linemaxroi)*linemaxroi*2 + mod(i,linemaxroi) + 1;
-    subplot(plotlines*2,linemaxroi,index)
-    plot(t,traces(:,i+1),'r');xlim(xlimit);ylim(ylimitv);
+    tsubplot(plotlines*2,linemaxroi,index,'compact');
+
+    plot(t_ca,SNR_traces_ca(:,i+1),'g');ylim(ylimitca);xlim(xlimit);
+    set(gca, 'XTickLabel', []);
+    set(gca, 'YTickLabel', []);
+    set(gca, 'TickLength', [0 0]);
+    set(gca, 'XColor', 'none'); % 隐藏 x 轴线
+    set(gca, 'YColor', 'none'); % 隐藏
+    set(gca, 'Box', 'off');
+    set(gca, 'Color', 'none'); % 设置背景为无色
+
+
+    tsubplot(plotlines*2,linemaxroi,index+linemaxroi,'compact');
+    plot(t,SNR_traces(:,i+1),'r');ylim(ylimitv);xlim(xlimit);
     set(gca, 'YDir', 'reverse');
-    subplot(plotlines*2,linemaxroi,index+linemaxroi)
-    plot(t_ca,traces_ca(:,i+1),'g');xlim(xlimit);ylim(ylimitca);
-    ylabel(sprintf('ROI %d', i + 1))
+    set(gca, 'XTickLabel', []);
+    set(gca, 'YTickLabel', []);
+    set(gca, 'TickLength', [0 0]);
+    set(gca, 'XColor', 'none'); % 隐藏 x 轴线
+    set(gca, 'YColor', 'none'); % 隐藏
+    set(gca, 'Box', 'off');
+    set(gca, 'Color', 'none'); % 设置背景为无色
 end
 
-axesHandles = findall(gcf, 'type', 'axes');
-for i = 1:length(axesHandles)
-    set(axesHandles(i), 'XTickLabel', []);
-    set(axesHandles(i), 'YTickLabel', []);
-    set(axesHandles(i), 'TickLength', [0 0]);
-    set(axesHandles(i), 'Box', 'off');
-    set(axesHandles(i), 'XColor', 'none'); % 隐藏 x 轴线
-    set(axesHandles(i), 'YColor', 'none'); % 隐藏 y 轴线
-    set(axesHandles(i), 'Color', 'none'); % 设置背景为无色
-    ylabel(sprintf('ROI %d', floor(i/2)));
-end
+% axesHandles = findall(gcf, 'type', 'axes');
+% for i = 1:length(axesHandles)
+%     if i ~= 1 && i ~= 2
+%         set(axesHandles(i), 'XTickLabel', []);
+%         set(axesHandles(i), 'YTickLabel', []);
+%         set(axesHandles(i), 'TickLength', [0 0]);
+%         set(axesHandles(i), 'XColor', 'none'); % 隐藏 x 轴线
+%         set(axesHandles(i), 'YColor', 'none'); % 隐藏 y 轴线
+%         %
+%     else
+%         ylabel(sprintf('ROI %d', floor(i/2)));
+%     end
+%     set(axesHandles(i), 'Box', 'off');
+%     set(axesHandles(i), 'Color', 'none'); % 设置背景为无色
+% end
 
 fig_filename = fullfile(save_path, '2_stacked_trace.fig');
 png_filename = fullfile(save_path, '2_stacked_trace.png');
@@ -316,7 +396,7 @@ trace_filename = fullfile(save_path, '2_stacked_trace.mat');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-save(trace_filename, 't','t_ca','traces','traces_ca');
+save(trace_filename, 't','t_ca','SNR_traces','traces_ca');
 
 
 %% Accumulate Voltage signal
@@ -344,12 +424,12 @@ kth = 0.21;
 ftest = @(x, v) x + (g * max(v - gthr, 0) - k * max(x - kth, 0)) * 1/200;
 
 voltage_accumulated = cell(1, nrois);
-calcium_normalized = zeros(size(traces_ca));
+calcium_normalized = zeros(size(SNR_traces_ca));
 
 for i = 1:nrois
     % Normalize voltage and calcium signals
-    volsele = normalize(-traces(:, i),'range');
-    calsele = normalize(traces_ca(:, i),'range');
+    volsele = normalize(-SNR_traces(:, i),'range');
+    calsele = normalize(SNR_traces_ca(:, i),'range');
     
     % Initialize accumulation array
     volaccum = zeros(length(volsele), 1);
@@ -396,11 +476,46 @@ for i = 0: nrois-1
     index = floor(i/linemaxroi)*linemaxroi*2 + mod(i,linemaxroi) + 1;
     subplot(plotlines*2,linemaxroi,index)
     plot(voltage_accumulated(:,i+1),'r');ylim(ylimitv);
+    if i ~= nrois-1
+        set(gca, 'XTickLabel', []);
+        set(gca, 'YTickLabel', []);
+        set(gca, 'TickLength', [0 0]);
+        set(gca, 'XColor', 'none'); % 隐藏 x 轴线
+        set(gca, 'YColor', 'none'); % 隐藏
+    end
+
+    set(gca, 'Box', 'off');
+    set(gca, 'Color', 'none'); % 设置背景为无色
     subplot(plotlines*2,linemaxroi,index+linemaxroi)
     plot(calcium_normalized(:,i+1),'g');ylim(ylimitca);
-    ylabel(sprintf('ROI %d', i+1))
+    if i ~= nrois-1
+        set(gca, 'XTickLabel', []);
+        set(gca, 'YTickLabel', []);
+        set(gca, 'TickLength', [0 0]);
+        set(gca, 'XColor', 'none'); % 隐藏 x 轴线
+        set(gca, 'YColor', 'none'); % 隐藏
+    else
+        ylabel(sprintf('ROI %d', floor(i/2)));
+    end
+    set(gca, 'Box', 'off');
+    set(gca, 'Color', 'none'); % 设置背景为无色
 end
 
+% axesHandles = findall(gcf, 'type', 'axes');
+% for i = 1:length(axesHandles)
+%     if i ~= 1 && i ~= 2
+%         set(axesHandles(i), 'XTickLabel', []);
+%         set(axesHandles(i), 'YTickLabel', []);
+%         set(axesHandles(i), 'TickLength', [0 0]);
+%         set(axesHandles(i), 'XColor', 'none'); % 隐藏 x 轴线
+%         set(axesHandles(i), 'YColor', 'none'); % 隐藏 y 轴线
+%         %
+%     else
+%         ylabel(sprintf('ROI %d', floor(i/2)));
+%     end
+%     set(axesHandles(i), 'Box', 'off');
+%     set(axesHandles(i), 'Color', 'none'); % 设置背景为无色
+% end
 
 fig_filename = fullfile(save_path, '3_Integral_trace.fig');
 png_filename = fullfile(save_path, '3_Integral_trace.png');
@@ -458,72 +573,8 @@ mat_filename = fullfile(save_path, '4_Correlation_analysis.mat');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(mat_filename,'paired_corrtest','random_corrtest','paired_spcorrtest','random_speartest');
-%% Peak finding
-peakfinding = true; % defined as true
-AP_window_width = 40 ; % number of frames to for AP window (defined = 40)
-[peaks_polarity, peaks_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = peak_finding(traces);
 
 
-fig_filename = fullfile(save_path, '5_peak_finding.fig');
-png_filename = fullfile(save_path, '5_peak_finding.png');
-
-saveas(gcf, fig_filename, 'fig');
-saveas(gcf, png_filename, 'png');
-%% Sensitivity and SNR Analysis
-% set up
-fig = figure();
-set(fig,'Position',get(0,'Screensize'));
-sentivity_trace = zeros(nframes,nrois);
-SNR_traces = zeros(nframes,nrois);
-baselines = zeros(nframes,nrois);
-
-% plot fluorescent image
-f_axe = subplot(1,3,1);
-f_im = reshape(movie, ncols, nrows, []);hold on;
-im_adj = uint16(mean(f_im, 3));
-imshow(im_adj,[min(im_adj,[],'all'),max(im_adj,[],'all')]);
-for i = 1:nrois
-    roi = (bwmask == i);
-    boundary = cell2mat(bwboundaries(roi));
-    plot(boundary(:, 2), boundary(:, 1), 'Color', colors(i,:), 'LineWidth', 2, 'Parent', f_axe);hold on;
-            text(mean(boundary(:, 2)) + 12, mean(boundary(:, 1)) - 12, num2str(i), ...
-            'Color', colors(i,:), 'FontSize', 12, 'Parent', f_axe); hold on;
-end
-hold on;
-title('Fluorescent Image');
-
-% plot sensitivity
-sensitivity_axe = subplot(1,3,2);
-title('Sensitivity');
-hold on;
-for i = 1 : nrois
-    % Calculate Sensitivity
-    % sentivity_trace(:,i) = traces_corrected(:,i)*peaks_polarity(i)+ 1 -peaks_polarity(i);
-    sentivity_trace(:,i) = traces(:,i) - 1 ;
-end
-    % [~] = offset_plot(sentivity_trace,t);
-
-% plot SNR
-SNR_axe = subplot(1,3,3);
-title('SNR');
-hold on;
-for i = 1 : nrois
-    % Calculate SNR
-    if peakfinding
-        [SNR_traces(:,i),baselines(i)]  = calculate_SNR(traces(:,i),peaks_index{i},AP_window_width);
-    else
-        [SNR_traces(:,i),baselines(i)]  = calculate_SNR(traces(:,i));
-    end
-    % [~] = offset_plot(SNR_traces,t);
-end
-
-fig_filename = fullfile(save_path, '4_SNR.fig');
-png_filename = fullfile(save_path, '4_SNR.png');
-trace_filename = fullfile(save_path, '4_SNR.mat');
-
-save(trace_filename,"sentivity_trace",'SNR_traces');
-saveas(gcf, fig_filename, 'fig');
-saveas(gcf, png_filename, 'png');
 %% Statistic AP
 AP_list = cell(1, nrois);
 each_AP = struct('Trace', [], 'AP_number', [], 'AP_index',[],'AP_amp',[], ...
@@ -536,13 +587,13 @@ for i = 1:nrois % i for trace
     peaks_index_i = peaks_index{i};
     peaks_amp_i = peaks_amplitude{i};
     each_trace_amp = traces(:,i);
-    each_trace_sensitivity = sentivity_trace(:,i);
+    each_trace_sensitivity = traces(:,i)-1;
     each_trace_SNR = SNR_traces(:,i);
     AP_list{i} = cell(1, length(peaks_index{i}));
 
     % each peak
     for j = 1:peaks_num % j for peak
-        fprint('Statistic trace %d in %d , AP %d in %d\n',i, nrois , j , peaks_num)
+        
         peak_index_ij = peaks_index_i(j);
         peak_amp_ij = peaks_amp_i(j);
 
@@ -598,7 +649,9 @@ ROI_number = zeros(length(AP_list), 1);
 % 计算所有AP的SNR数据并存储在tables中
 table_name = fullfile(save_path,'AP_data.xlsx');
 for i = 1:length(AP_list)
+    
     if cellfun('isempty',AP_list{i}) == 0
+        fprintf('Statistic trace %d in %d\n',i, nrois)
         AP_i = AP_list{i}; % 当前trace的所有APs
 
         % 初始化每个trace的数据向量
@@ -609,6 +662,7 @@ for i = 1:length(AP_list)
         SNR_i = zeros(length(AP_i), 1);
 
         for j = 1:length(AP_i)
+            
             each_AP = AP_i{j};
             number_i(j) = each_AP.AP_number;
             amp_i(j)  = each_AP.Amplitude;
@@ -669,23 +723,42 @@ traces_path = fullfile(save_path,'eachROI');
 mkdir(traces_path);
 
 for i = 1:nrois
+    
     % plot aligned each trace of each ROI
     fig = figure();
     subplot(3,1,1);
-    plot(t,traces(:,i),'r');xlim(xlimit);
-    ylabel('Original Voltage')
+    current_SNR = SNR_traces(:,i);
+    plot(t,current_SNR,'r');hold on;xlim(xlimit);
+    ylabel('Original Voltage SNR')
+    
     title(sprintf('ROI %d',i),sprintf('Correlation effector = %f',paired_corrtest(i)))
+    if peakfinding
+        peaks_y = current_SNR(peaks_index{i});
+        peaks_x = t(peaks_index{i});
+        plot(peaks_x , peaks_y,'v','Color','r','MarkerFaceColor','r','MarkerSize',3);
+    end
+    set(gca,'YDir','reverse')
+
     subplot(3,1,2);
     plot(t_ca,voltage_accumulated(:,i),'r');xlim(xlimit);
     ylabel('Integral Voltage')
+
+
     subplot(3,1,3);
-    plot(t_ca,calcium_normalized(:,i),'g');xlim(xlimit);
+    current_ca = SNR_traces_ca(:,i);
+    plot(t_ca,current_ca,'g');hold on;xlim(xlimit);
+    if peakfinding     
+        peaks_x = t(peaks_index{i});
+        peaks_y = ones(size(peaks_x))*max(current_ca);
+        plot(peaks_x , peaks_y,'|','Color','k','MarkerFaceColor','k','MarkerSize',6);
+    end
+
     ylabel('Calcium')
     xlabel('Time')
     
     % save the figure
-    fig_filename = fullfile(traces_path, sprintf('ROI %d.fig', i));
-    png_filename = fullfile(traces_path, sprintf('ROI %d.png', i));
+    fig_filename = fullfile(traces_path, sprintf('ROI %d Corr. = %f.fig', i,paired_corrtest(i)));
+    png_filename = fullfile(traces_path, sprintf('ROI %d Corr. = %f.png', i,paired_corrtest(i)));
     saveas(gcf, fig_filename, 'fig');
     saveas(gcf, png_filename, 'png');
     close;
@@ -762,7 +835,7 @@ for i = 1:nrois
         'Color', 'g', 'FontSize', 36, 'Parent', cal_img); hold on;
 end
 %%
-map
+
 %% Save parameter
 % 定义保存路径和文件名
 save_filename = fullfile(save_path, '-1_workspace_variables.mat');
@@ -770,3 +843,43 @@ save_filename = fullfile(save_path, '-1_workspace_variables.mat');
 % 保存当前工作区中的所有变量到.mat文件
 clear movie; clear movie_corrected; clear movie_ca; clear movie_corrected_ca;
 save(save_filename);
+
+
+function ax=tsubplot(rows,cols,ind,type)
+% @author : slandarer
+% gzh  : slandarer随笔
+
+if nargin<4,type='tight';end
+sz=[rows,cols];
+ratio1=[0,0,1,1];
+switch type
+    case 'tight'
+        ratio1=[0,0,1,1];
+        % ratio2=[0.031 0.054 0.9619 0.9254];
+    case 'compact'
+        ratio1=[0.034 0.0127 0.9256 0.9704];
+        % ratio2=[0.065 0.0667 0.8875 0.8958];
+    case 'loose'
+        ratio1=[0.099 0.056 0.8131 0.8896];
+        % ratio2=[0.13 0.11 0.775 0.815];
+end
+k=1;
+posList=zeros(sz(1)*sz(2),4);
+for i=1:sz(1)
+    for j=1:sz(2)
+        tpos=[(j-1)/sz(2),(sz(1)-i)/sz(1),1/sz(2),1/sz(1)];
+        posList(k,:)=[tpos(1)+tpos(3).*ratio1(1),tpos(2)+tpos(4).*ratio1(2),...
+                      tpos(3).*ratio1(3),tpos(4).*ratio1(4)];
+        k=k+1;
+    end
+end
+posSet=posList(ind(:),:);
+xmin=min(posSet(:,1));
+ymin=min(posSet(:,2));
+xmax=max(posSet(:,1)+posSet(:,3));
+ymax=max(posSet(:,2)+posSet(:,4));
+ax=axes('Parent',gcf,'LooseInset',[0,0,0,0],...
+    'OuterPosition',[xmin,ymin,xmax-xmin,ymax-ymin]);
+% @author : slandarer
+% gzh  : slandarer随笔
+end

@@ -1,4 +1,4 @@
-function [bwmask, bwmask_ca, traces, traces_ca] = select_ROI_dual(movie, movie_ca, ...
+function [bwmask, bwmask_ca, traces, traces_ca, offset] = select_ROI_dual(movie, movie_ca, ...
     nrows, ncols, correct, map, map_ca, mask, mask_ca)
 
 colors = lines(100);
@@ -24,9 +24,12 @@ end
 
 if correct && ~selected
     [x_offset, y_offset] = handle_manual_correction(map_axe,map_ca_axe, ncols, nrows, img_axe, img_ca_axe);
+    offset = [x_offset, y_offset];
     corrected = true;
 else
+    offset = [];
     corrected = true;
+    
 end
 
 while corrected && ~selected
@@ -63,7 +66,6 @@ while corrected && ~selected
         continue;
     elseif any(strcmp(key, {'v', 'c', 'r'}))
         % reset data
-        num_roi = num_roi - 1;
         bwmask(mask_v) = 0; bwmask_ca(mask_ca) = 0;
         if num_roi == 0
             traces = []; traces_ca = [];

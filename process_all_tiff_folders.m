@@ -5,11 +5,10 @@ function process_all_tiff_folders(root_path, save_root_path)
     % Parameters:
     % root_path - String specifying the root directory to start searching for TIFF folders.
     % save_root_path - String specifying the root directory to save the TIFF stack files.
-    % batch_size - (Optional) Integer specifying the number of files to process in one batch. Default is 1000.
-    % max_file_size - (Optional) Maximum size of each TIFF file in bytes. Default is 4GB (4*1024^3 bytes).
     %
     % Example:
-    % process_all_tiff_folders('E:\1_Data\Luorong\20240709_optopatch', 'E:\1_Data\Luorong\processed\', 500, 4*1024^3);
+    % process_all_tiff_folders('E:\1_Data\Luorong\20240709_optopatch', 'E:\1_Data\Luorong\processed\');
+    
     % Get all subfolders
     subfolders = get_subfolders_with_tiffs(root_path);
     
@@ -22,7 +21,11 @@ function process_all_tiff_folders(root_path, save_root_path)
         if ~exist(save_path, 'dir')
             mkdir(save_path);
         end
+        % Create TIFF stack
         create_tiff_stack(subfolders{i}, save_path);
+        
+        % Copy non-TIFF files to the new folder
+        copy_non_tiff_files(subfolders{i}, save_path);
     end
 end
 
@@ -47,6 +50,25 @@ function subfolders = get_subfolders_with_tiffs(root_path)
             end
             % Recursively search subdirectories
             subfolders = [subfolders, get_subfolders_with_tiffs(current_folder)];
+        end
+    end
+end
+
+function copy_non_tiff_files(source_folder, destination_folder)
+    % COPY_NON_TIFF_FILES Copies non-TIFF files from source_folder to destination_folder.
+    %
+    % Parameters:
+    % source_folder - String specifying the folder to copy files from.
+    % destination_folder - String specifying the folder to copy files to.
+
+    % Get list of all files in the source folder
+    all_files = dir(source_folder);
+    
+    for i = 1:length(all_files)
+        if ~all_files(i).isdir && ~endsWith(all_files(i).name, '.tif')
+            source_file = fullfile(source_folder, all_files(i).name);
+            destination_file = fullfile(destination_folder, all_files(i).name);
+            copyfile(source_file, destination_file);
         end
     end
 end

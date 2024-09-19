@@ -35,8 +35,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'D:\1_Data\1m. Single color recording in slice';
-file = '\20230317-170518beside';  % must add format.do not add '\' at last
+folder_path = 'E:\1_Data\CY\20240918_new_labeling\';
+file = '\10';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
@@ -144,7 +144,7 @@ fprintf('Finished mask creating after %d s\n',round(t2))
 t1 = tic; % Start a timer
 
 % with or wihout Mask and Map
-[bwmask, traces] = select_ROI(movie, nrows, ncols, t, mask, map);
+[bwmask, traces] = select_ROI(movie, nrows, ncols, mask, map);
 nrois = max(bwmask,[],'all');
 
 % if do not need a map, run the following code:
@@ -158,6 +158,45 @@ roi_filename = fullfile(save_path, '1_raw_ROI.mat');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(roi_filename, 'bwmask');
+%% Background Correction
+% 扣除背景
+% 创建结构元素，用于膨胀边界
+innerdis = 6;
+outerdis = 8;
+
+se1 = strel('disk', innerdis);
+se2 = strel('disk', outerdis);
+
+% 对二值化图像进行膨胀
+expandmask1 = imdilate(bwmask, se1);
+expandmask2 = imdilate(bwmask, se2);
+expandregion = expandmask2 & ~expandmask1;
+backgoundmask = zeros(size(expandmask));
+backgoundmask(expandregion) = expandmask2(expandregion);
+
+% backgoundmask = zeros(size(expandmask));
+% expandregion = expandmask & ~bwmask;
+% backgoundmask(expandregion) = expandmask(expandregion);
+% expandedBoundaries = bwboundaries(backgoundmask);
+% imshow(backgoundmask);hold on
+% 
+% for k = 1:length(expandedBoundaries)
+%     expandedBoundary = expandedBoundaries{k};
+%     plot(expandedBoundary(:,2), expandedBoundary(:,1), 'r', 'LineWidth', 0.5); % 红色虚线绘制外扩边缘
+% end
+
+[~, background] = select_ROI(movie, nrows, ncols,backgoundmask ,[]);
+fig_filename = fullfile(save_path, '1_background_trace.fig');
+png_filename = fullfile(save_path, '1_background_trace.png');
+roi_filename = fullfile(save_path, '1_background_ROI.mat');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+save(roi_filename, 'backgoundmask','innerdis','outerdis');
+
+
+%% 
+traces = traces - background;
 
 %% Correction
 
@@ -172,11 +211,11 @@ fited_axe = subplot(2,1,2);
 
 % plot
 for i = 1: size(traces_corrected,2)
-    plot(t,traces(:,i),'Color',colors(i,:),'Parent',fit_axe);
+    plot(traces(:,i),'Color',colors(i,:),'Parent',fit_axe);
     hold(fit_axe, 'on');
-    plot(t,fitted_curves(:,i),'Color',colors(i,:),'LineWidth',2,'Parent',fit_axe);
+    plot(fitted_curves(:,i),'Color',colors(i,:),'LineWidth',2,'Parent',fit_axe);
     hold(fit_axe, 'on');
-    plot(t,traces_corrected(:,i),'Color',colors(i,:),'Parent',fited_axe);
+    plot(traces_corrected(:,i),'Color',colors(i,:),'Parent',fited_axe);
     hold(fited_axe, 'on');
 end
 hold off;
@@ -199,6 +238,8 @@ peakfinding = true; % defined as true
 AP_window_width = 40 ; % number of frames to for AP window (defined = 40)
     
 if peakfinding
+    %  find peaks
+    % also peak_finding(traces,MinPeakProminence_factor) for diy factor
     [peaks_polarity, peaks_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = ...
                                             peak_finding(traces_corrected);
     traces_corr_flipped = traces_corrected.*peaks_polarity + 1 - peaks_polarity;
@@ -474,64 +515,77 @@ png_filename = fullfile(save_path, '6_average_AP_sensitivity.png');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 
-
-% Plot average AP SNR
-% plot
+%%
+% Plot average AP SNR with SD
 figure();
-title('Statistic AP');
-hold on;
-
-% 统计不为空的trace数目
-plot_cols = sum(cellfun('isempty',AP_list)==0)+1;
+plot_cols = sum(cellfun('isempty', AP_list) == 0) + 1;
 plot_col = 0;
-subplot(1,plot_cols,plot_cols);
-
+% Initialize arrays to store all traces for final average calculation
+trace_AP_mean = [];
 
 for i = 1:nrois
-    %判断是否为有AP的trace
     peaks_num = length(peaks_index{i});
-    if cellfun('isempty',AP_list{i}) == 0
+    if ~isempty(AP_list{i})
         plot_col = plot_col + 1;
-        subplot(2,ceil(plot_cols/2),plot_col);
+        subplot(2, ceil(plot_cols / 2), plot_col);
 
-        % set y axis direction
+        % Set y axis direction if necessary
         if peaks_polarity(i) == -1
-            set(gca,'YDir','reverse')
+            set(gca, 'YDir', 'reverse');
             hold on;
         end
 
-        % extract each AP
-        AP_i = zeros(peaks_num, AP_window_width*2+1);
+        % Get each AP and compute mean & SEM
+        AP_i = zeros(peaks_num, AP_window_width*2 + 1);
         for j = 1:peaks_num
             each_AP = AP_list{i}{j};
             AP_i(j,:) = each_AP.AP_SNR;
-            plot((1:AP_window_width*2+1)*dt, each_AP.AP_SNR','Color',[0.8 0.8 0.8]);
+            %plot((1:AP_window_width*2+1) * dt, each_AP.AP_SNR', 'Color', [0.8 0.8 0.8]);
             hold on;
         end
 
-        % plot average AP for trace
-        subplot(2,ceil(plot_cols/2),plot_col);
-        plot((1:AP_window_width*2+1)*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
-        hold on;
-        title(sprintf('ROI %d',i));
+        AP_mean = mean(AP_i, 1, 'omitnan');
+        AP_sd = std(AP_i, 0, 1, 'omitnan');
+
+        % Plot mean with Sd
+        plot((1:AP_window_width*2+1) * dt, AP_mean, 'Color', colors(i,:), 'LineWidth', 2);
+        fill([(1:AP_window_width*2+1)*dt, fliplr((1:AP_window_width*2+1)*dt)], ...
+             [AP_mean + AP_sd, fliplr(AP_mean - AP_sd)], ...
+             colors(i,:), 'FaceAlpha', 0.3, 'EdgeColor', 'none');
+        title(sprintf('ROI %d', i));
         hold on;
 
-        % plot average AP for all
-        subplot(2,ceil(plot_cols/2),plot_cols);
-        plot((1:AP_window_width*2+1)*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
-        hold on;
+        % % Plot average AP for all traces
+        % subplot(2, ceil(plot_cols / 2), plot_cols);
+        % plot((1:AP_window_width*2+1) * dt, AP_mean*peaks_polarity(i), 'Color', [0.8 0.8 0.8]);
+        % hold on;
+
+        % Collect traces for final average calculation
+        trace_AP_mean = [trace_AP_mean; AP_mean*peaks_polarity(i)];
     end
+    
 end
-title('Averaged of All');
-hold on;
-sgtitle('Average SNR');
-hold on;
 
-fig_filename = fullfile(save_path, '6_average_AP_SNR.fig');
-png_filename = fullfile(save_path, '6_average_AP_SNR.png');
+% Plot overall average and SEM in the last subplot
+if ~isempty(trace_AP_mean)
+    overall_mean = mean(trace_AP_mean, 1, 'omitnan');
+    overall_sem = std(trace_AP_mean, 0, 1, 'omitnan') / sum(~cellfun('isempty', AP_list));
+    subplot(2, ceil(plot_cols / 2), plot_cols);
+    fill([(1:AP_window_width*2+1)*dt, fliplr((1:AP_window_width*2+1)*dt)], ...
+         [overall_mean + overall_sem, fliplr(overall_mean - overall_sem)], ...
+         [0.8 0.8 0.8], 'EdgeColor', 'none');
+    hold on;
+    title('Averaged of All');
+    plot((1:AP_window_width*2+1) * dt, overall_mean, 'Color', 'k', 'LineWidth', 1);
+    hold on;
+end
+sgtitle('Average SNR with SD');
+fig_filename = fullfile(save_path, '6_average_AP_SNR_with_SD.fig');
+png_filename = fullfile(save_path, '6_average_AP_SNR_with_SD.png');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
+
 %
 %% Firing rate
 
