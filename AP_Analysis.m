@@ -27,7 +27,6 @@
 %% Loading raw data
 clear; clc;
 
-t1 = tic; % Start a timer
 nowtime = string(datetime('now'));
 % Replace colons with hyphens to get the desired output format
 nowtime = strrep(nowtime , ':', '-');
@@ -35,8 +34,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\CY\20240918_new_labeling\';
-file = '\10';  % must add format.do not add '\' at last
+folder_path = 'E:\1_Data\zsy\20240924 solaris 608\slice1\';
+file = 'field4';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
@@ -82,8 +81,7 @@ end
 
 % 提示完成
 fprintf('All codes have been copied to %s\n', code_path);
-t2 = toc(t1); % Get the elapsed time
-fprintf('Finished loading after %d s\n',round(t2))
+
 
 
 % ----------------------Optional part------------------------
@@ -104,7 +102,7 @@ else
     map = map.map;
 end
 
-mask_path = ''; % define as ''
+mask_path = 'E:\1_Data\Luorong\2024.07.12_dueplex\1：10\50%488-1_Analysis\2024-07-17 11-39-12'; % define as ''
 if isempty(mask_path)
     mask = []; 
 else
@@ -150,6 +148,7 @@ nrois = max(bwmask,[],'all');
 % if do not need a map, run the following code:
 % map = [];
 % [bwmask, traces] = select_ROI(movie, nrows, ncols, t, mask, map);
+avg_image = mean(reshape(movie, ncols, nrows, []),3);
 
 fig_filename = fullfile(save_path, '1_raw_trace.fig');
 png_filename = fullfile(save_path, '1_raw_trace.png');
@@ -157,11 +156,11 @@ roi_filename = fullfile(save_path, '1_raw_ROI.mat');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-save(roi_filename, 'bwmask');
+save(roi_filename, 'bwmask','avg_image');
 %% Background Correction
 % 扣除背景
 % 创建结构元素，用于膨胀边界
-innerdis = 6;
+innerdis = 5;
 outerdis = 8;
 
 se1 = strel('disk', innerdis);
@@ -171,7 +170,7 @@ se2 = strel('disk', outerdis);
 expandmask1 = imdilate(bwmask, se1);
 expandmask2 = imdilate(bwmask, se2);
 expandregion = expandmask2 & ~expandmask1;
-backgoundmask = zeros(size(expandmask));
+backgoundmask = zeros(size(expandmask1));
 backgoundmask(expandregion) = expandmask2(expandregion);
 
 % backgoundmask = zeros(size(expandmask));
@@ -193,6 +192,8 @@ roi_filename = fullfile(save_path, '1_background_ROI.mat');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(roi_filename, 'backgoundmask','innerdis','outerdis');
+%% 
+[bgmask, background] = select_ROI(movie, nrows, ncols, '', '');
 
 
 %% 
@@ -265,10 +266,11 @@ end
 
 fig_filename = fullfile(save_path, '3_peak_finding.fig');
 png_filename = fullfile(save_path, '3_peak_finding.png');
-
+peak_filename = fullfile(save_path, '3_peak_finding.mat');
+ 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-
+save(peak_filename, 'peaks_polarity', 'peaks_threshold', 'peaks_index', 'peaks_amplitude', 'peaks_sensitivity');
 %% Sensitivity and SNR Analysis
 % set up
 fig = figure();

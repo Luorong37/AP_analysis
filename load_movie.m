@@ -46,6 +46,7 @@ nrows = NaN;
 ncols = NaN;
 nframes = NaN;
 
+
 % Check if folder_path is a folder or path to a tif movie
 if isfolder(file_path)
     % Get all TIFF file names in folder
@@ -159,20 +160,29 @@ function tifsize = gettifsize(t)
 end
 
 function tifframe = gettifframe(t)
-fprintf('Calculating frame...\n')
+count = 0;
+print_count = 0;
 while true
+    count = count+1;
     if t.lastDirectory()
         tifframe = t.currentDirectory();
+        fprintf(repmat('\b',1,print_count));   
+        fprintf('%d frames found\n', count);
         break
     else
+        fprintf(repmat('\b',1,print_count));   
+        print_count = fprintf('Calculating frame %d ...\n', count);
         t.nextDirectory()
     end
 end
 end
 
 function [movie, nframes]= readstacktifs(file_path,tifsize)
+    t1 = tic;
      % Initialize parameter
     t = Tiff(file_path, 'r');
+    print_text = 0;
+
     % 初始化帧数
     nframes = gettifframe(t);  % 初始为1，因为至少有一帧
     t.setDirectory(1);
@@ -198,7 +208,8 @@ function [movie, nframes]= readstacktifs(file_path,tifsize)
             if current_percentage > prev_percentage
                 elapsed = toc;
                 remaining = elapsed / ((i - 1) / nframes) - elapsed;
-                fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
+                fprintf(repmat('\b',1,print_text));   
+                print_text = fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
                     i - 1, nframes, current_percentage, remaining);
                 prev_percentage = current_percentage;
             end
@@ -233,17 +244,20 @@ function [movie, nframes]= readstacktifs(file_path,tifsize)
     %     end
     % end
     t.close();
+    t2 = toc(t1); % Get the elapsed time
+    fprintf('Finished loading after %d s\n',round(t2))
 end
 
 function [movie, nframes] = readsingletifs(file_sortedaddress, tifsize)
-
+    t1 = tic;
     % Loop through all TIF files and populate intensity time series parameter
     prev_percentage = 0; % Initialize with -1 so the first update is always printed
     nframes = numel(file_sortedaddress);
     nrows = tifsize(1);
     ncols = tifsize(2);
     movie = zeros(nrows*ncols,nframes, 'uint16');
-    
+    print_text = 0;
+
     % Load batch of TIF files
     tic;
     for i = 1:nframes
@@ -260,12 +274,15 @@ function [movie, nframes] = readsingletifs(file_sortedaddress, tifsize)
         if current_percentage > prev_percentage
             elapsed = toc;
             remaining = (elapsed / i) * (nframes-i) ;
-            fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
+            fprintf(repmat('\b',1,print_text));   
+            print_text = fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
                 i, nframes, current_percentage, remaining);
             prev_percentage = current_percentage;
         end
     
     end
+    t2 = toc(t1);
+    fprintf('Finished loading after %d s\n',round(t2))
 end
 
 

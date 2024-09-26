@@ -37,15 +37,15 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\Luorong\240523mix\';
-file = '20240523-182909SCN';  % must add format.
+folder_path = 'G:\Slice\20240905-P2a-G8s';
+file = '20240905-153142POA';  % must add format.
 file_path = fullfile(folder_path, file);
 file_path_ca = [file_path,'_Green']; % defined name 
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 freq_ca = 10; % Hz
 % ↓↓↓↓↓-------------Prompt user for bin-----------------↓↓↓↓↓
-bin = 1;
+bin = 2;
 bin_ca = 1;
 % -----------------------------------------------------------
 
@@ -146,7 +146,7 @@ else
 end
 
 % mask_path = 'E:\0_Code\Luorong\Tools'; % define as ''
-mask_path = 'E:\1_Data\Luorong\240523mix\20240523-182909SCN_Analysis\2024-09-18 18-23-35';
+mask_path = 'G:\Slice\20240905-P2a-G8s\20240905-153142POA_Analysis\2024-09-26 12-44-40';
 if isempty(mask_path)
     mask = []; 
     mask_ca = [];
@@ -236,13 +236,22 @@ fprintf('Finished exp2 fit\n')
 t1 = tic; % Start a timer
 
 % pAce sparaly corrected each ROI
-% movie_corrected = movie ./ fitted_curves';
+% movie_corrected = movie x`./ fitted_curves';
 % movie_ca_corrected = movie_ca ./ fitted_curves_ca';
 
 % with or wihout Mask and Map
 correct = false; %true for correct offset
+offset_path = 'D:\1_Data\2b. Dual-color imaging in SCN\2024.05.30_dual_P2A\20240530-merge_Analysis\2024-09-26 13-50-02';
+
+if isempty(offset_path)
+    offset = [];
+else
+    offset_filename = fullfile(mask_path, '1_raw_ROI.mat');
+    offset_load = load(offset_filename);
+    offset = offset_load.offset;
+end
 [bwmask, bwmask_ca, traces, traces_ca, offset] = select_ROI_dual(movie , movie_ca, ...
-    nrows, ncols, correct, map, map_ca, mask, mask_ca);
+    nrows, ncols, correct, map, map_ca, mask, mask_ca,offset);
 
 nrois = size(traces,2);
 
@@ -256,10 +265,78 @@ save(roi_filename, 'bwmask', 'bwmask_ca','offset');
 
 t2 = toc(t1); % Get the elapsed time
 fprintf('Saved ROI figure after %d s\n',round(t2))
+%% Correction
+
+% fit
+[traces_corrected, fitted_curves] = fit_exp2(traces);
+
+% plot
+fig = figure();
+set(fig,'Position',get(0,'Screensize'));
+fit_axe = subplot(2,1,1);
+fited_axe = subplot(2,1,2);
+
+% plot
+for i = 1: size(traces_corrected,2)
+    plot(traces(:,i),'Color',colors(i,:),'Parent',fit_axe);
+    hold(fit_axe, 'on');
+    plot(fitted_curves(:,i),'Color',colors(i,:),'LineWidth',2,'Parent',fit_axe);
+    hold(fit_axe, 'on');
+    plot(traces_corrected(:,i),'Color',colors(i,:),'Parent',fited_axe);
+    hold(fited_axe, 'on');
+end
+hold off;
+
+% note
+title(fit_axe, 'Original and Fitted Curves');
+title(fited_axe, 'Corrected Traces');
+legend(fit_axe, 'Original Trace', 'Fitted Curve');
+
+fig_filename = fullfile(save_path, '2_fitted_trace.fig');
+png_filename = fullfile(save_path, '2_fitted_trace.png');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+
+fprintf('Finished expotential fit\n')
+
+% fit
+[traces_corrected_ca, fitted_curves_ca] = fit_exp2(traces_ca);
+
+% plot
+fig = figure();
+set(fig,'Position',get(0,'Screensize'));
+fit_axe = subplot(2,1,1);
+fited_axe = subplot(2,1,2);
+
+% plot
+for i = 1: size(traces_corrected,2)
+    plot(traces_ca(:,i),'Color',colors(i,:),'Parent',fit_axe);
+    hold(fit_axe, 'on');
+    plot(fitted_curves_ca(:,i),'Color',colors(i,:),'LineWidth',2,'Parent',fit_axe);
+    hold(fit_axe, 'on');
+    plot(traces_corrected_ca(:,i),'Color',colors(i,:),'Parent',fited_axe);
+    hold(fited_axe, 'on');
+end
+hold off;
+
+% note
+title(fit_axe, 'Original and Fitted Curves');
+title(fited_axe, 'Corrected Traces');
+legend(fit_axe, 'Original Trace', 'Fitted Curve');
+
+fig_filename = fullfile(save_path, '2_fitted_trace_ca.fig');
+png_filename = fullfile(save_path, '2_fitted_trace_ca.png');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+
+fprintf('Finished expotential fit\n')
+
 %% Peak finding (optional)
 peakfinding = true; % defined as true
 AP_window_width = 40 ; % number of frames to for AP window (defined = 40)
-[peaks_polarity, peaks_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = peak_finding(traces);
+[peaks_polarity, peaks_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = peak_finding(traces_corrected);
 
 
 fig_filename = fullfile(save_path, '5_peak_finding.fig');
@@ -299,13 +376,13 @@ hold on;
 fs = 10; % 采样频率 (Hz)
 fc = 1; % 截止频率 (Hz)
 [b, a] = butter(4, fc/(fs/2)); % 4阶Butterworth低通滤波器
-traces_smoothed_ca = zeros(size(traces_ca));  % 使用双向滤波器进行零相位滤波
-SNR_traces_ca = zeros(size(traces_ca));
+traces_smoothed_ca = zeros(size(traces_corrected_ca));  % 使用双向滤波器进行零相位滤波
+SNR_traces_ca = zeros(size(traces_corrected_ca));
 
 for i = 1 : nrois
     % Calculate SNR
-    traces_smoothed_ca(:,i) = filtfilt(b, a, traces_ca(:,i));
-    SNR_traces_ca(:,i) = calculate_SNR_Ca(traces_ca(:,i),traces_smoothed_ca(:,i));
+    traces_smoothed_ca(:,i) = filtfilt(b, a, traces_corrected_ca(:,i));
+    SNR_traces_ca(:,i) = calculate_SNR_Ca(traces_corrected_ca(:,i),traces_smoothed_ca(:,i));
 end
 [~] = offset_plot(SNR_traces_ca,t_ca);
 
@@ -316,9 +393,9 @@ hold on;
 for i = 1 : nrois
     % Calculate SNR
     if peakfinding
-        [SNR_traces(:,i),baselines(i)]  = calculate_SNR(traces(:,i),peaks_index{i},AP_window_width);
+        [SNR_traces(:,i),baselines(i)]  = calculate_SNR(traces_corrected(:,i),peaks_index{i},AP_window_width);
     else
-        [SNR_traces(:,i),baselines(i)]  = calculate_SNR(traces(:,i));
+        [SNR_traces(:,i),baselines(i)]  = calculate_SNR(traces_corrected(:,i));
     end
 % ;
 end

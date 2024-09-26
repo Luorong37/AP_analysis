@@ -58,6 +58,7 @@ if ~isempty(map)
     [map_axe, image_axe, ~, trace_axe] = GUIwithmap(map, movie_2D);
 else
     [image_axe, ~, trace_axe] = GUIwithoutmap(movie_2D);
+    map_axe = [];
 end
 
 % Mask provided, overlay ROI and traces
@@ -70,16 +71,18 @@ end
 while ~selected
     num_roi = max(bwmask(:)) + 1;
     color = colors(mod(num_roi - 1, length(colors)) + 1, :);
-    if (~isempty(map) && strcmp(key, {''})) || (any(strcmp(previous_key, {'','r'})) && strcmp(key, {'r'}))
-        current_axe = map_axe;
-    else
-        current_axe = image_axe;
-    end
+    % if (~isempty(map) && strcmp(key, {''})) || (any(strcmp(previous_key, {'','r'})) && strcmp(key, {'r'}))
+    %     current_axe = map_axe;
+    % else
+    %     current_axe = image_axe;
+    % end
+    waitforbuttonpress;
+    current_axe = gca;
     [mask,boundary] = axe_select(ncols, nrows, current_axe, color);
     bwmask(mask) = num_roi;
     trace = mean(movie(mask(:),:),1);
     traces = [traces trace'];
-
+    
     [image_ROI, image_text, map_ROI, map_text] = ...
         plot_ROI(boundary, color, num_roi, image_axe, map_axe);
     cla(trace_axe); plot(trace', 'Color', color, 'Parent', trace_axe);
@@ -198,11 +201,13 @@ end
 
 function [image_ROI, image_text, map_ROI, map_text] = ...
 plot_ROI(boundary, color, num_roi, image_axe, map_axe)
-if nargin > 4
+if ~isempty(map_axe)
     map_ROI = plot(boundary(:, 2), boundary(:, 1), 'Color', color, 'LineWidth', 1, 'Parent', map_axe);
     map_text = text(mean(boundary(:, 2)) + 12, mean(boundary(:, 1)) - 12, num2str(num_roi), 'Color', color, 'FontSize', 12, 'Parent', map_axe); hold on;
+else
+    map_ROI = [];
+    map_text = [];
 end
     image_ROI = plot(boundary(:, 2), boundary(:, 1), 'Color', color, 'LineWidth', 1, 'Parent', image_axe);
     image_text = text(mean(boundary(:, 2)) + 12, mean(boundary(:, 1)) - 12, num2str(num_roi), 'Color', color, 'FontSize', 12, 'Parent', image_axe); hold on;
-
 end
