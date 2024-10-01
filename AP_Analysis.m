@@ -34,8 +34,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\zsy\20240924 solaris 608\slice1\';
-file = 'field4';  % must add format.do not add '\' at last
+folder_path = 'D:\1_Data\e. Duplex imaging\\';
+file = '50%488-1';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
@@ -102,7 +102,7 @@ else
     map = map.map;
 end
 
-mask_path = 'E:\1_Data\Luorong\2024.07.12_dueplex\1：10\50%488-1_Analysis\2024-07-17 11-39-12'; % define as ''
+mask_path = 'D:\1_Data\e. Duplex imaging'; % define as ''
 if isempty(mask_path)
     mask = []; 
 else
@@ -142,13 +142,15 @@ fprintf('Finished mask creating after %d s\n',round(t2))
 t1 = tic; % Start a timer
 
 % with or wihout Mask and Map
-[bwmask, traces] = select_ROI(movie, nrows, ncols, mask, map);
-nrois = max(bwmask,[],'all');
+[rois, traces] = select_ROI(movie, nrows, ncols, mask, map);
+nrois = max(rois.bwmask,[],'all');
+bwmask = rois.bwmask;
 
 % if do not need a map, run the following code:
 % map = [];
 % [bwmask, traces] = select_ROI(movie, nrows, ncols, t, mask, map);
-avg_image = mean(reshape(movie, ncols, nrows, []),3);
+movie_vol_2D = reshape(mean(movie,2), ncols, nrows, []);
+avg_image  = (movie_vol_2D - min(movie_vol_2D(:))) / (max(movie_vol_2D(:)) - min(movie_vol_2D(:)));
 
 fig_filename = fullfile(save_path, '1_raw_trace.fig');
 png_filename = fullfile(save_path, '1_raw_trace.png');
@@ -156,35 +158,16 @@ roi_filename = fullfile(save_path, '1_raw_ROI.mat');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-save(roi_filename, 'bwmask','avg_image');
+save(roi_filename, 'rois','avg_image');
+
+h = msgbox('All rois saved.', 'Done', 'help');
+uiwait(h);
+close(gcf);
 %% Background Correction
-% 扣除背景
-% 创建结构元素，用于膨胀边界
-innerdis = 5;
-outerdis = 8;
+background_correction(movie, ncols, nrows, rois)
 
-se1 = strel('disk', innerdis);
-se2 = strel('disk', outerdis);
+[~,background ] = select_ROI(movie, nrows, ncols,rois.background ,[]);
 
-% 对二值化图像进行膨胀
-expandmask1 = imdilate(bwmask, se1);
-expandmask2 = imdilate(bwmask, se2);
-expandregion = expandmask2 & ~expandmask1;
-backgoundmask = zeros(size(expandmask1));
-backgoundmask(expandregion) = expandmask2(expandregion);
-
-% backgoundmask = zeros(size(expandmask));
-% expandregion = expandmask & ~bwmask;
-% backgoundmask(expandregion) = expandmask(expandregion);
-% expandedBoundaries = bwboundaries(backgoundmask);
-% imshow(backgoundmask);hold on
-% 
-% for k = 1:length(expandedBoundaries)
-%     expandedBoundary = expandedBoundaries{k};
-%     plot(expandedBoundary(:,2), expandedBoundary(:,1), 'r', 'LineWidth', 0.5); % 红色虚线绘制外扩边缘
-% end
-
-[~, background] = select_ROI(movie, nrows, ncols,backgoundmask ,[]);
 fig_filename = fullfile(save_path, '1_background_trace.fig');
 png_filename = fullfile(save_path, '1_background_trace.png');
 roi_filename = fullfile(save_path, '1_background_ROI.mat');

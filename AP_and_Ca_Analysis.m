@@ -339,11 +339,14 @@ AP_window_width = 40 ; % number of frames to for AP window (defined = 40)
 [peaks_polarity, peaks_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = peak_finding(traces_corrected);
 
 
-fig_filename = fullfile(save_path, '5_peak_finding.fig');
-png_filename = fullfile(save_path, '5_peak_finding.png');
-
+fig_filename = fullfile(save_path, '3_peak_finding.fig');
+png_filename = fullfile(save_path, '3_peak_finding.png');
+peak_filename = fullfile(save_path, '3_peak_finding.mat');
+ 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
+save(peak_filename, 'peaks_polarity', 'peaks_threshold', 'peaks_index', 'peaks_amplitude', 'peaks_sensitivity');
+
 %% SNR Analysis
 % set up
 fig = figure();
@@ -473,7 +476,7 @@ trace_filename = fullfile(save_path, '2_stacked_trace.mat');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-save(trace_filename, 't','t_ca','SNR_traces','traces_ca');
+save(trace_filename, 't','t_ca','SNR_traces','traces_corrected_ca');
 
 
 %% Accumulate Voltage signal
@@ -911,6 +914,16 @@ for i = 1:nrois
     text(mean(boundary(:, 2)) + 6, mean(boundary(:, 1)) - 6, num2str(i), ...
         'Color', 'g', 'FontSize', 36, 'Parent', cal_img); hold on;
 end
+fig_filename = fullfile(save_path, '5_fluorescent image.fig');
+png_filename = fullfile(save_path, '5_fluorescent image.png');
+mat_filename = fullfile(save_path, '5_fluorescent image.mat');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+save(mat_filename,'normalized_img','normalized_img_ca');
+
+
+
 %%
 
 %% Save parameter
