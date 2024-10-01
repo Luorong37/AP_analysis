@@ -83,8 +83,7 @@ end
 fprintf('All codes have been copied to %s\n', code_path);
 
 
-
-% ----------------------Optional part------------------------
+%% ----------------------Optional part------------------------
 
 % Save data
 save_stack = false;
@@ -92,25 +91,20 @@ if save_stack
     create_tiff_stack(file_path);
 end
 
-% Load saved map or mask (optional)
-map_path = ''; % define as ''
-if isempty(map_path)
-    map = [];
-else
-    map_filename = fullfile(map_path, '0_Sensitivity_Map.mat');
-    map = load(map_filename);
-    map = map.map;
-end
+map = [];
+mask = [];
 
-mask_path = ''; % define as ''
-if isempty(mask_path)
-    mask = []; 
-else
-    mask_filename = fullfile(mask_path, '1_raw_ROI.mat');
-    mask = load(mask_filename);
-    mask = mask.bwmask;
+preload = questdlg('Load previous data?','load data','mask','map','No','Cancel');
+switch preload
+    case 'mask'
+        [mask_filename,mask_foldername] = uigetfile(save_path);
+        mask_data = load(fullfile(mask_foldername,mask_filename));
+        mask = mask_data.rois.bwmask;
+    case 'map'
+        [map_filename,map_foldername] = uigetfile(save_path);
+        map_data = load(fullfile(map_foldername,map_filename));
+        map = map_data.map;
 end
-
 % -----------------------------------------------------------
 
 %% Create a map (optional)
@@ -197,7 +191,8 @@ roi_filename = fullfile(save_path, '1_background_ROI.mat');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-save(roi_filename, 'rois_corrected','background','innerdis','outerdis');
+save(roi_filename, 'rois_corrected','background','background_fitted','background_mask','traces_bgcorr','traces_bgfitcorr', ...
+    'innerdis','outerdis');
 
 %% Correction
 

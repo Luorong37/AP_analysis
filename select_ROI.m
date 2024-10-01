@@ -218,9 +218,9 @@ num_rois = max(bwmask(:));  % ROI数量
 traces = [];
 for i = 1:num_rois
     color = colors(mod(i - 1, length(colors)) + 1, :);  % 选择颜色
-    rois = (bwmask == i);  % 获取当前ROI掩码
-    trace = mean(movie(rois, :), 1);  % 计算平均强度
-    boundary = cell2mat(bwboundaries(rois));  % 提取边界
+    mask = (bwmask == i);  % 获取当前ROI掩码
+    trace = mean(movie(mask, :), 1);  % 计算平均强度
+    boundary = cell2mat(bwboundaries(mask));  % 提取边界
 
     traces = [traces, trace'];  % 保存轨迹
     rois.boundary{i} = boundary;
