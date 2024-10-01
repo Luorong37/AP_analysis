@@ -34,8 +34,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'D:\1_Data\e. Duplex imaging\\';
-file = '50%488-1';  % must add format.do not add '\' at last
+folder_path = 'D:\1_Data\1m. Single color recording in slice\COT-Cy3';
+file = '20230810-170126recordPVH';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
@@ -102,7 +102,7 @@ else
     map = map.map;
 end
 
-mask_path = 'D:\1_Data\e. Duplex imaging'; % define as ''
+mask_path = ''; % define as ''
 if isempty(mask_path)
     mask = []; 
 else
@@ -115,7 +115,7 @@ end
 
 %% Create a map (optional)
 t1 = tic; % Start a timer
-fprintf('Creating...\n')
+fprintf('Creating a map...\n')
 % if SNR is low, please large the bin.
 bin = 4; % defined bin = 4
 [quick_map] = create_map(movie, nrows, ncols, bin);
@@ -164,9 +164,32 @@ h = msgbox('All rois saved.', 'Done', 'help');
 uiwait(h);
 close(gcf);
 %% Background Correction
-background_correction(movie, ncols, nrows, rois)
+fig = background_correction(movie, ncols, nrows, rois);
 
-[~,background ] = select_ROI(movie, nrows, ncols,rois.background ,[]);
+waitfor(fig);
+% [~,background] = select_ROI(movie, nrows, ncols,background ,[]);
+traces_bgcorr = traces - background;
+
+figure()
+subplot(2,2,1)
+imshow(rois.bwmask)
+title('Row rois')
+
+subplot(2,2,2)
+for i = 1:nrois
+    plot(traces(:,i));hold on
+end
+title('Row traces')
+
+subplot(2,2,3)
+imshow(rois_corrected.bwmask)
+title('Corrected rois')
+
+subplot(2,2,4)
+for i = 1:nrois
+    plot(traces_bgcorr(:,i));hold on
+end
+title('Background corrected traces')
 
 fig_filename = fullfile(save_path, '1_background_trace.fig');
 png_filename = fullfile(save_path, '1_background_trace.png');
@@ -174,13 +197,7 @@ roi_filename = fullfile(save_path, '1_background_ROI.mat');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-save(roi_filename, 'backgoundmask','innerdis','outerdis');
-%% 
-[bgmask, background] = select_ROI(movie, nrows, ncols, '', '');
-
-
-%% 
-traces = traces - background;
+save(roi_filename, 'rois_corrected','background','innerdis','outerdis');
 
 %% Correction
 

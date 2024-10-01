@@ -2,7 +2,7 @@ function [rois, traces] = select_ROI(movie, nrows, ncols, mask, map)
 % 
 % ----------Written by Liu-Yang Luorong and ChatGPT----------
 % ----------POWERED by Zoulab in Peking University----------
-% Date: 24.09.10
+% Date: 24.10.01
 % MATLAB Version: R2023a
 % select_ROI 交互式选择兴趣区域（ROIs）
 %
@@ -48,13 +48,13 @@ rois.boundary = {};  % 存储每个ROI的边界
 rois.position = {};  % 存储每个ROI的顶点坐标
 movie_2D = reshape(movie, ncols, nrows, []);  % 重塑电影数据为二维图像
 colors = lines(100);  % 使用预定义的颜色线来标记不同的ROI
-key = '';  % 用于跟踪用户按键
+% key = '';  % 用于跟踪用户按键
 selected = false;  % 标记是否已完成选择
 
 % 设置当前图形窗口为全屏，并添加按键回调函数
 fig = gcf;
-set(fig, 'Position', get(0, 'Screensize'));
 set(gcf, 'KeyPressFcn', @(src, event) set_key_pressed(event, fig));  % 设置按键事件
+set(fig, 'Position', get(0, 'Screensize'));
 
 % 如果提供了敏感度图，创建带有地图的GUI界面；否则，创建仅显示电影的界面
 if ~isempty(map)
@@ -63,6 +63,9 @@ else
     [image_axe, ~, trace_axe] = GUIwithoutmap(movie_2D);
     map_axe = [];
 end
+title(sprintf(['Click an axe to select ROIs.' ...
+    '\nAfter an ROI selection, Press SPACE to continue, Press ENTER to end, Press R to reselect' ...
+    '\nBefore an ROI selction, Press Q to quit, Press R to reselect.']));
 
 % 如果提供了掩码，跳过选择，直接使用提供的掩码并计算轨迹
 if ~isempty(mask)
@@ -70,6 +73,7 @@ if ~isempty(mask)
     selected = true;
     rois.bwmask = mask;
 end
+axe_labels = {};
 
 % 交互式选择ROI的过程
 while ~selected
@@ -77,49 +81,73 @@ while ~selected
     color = colors(mod(num_rois - 1, length(colors)) + 1, :);  % 选择颜色
 
     % 等待用户绘制ROI
+    title(trace_axe,sprintf(['Click an axe to select ROIs.' ...
+    '\nPress Q/Enter to quit, Press R to reselect.']));
+    set(gcf, 'CurrentCharacter', char(0));
     waitforbuttonpress;
-    current_axe = gca;
-    
-    % 用户在当前轴选择ROI
-    [mask, boundary, position] = axe_select(ncols, nrows, current_axe, color);
-    rois.bwmask(mask) = num_rois;  % 将掩码添加到总掩码
-    rois.boundary = [rois.boundary, boundary];  % 记录边界
-    rois.position = [rois.position, position];  % 记录位置
 
-    % 计算ROI区域的平均强度轨迹
-    trace = mean(movie(mask(:), :), 1);
-    traces = [traces, trace'];
+    current_axe = gca;
+    % 捕捉用户的按键
+    key_pressed = get(gcf, 'CurrentCharacter');
+    switch key_pressed
+        case {char(13),'q'} % 按下 'q'和 Enter 键退出循环
+        disp('ROI selection cancelled by user.');
+        break; 
+
+        case 'r'
+        key = 'r';
+
+        otherwise
+        % 用户在当前轴选择ROI
+        [mask, boundary, position] = axe_select(ncols, nrows, current_axe, color);
+        rois.bwmask(mask) = num_rois;  % 将掩码添加到总掩码
+        rois.boundary = [rois.boundary, boundary];  % 记录边界
+        rois.position = [rois.position, position];  % 记录位置
     
-    % 绘制ROI和轨迹
-    [image_rois, image_text, map_rois, map_text] = plot_rois(boundary, color, num_rois, image_axe, map_axe);
-    cla(trace_axe); plot(trace', 'Color', color, 'Parent', trace_axe);  % 绘制信号轨迹
-    
-    % 等待用户的下一步操作
-    key = wait_for_key(fig);
-    
+        % 计算ROI区域的平均强度轨迹
+        trace = mean(movie(mask(:), :), 1);
+        traces = [traces, trace'];
+        
+        % 绘制ROI和轨迹
+        [image_roi, image_text, map_roi, map_text] = plot_rois(boundary, color, num_rois, image_axe, map_axe);
+        cla(trace_axe); plot(trace', 'Color', color, 'Parent', trace_axe);  % 绘制信号轨迹
+        axe_labels = [axe_labels;{image_roi, image_text, map_roi, map_text}];
+
+        % 等待用户的下一步操作
+        title(trace_axe,sprintf(['An ROI selected.' ...
+    '\nPress SPACE to continue, Press Q/Enter to end, Press R to reselect']));
+        key = wait_for_key(fig);
+    end
+
     switch key
-        case 'return'
+        case {'return','q'}
             break;  % 按回车键结束选择
         case 'space'
-            key = '';  % 按空格键继续选择下一个ROI
+            % key = '';  % 按空格键继续选择下一个ROI
             continue;
         case {'v', 'r'}
+            deleted_nroi = max(rois.bwmask(:));
+            % 清除当前ROI的绘图
+            delete(axe_labels{deleted_nroi,1});  delete(axe_labels{deleted_nroi,2});
+            if ~isempty(map)
+                delete(axe_labels{deleted_nroi,3}); delete(axe_labels{deleted_nroi,4});
+            end
+            axe_labels = axe_labels(1:end-1,:);
+            cla(trace_axe);
+
             % 重新选择当前ROI
-            rois.bwmask(mask) = 0;
-            if num_rois > 1
-                traces = traces(:, end-1);
-                rois.boundary = rois.boundary(:, end-1);
-                rois.position = rois.position(:, end-1);
+            rois.bwmask(rois.bwmask == max(rois.bwmask(:))) = 0;
+            if max(rois.bwmask(:)) > 0
+                traces = traces(:, 1:end-1);
+                rois.boundary = rois.boundary(1:end-1);
+                rois.position = rois.position(1:end-1);
+                plot(traces(:, end), 'Color',colors(mod(max(rois.bwmask(:))-1, length(colors)) + 1, :),'Parent', trace_axe);
             else
                 traces = [];
                 rois.boundary = {};
                 rois.position = {};
             end
-            % 清除当前ROI的绘图
-            delete(image_rois);  delete(image_text);
-            if ~isempty(map)
-                delete(map_rois); delete(map_text);
-            end
+
             continue;
     end
 end
@@ -128,7 +156,7 @@ end
 
 function set_key_pressed(event, fig)
 % 处理按键事件，记录按键值
-if any(strcmp(event.Key, {'space', 'return', 'v', 'r'}))
+if any(strcmp(event.Key, {'space', 'return', 'v', 'r','q'}))
     fig.UserData.space = event.Key;
 end
 end
@@ -146,7 +174,7 @@ function [map_axe, image_axe, im_adj, trace_axe] = GUIwithmap(map, movie_2D)
     map_axe = gca;
     imagesc(map);  % 显示敏感度图
     colorbar;
-    title('Sensitivity MAP\n\nPress SPACE to continue\nPress ENTER to end');
+    title(sprintf('Sensitivity MAP'));
     hold on;
     axis image;
 
@@ -174,7 +202,7 @@ function [image_axe, im_adj, trace_axe] = GUIwithoutmap(movie_2D)
     im_adj = uint16(mean(movie_2D, 3));  % 显示电影的平均图像
     imshow(im_adj, [min(im_adj,[],'all'), max(im_adj,[],'all')]);
     hold on;
-    title('Fluorescent Image\n\nPress SPACE to continue\nPress ENTER to end');
+    title('Fluorescent Image');
 
     % 显示轨迹的轴
     subplot(1,2,2);

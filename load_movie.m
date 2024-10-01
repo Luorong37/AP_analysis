@@ -75,7 +75,7 @@ if isfolder(file_path)
         movie = [];
         nframes = 0;
         for i = 1:stacks_num
-            fprintf('Loading %s\n',file_sortedaddress{i})
+            fprintf('Loading %s, ',file_sortedaddress{i})
             [current_movie, current_nframes] = readstacktifs(file_sortedaddress{i},tifsize);
             movie = cat(2,movie,current_movie);
             nframes = nframes + current_nframes;
@@ -245,7 +245,7 @@ function [movie, nframes]= readstacktifs(file_path,tifsize)
     % end
     t.close();
     t2 = toc(t1); % Get the elapsed time
-    fprintf('Finished loading after %d s\n',round(t2))
+    fprintf('Finished loading after %d s, ',round(t2))
 end
 
 function [movie, nframes] = readsingletifs(file_sortedaddress, tifsize)
@@ -282,7 +282,7 @@ function [movie, nframes] = readsingletifs(file_sortedaddress, tifsize)
     
     end
     t2 = toc(t1);
-    fprintf('Finished loading after %d s\n',round(t2))
+    fprintf('Finished loading after %d s, ',round(t2))
 end
 
 

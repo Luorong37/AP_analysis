@@ -33,7 +33,7 @@ file_names = {file_list.name};
 file_nums = cellfun(@(x) extractFileNumber(x), file_names,'UniformOutput', false);
 
 try
-    [~, idx] = sort(file_nums);
+    [~, idx] = sort(cell2mat(file_nums));
     sortable = true;
 catch
     sortable = false;
@@ -62,6 +62,7 @@ if sortable
 
     % Loop through all TIF files and create TIFF stack
     tic;
+    print_count = 0 ;
     while batch_start <= num_files
         % Load batch of TIF files
         batch_end = min(batch_start + batch_size - 1, num_files);
@@ -70,8 +71,7 @@ if sortable
         for i = batch_range
             try
                 % Read the current image
-                current_image = imread(fullfile(file_path, file_names{i}));
-                current_image = uint16(current_image);  % Convert to appropriate type
+                current_image = uint16(imread(fullfile(file_path, file_names{i})));% Convert to appropriate type
 
                 % Get the size of the current image
                 im_info = whos('current_image');
@@ -86,6 +86,7 @@ if sortable
                     current_file_size = 0;
                     stack_counter = 1;
                     fprintf('Creating new stack file: %s\n', tiff_file_name);
+                    print_count = 0;
                 end
 
                 % Write the current image to the TIFF stack
@@ -113,7 +114,8 @@ if sortable
                 if current_percentage > prev_percentage
                     elapsed = toc;
                     remaining = elapsed / ((i-1) / num_files) - elapsed;
-                    fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
+                    fprintf(repmat('\b',1,print_count))
+                    print_count = fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
                         i - 1, num_files, current_percentage, remaining);
                     prev_percentage = current_percentage;
                 end
