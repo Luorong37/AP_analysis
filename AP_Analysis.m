@@ -23,10 +23,9 @@
 % GitHub: https://github.com/Luorong37/AP_analysis
 %
 % See also calculate_firing_rate, calculate_FWHM, create_map, calculate_SNR, fit_exp1, highpassfilter, select_ROI
- 
-%% Loading raw data
-clear; clc;
 
+clear; clc;
+%% Loading raw data
 nowtime = string(datetime('now'));
 % Replace colons with hyphens to get the desired output format
 nowtime = strrep(nowtime , ':', '-');
@@ -34,8 +33,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'D:\1_Data\1m. Single color recording in slice\COT-Cy3';
-file = '20230810-170126recordPVH';  % must add format.do not add '\' at last
+folder_path = 'E:\1_Data\zsy\20241004 solaris_Citrine_Kv2.1 608\100 nM';
+file = 'field1';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
@@ -66,6 +65,8 @@ colors = lines(100);
 t = (1:nframes) * dt;
 peakfinding = true;
 options.colors = colors;
+map = [];
+mask = [];
 
 % Save code
 code_path = fullfile(save_path,'Code');
@@ -91,22 +92,19 @@ if save_stack
     create_tiff_stack(file_path);
 end
 
-map = [];
-mask = [];
-
-preload = questdlg('Load previous data?','load data','mask','map','No','Cancel');
+preload = questdlg('Load previous data?','load data','mask','ROIs','No','Cancel');
 switch preload
     case 'mask'
         [mask_filename,mask_foldername] = uigetfile(save_path);
         mask_data = load(fullfile(mask_foldername,mask_filename));
         mask = mask_data.rois.bwmask;
-    case 'map'
-        [map_filename,map_foldername] = uigetfile(save_path);
-        map_data = load(fullfile(map_foldername,map_filename));
-        map = map_data.map;
+    case 'ROIs'
+        [roi_filename,roi_foldername] = uigetfile(save_path);
+        rois_data = load(fullfile(roi_foldername,roi_filename));
+        rois = rois_data.rois;
+        mask = rois.bwmask;
 end
 % -----------------------------------------------------------
-
 %% Create a map (optional)
 t1 = tic; % Start a timer
 fprintf('Creating a map...\n')
@@ -136,9 +134,18 @@ fprintf('Finished mask creating after %d s\n',round(t2))
 t1 = tic; % Start a timer
 
 % with or wihout Mask and Map
-[rois, traces] = select_ROI(movie, nrows, ncols, mask, map);
+if exist('preload','var')
+    if strcmp(preload,'No')
+        [rois, traces] = select_ROI(movie, nrows, ncols, mask, map);
+    else
+        [~, traces] = select_ROI(movie, nrows, ncols, mask, map);
+    end
+else
+    [rois, traces] = select_ROI(movie, nrows, ncols, mask, map);
+end
 nrois = max(rois.bwmask,[],'all');
 bwmask = rois.bwmask;
+traces_original = traces;
 
 % if do not need a map, run the following code:
 % map = [];
@@ -152,17 +159,17 @@ roi_filename = fullfile(save_path, '1_raw_ROI.mat');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-save(roi_filename, 'rois','avg_image');
+save(roi_filename, 'rois','avg_image','traces');
 
 h = msgbox('All rois saved.', 'Done', 'help');
 uiwait(h);
 close(gcf);
-%% Background Correction
+%% Background Correction(optional)
 fig = background_correction(movie, ncols, nrows, rois);
 
 waitfor(fig);
 % [~,background] = select_ROI(movie, nrows, ncols,background ,[]);
-traces_bgcorr = traces - background;
+% traces_bgcorr = traces - background;
 
 figure()
 subplot(2,2,1)
@@ -181,7 +188,7 @@ title('Corrected rois')
 
 subplot(2,2,4)
 for i = 1:nrois
-    plot(traces_bgcorr(:,i));hold on
+    plot(traces_bgfitcorr(:,i));hold on
 end
 title('Background corrected traces')
 
@@ -192,8 +199,8 @@ roi_filename = fullfile(save_path, '1_background_ROI.mat');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(roi_filename, 'rois_corrected','background','background_fitted','background_mask','traces_bgcorr','traces_bgfitcorr', ...
-    'innerdis','outerdis');
-
+    'innerdis','outerdis','bgthreshold');
+traces = traces_bgfitcorr;
 %% Correction
 
 % fit
@@ -231,8 +238,7 @@ fprintf('Finished expotential fit\n')
 
 %% Peak finding
 peakfinding = true; % defined as true
-AP_window_width = 40 ; % number of frames to for AP window (defined = 40)
-    
+ 
 if peakfinding
     %  find peaks
     % also peak_finding(traces,MinPeakProminence_factor) for diy factor
@@ -267,6 +273,8 @@ saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(peak_filename, 'peaks_polarity', 'peaks_threshold', 'peaks_index', 'peaks_amplitude', 'peaks_sensitivity');
 %% Sensitivity and SNR Analysis
+AP_window_width = 10 ; % number of frames to for AP window (defined = 40)
+   
 % set up
 fig = figure();
 set(fig,'Position',get(0,'Screensize'));
@@ -465,6 +473,8 @@ figure();
 % 统计不为空的trace数目
 plot_cols = sum(cellfun('isempty',AP_list)==0)+1;
 plot_col = 0;
+% Initialize arrays to store all traces for final average calculation
+trace_AP_mean = [];
 
 for i = 1:nrois % i for trace
     %判断是否为有AP的trace
@@ -472,6 +482,7 @@ for i = 1:nrois % i for trace
     if cellfun('isempty',AP_list{i}) == 0
         plot_col = plot_col + 1;
         subplot(2,ceil(plot_cols/2),plot_col);
+        set(gca,'color','none');
 
         % set y axis direction
         if peaks_polarity(i) == -1
@@ -485,32 +496,54 @@ for i = 1:nrois % i for trace
             each_AP = AP_list{i}{j};
             AP_i(j,:) = each_AP.AP_sensitivity;
             % plot each AP
-            plot((1:AP_window_width*2+1)*dt, each_AP.AP_sensitivity','Color',[0.8 0.8 0.8]);
+            % plot((1:AP_window_width*2+1)*dt, each_AP.AP_sensitivity','Color',[0.8 0.8 0.8]);
             hold on;
         end
 
+        AP_mean = mean(AP_i, 1, 'omitnan');
+        AP_sd = std(AP_i, 0, 1, 'omitnan');
+
         % plot average AP for each trace
         subplot(2,ceil(plot_cols/2),plot_col);
-        plot((1:AP_window_width*2+1)*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
+        plot((1:AP_window_width*2+1)*dt, AP_mean,'Color',colors(i,:),'LineWidth',2);
         hold on;
         title(sprintf('ROI %d\n',i));
+        fill([(1:AP_window_width*2+1)*dt, fliplr((1:AP_window_width*2+1)*dt)], ...
+             [AP_mean + AP_sd, fliplr(AP_mean - AP_sd)], ...
+             colors(i,:), 'FaceAlpha', 0.3, 'EdgeColor', 'none');
         hold on;
 
         % plot average AP for average trace
-        subplot(2,ceil(plot_cols/2),plot_cols);
-        plot((1:AP_window_width*2+1)*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
-        hold on;
+        
+        % plot((1:AP_window_width*2+1)*dt, mean(AP_i,1,'omitnan'),'Color',colors(i,:),'LineWidth',1);
+        % hold on;
+        trace_AP_mean = [trace_AP_mean; AP_mean*peaks_polarity(i)];
     end
 end
-title('Averaged of All');
-hold on;
+
+
+if ~isempty(trace_AP_mean)
+    overall_mean = mean(trace_AP_mean, 1, 'omitnan');
+    overall_sem = std(trace_AP_mean, 0, 1, 'omitnan') / sum(~cellfun('isempty', AP_list));
+    subplot(2, ceil(plot_cols / 2), plot_cols);set(gca,'color','none');hold on;
+    fill([(1:AP_window_width*2+1)*dt, fliplr((1:AP_window_width*2+1)*dt)], ...
+         [overall_mean + overall_sem, fliplr(overall_mean - overall_sem)], ...
+         [0.8 0.8 0.8], 'EdgeColor', 'none');
+    
+    title('Averaged of All');
+    plot((1:AP_window_width*2+1) * dt, overall_mean, 'Color', 'k', 'LineWidth', 1);
+    hold on;
+end
+
 sgtitle('Averaged Sensitivity');
 hold on;
 fig_filename = fullfile(save_path, '6_average_AP_sensitivity.fig');
 png_filename = fullfile(save_path, '6_average_AP_sensitivity.png');
-
+mat_filename = fullfile(save_path, '6_average_AP_sensitivity.mat');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
+save(mat_filename, 'AP_list', 'peaks_index', 'nrois', 'AP_window_width', 'dt', ...
+     'peaks_polarity', 'colors', 'trace_AP_mean', 'overall_mean', 'overall_sem');
 
 %%
 % Plot average AP SNR with SD
@@ -518,13 +551,14 @@ figure();
 plot_cols = sum(cellfun('isempty', AP_list) == 0) + 1;
 plot_col = 0;
 % Initialize arrays to store all traces for final average calculation
-trace_AP_mean = [];
+trace_AP_SNR_mean = [];
 
 for i = 1:nrois
     peaks_num = length(peaks_index{i});
     if ~isempty(AP_list{i})
         plot_col = plot_col + 1;
         subplot(2, ceil(plot_cols / 2), plot_col);
+        set(gca,'color','none');
 
         % Set y axis direction if necessary
         if peaks_polarity(i) == -1
@@ -558,20 +592,21 @@ for i = 1:nrois
         % hold on;
 
         % Collect traces for final average calculation
-        trace_AP_mean = [trace_AP_mean; AP_mean*peaks_polarity(i)];
+        trace_AP_SNR_mean = [trace_AP_SNR_mean; AP_mean*peaks_polarity(i)];
     end
     
 end
 
 % Plot overall average and SEM in the last subplot
-if ~isempty(trace_AP_mean)
-    overall_mean = mean(trace_AP_mean, 1, 'omitnan');
-    overall_sem = std(trace_AP_mean, 0, 1, 'omitnan') / sum(~cellfun('isempty', AP_list));
-    subplot(2, ceil(plot_cols / 2), plot_cols);
+if ~isempty(trace_AP_SNR_mean)
+    overall_mean = mean(trace_AP_SNR_mean, 1, 'omitnan');
+    overall_sem = std(trace_AP_SNR_mean, 0, 1, 'omitnan') / sum(~cellfun('isempty', AP_list));
+    subplot(2, ceil(plot_cols / 2), plot_cols);hold on;
+    set(gca,'color','none');
     fill([(1:AP_window_width*2+1)*dt, fliplr((1:AP_window_width*2+1)*dt)], ...
          [overall_mean + overall_sem, fliplr(overall_mean - overall_sem)], ...
          [0.8 0.8 0.8], 'EdgeColor', 'none');
-    hold on;
+    
     title('Averaged of All');
     plot((1:AP_window_width*2+1) * dt, overall_mean, 'Color', 'k', 'LineWidth', 1);
     hold on;

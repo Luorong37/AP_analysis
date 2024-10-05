@@ -33,8 +33,11 @@ end
 while ~selected
     num_roi = max(bwmask(:)) + 1;
     color = colors(num_roi,:);
+
     waitforbuttonpress;
     current_axe = gca;
+
+    
     if isequal(current_axe,img_axe)||isequal(current_axe, img_ca_axe)
         % plot in img
         [mask_v, mask_ca, boundary_v, boundary_ca] = handle_offset_select(x_offset, y_offset, ncols, nrows, img_axe, img_ca_axe,current_axe, color);

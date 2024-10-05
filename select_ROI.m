@@ -84,9 +84,10 @@ while ~selected
     title(trace_axe,sprintf(['Click an axe to select ROIs.' ...
     '\nPress Q/Enter to quit, Press R to reselect.']));
     set(gcf, 'CurrentCharacter', char(0));
+    
     waitforbuttonpress;
-
     current_axe = gca;
+    
     % 捕捉用户的按键
     key_pressed = get(gcf, 'CurrentCharacter');
     switch key_pressed

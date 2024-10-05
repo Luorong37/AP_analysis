@@ -34,7 +34,7 @@ function fig = background_correction(movie, ncols, nrows, rois)
     % 初始化背景单元格数组，用于存储每个ROI的背景信息
     background = zeros(size(movie,2),num_rois); 
     background_fitted = zeros(size(movie,2),num_rois); 
-    background_mask = zeros(rois.bwmask);
+    background_mask = zeros(size(rois.bwmask));
     traces_bgcorr = zeros(size(movie,2),num_rois); 
     traces_bgfitcorr = zeros(size(movie,2),num_rois); 
 
@@ -61,14 +61,18 @@ function fig = background_correction(movie, ncols, nrows, rois)
     uilabel(fig, 'Position', [screenSize(3)/2 - 100 bottom_edge 100 30], 'Text', sprintf('ROI No.(max %d)',num_rois));
     uilabel(fig, 'Position', [screenSize(3)/2 + 200 bottom_edge 120 30], 'Text', 'Inner distance (pixel)');
     uilabel(fig, 'Position', [screenSize(3)/2 + 500 bottom_edge 160 30], 'Text', 'Outer distance (pixel)');
+    uilabel(fig, 'Position', [screenSize(3)/2 + 800 bottom_edge 160 30], 'Text', 'background threshold');
     ROInumber = uieditfield(fig, 'numeric', 'Position', [screenSize(3)/2 bottom_edge 50 30]);
     Inner_distance = uieditfield(fig, 'numeric', 'Position', [screenSize(3)/2 + 340 bottom_edge 50 30]);
     Outter_distance = uieditfield(fig, 'numeric', 'Position', [screenSize(3)/2 + 660 bottom_edge 50 30]);
+    bgthreshold = uieditfield(fig, 'numeric', 'Position', [screenSize(3)/2 + 980 bottom_edge 50 30]);
 
     % 设置默认值
     ROInumber.Value = 1;
+    lastroi = ROInumber.Value;
     Inner_distance.Value = 2;
-    Outter_distance.Value = 4;
+    Outter_distance.Value = 32;
+    bgthreshold.Value = 0.05;
 
     % 绘制初始ROI
     h = drawpolygon('Position', rois.position{1}, 'Parent', axImage);
@@ -90,30 +94,33 @@ function fig = background_correction(movie, ncols, nrows, rois)
     setappdata(fig, 'h', h);
     setappdata(fig, 'num_rois', num_rois);
     setappdata(fig,'background_mask',background_mask);
+    setappdata(fig, 'lastroi', lastroi)
 
     % 设置数值框的回调函数，更新背景信息
-    ROInumber.ValueChangedFcn = @(src, event) updatebackground(fig, ROInumber.Value, Inner_distance.Value, Outter_distance.Value);
-    Inner_distance.ValueChangedFcn = @(src, event) updatebackground(fig, ROInumber.Value, src.Value, Outter_distance.Value);
-    Outter_distance.ValueChangedFcn = @(src, event) updatebackground(fig, ROInumber.Value, Inner_distance.Value, src.Value);
-
+    % ROInumber.ValueChangedFcn = @(src, event) updatebackground(fig, src.Value, Inner_distance.Value, Outter_distance.Value, bgthreshold.Value);
+    ROInumber.ValueChangedFcn = @(src, event) plotbutton(fig, src.Value, Inner_distance.Value, Outter_distance.Value, bgthreshold.Value);
+    Inner_distance.ValueChangedFcn = @(src, event) updatebackground(fig, ROInumber.Value, src.Value, Outter_distance.Value, bgthreshold.Value);
+    Outter_distance.ValueChangedFcn = @(src, event) updatebackground(fig, ROInumber.Value, Inner_distance.Value, src.Value, bgthreshold.Value);
+    bgthreshold.ValueChangedFcn = @(src, event) updatebackground(fig, ROInumber.Value, Inner_distance.Value, Outter_distance.Value, src.Value);
+    
     % 初次更新背景
-    plotbutton(fig, ROInumber.Value, Inner_distance.Value, Outter_distance.Value);
+    plotbutton(fig, ROInumber.Value, Inner_distance.Value, Outter_distance.Value, bgthreshold.Value);
 
     % updatebackground(fig, ROInumber.Value, Inner_distance.Value, Outter_distance.Value);
 
     % 创建按钮：用于绘制轨迹
     plotButton = uibutton(fig, 'Text', 'Plot trace', ...
         'Position', [screenSize(3)/2 + 150 screenSize(4)/8 - 50 150 30], ...
-        'ButtonPushedFcn', @(src, event) plotbutton(fig, ROInumber.Value, Inner_distance.Value, Outter_distance.Value));
+        'ButtonPushedFcn', @(src, event) plotbutton(fig, ROInumber.Value, Inner_distance.Value, Outter_distance.Value, bgthreshold.Value));
 
     % 创建按钮：用于保存背景和ROI数据
     saveButton = uibutton(fig, 'Text', 'Save background', ...
         'Position', [screenSize(3)/2 + 500 screenSize(4)/8 - 50 150 30], ...
-        'ButtonPushedFcn', @(src, event) saveROI(fig, Inner_distance.Value, Outter_distance.Value));
+        'ButtonPushedFcn', @(src, event) saveROI(fig, Inner_distance.Value, Outter_distance.Value, bgthreshold.Value));
 end
 
 % 更新背景区域，使用内外扩展距离来定义背景区域
-function updatebackground(fig, nroi, innerdis, outerdis)
+function updatebackground(fig, nroi, innerdis, outerdis, bgthreshold)
     movie = getappdata(fig, 'movie');
     img = getappdata(fig, 'img');
     axImage = getappdata(fig, 'axImage');
@@ -126,29 +133,37 @@ function updatebackground(fig, nroi, innerdis, outerdis)
     traces_bgfitcorr = getappdata(fig, 'traces_bgfitcorr');
     rois = getappdata(fig, 'rois');
     num_rois = getappdata(fig, 'num_rois');
-    sg = getappdata(fig, 'sg');
+    % sg = getappdata(fig, 'sg');
     background_mask = getappdata(fig,'background_mask');
+    lastroi = getappdata(fig, 'lastroi');
+    axSig = getappdata(fig, 'axSig');
 
-    % 确认ROI和距离合法性
+    % 确认合法性
     if nroi > num_rois
         errordlg('Exceed max ROI number!', 'Error');
         return;
     elseif outerdis <= innerdis
         errordlg('Outer distance must be larger than Inner distance!', 'Error');
         return;
+    elseif ~(0<bgthreshold && bgthreshold<=1)
+        errordlg('Background threshold must bewteen 0 and 1!', 'Error');
+        return;
     end
 
     % 显示图像
+    position = h.Position;
     imshow(img, 'Parent', axImage);
     hold(axImage, 'on');
 
     % 重新绘制多边形ROI
-    h = drawpolygon('Position', rois.position{nroi}, 'Parent', axImage);
+    h = drawpolygon('Position', position, 'Parent', axImage);
 
     % 计算并显示背景区域
     se1 = strel('disk', innerdis);
     se2 = strel('disk', outerdis);
+    w = msgbox('Rois updating, please wait...', 'Process', 'help');
     for i = 1:num_rois
+        if nroi == lastroi || i == nroi
         bwmask = rois.bwmask == i;
         expandmask1 = imdilate(bwmask, se1);
         expandmask2 = imdilate(bwmask, se2);
@@ -159,17 +174,22 @@ function updatebackground(fig, nroi, innerdis, outerdis)
         background_mask(background_mask == nroi) = 0;
         background_mask(expandregion) = nroi;
 
-        % 根据掩码提取背景信号
-        bg = select_by_mask(expandregion, movie);
+        % 根据掩码提取信号
+        [bg, bg_mask] = selectbg_by_mask(expandregion, movie,bgthreshold);
         bg_fitted = polyval(polyfit(1:length(bg), bg, 1), 1:length(bg));
+
+        sg = select_by_mask(bwmask, movie);
         
         % 保存背景信息
         background(:, i) = bg;
         background_fitted(:, i) = bg_fitted;
         traces_bgcorr(:, i) = sg-bg; 
         traces_bgfitcorr(:, i) = sg-bg_fitted; 
-
+        max_dff = (min(sg-bg_fitted)-mean(sg-bg_fitted))/mean(sg-bg_fitted);
+        
+        % 绘制区域
         hold(axImage,'on')
+
         for k = 1:length(expandedBoundaries)
             expandedBoundary = expandedBoundaries{k};
             plot(expandedBoundary(:, 2), expandedBoundary(:, 1), 'r', 'LineWidth', 0.5, 'Parent', axImage);
@@ -178,25 +198,36 @@ function updatebackground(fig, nroi, innerdis, outerdis)
             end
         end
 
+        % 绘制背景
+        bgboundaries = bwboundaries(bg_mask);
+        for k = 1:length(bgboundaries)
+            bgboundary = bgboundaries{k};
+            plot(bgboundary(:, 2), bgboundary(:, 1), 'y', 'LineWidth', 0.5, 'Parent', axImage);
+        end
+
         hold(axImage,'off')
 
-        % 绘制扩展区域的边界
+        % 绘制trace
         if i == nroi
+            plot(sg, 'Parent', axSig);
             plot(bg, 'Parent', axBg); hold(axBg,'on');
             plot(bg_fitted,'r','LineWidth', 2, 'Parent', axBg); hold(axBg,'off');
             plot(sg-bg, 'Parent', axSigcorr);hold(axSigcorr,'on');
             plot(sg-bg_fitted,'r', 'Parent', axSigcorr);
             plot(zeros(size(bg))','r','LineWidth', 2, 'Parent', axSigcorr);hold(axSigcorr,'off');
+            title(axSigcorr,sprintf('Corrected Signal, max dF/F = %f2', max_dff));
+        end
         end
     end
-
+    close(w)
     setappdata(fig, 'background', background);
     setappdata(fig, 'h', h);
+    setappdata(fig,'traces_bgfitcorr',traces_bgfitcorr);
 
 end
 
 % 保存ROI和背景数据到工作区
-function saveROI(fig, innerdis, outerdis)
+function saveROI(fig, innerdis, outerdis, bgthreshold)
     rois = getappdata(fig, 'rois');
     background = getappdata(fig, 'background');
     background_fitted = getappdata(fig, 'background_fitted');
@@ -213,7 +244,7 @@ function saveROI(fig, innerdis, outerdis)
     assignin('base', 'rois_corrected', rois);
     assignin('base', 'innerdis', innerdis);
     assignin('base', 'outerdis', outerdis);
-    
+    assignin('base', 'bgthreshold', bgthreshold);
 
     % 提示保存成功
     disp('ROI updated. Background selected.');
@@ -221,45 +252,70 @@ function saveROI(fig, innerdis, outerdis)
 end
 
 % 绘制ROI的信号轨迹
-function plotbutton(fig, nroi, innerdis, outerdis)
+function plotbutton(fig, nroi, innerdis, outerdis, bgthreshold)
     h = getappdata(fig, 'h');
     rois = getappdata(fig, 'rois');
-    movie = getappdata(fig, 'movie');
+    % movie = getappdata(fig, 'movie');
     img = getappdata(fig, 'img');
     axImage = getappdata(fig, 'axImage');
-    axSig = getappdata(fig, 'axSig');
     ncols = getappdata(fig, 'ncols');
     nrows = getappdata(fig, 'nrows');
+    lastroi = getappdata(fig, 'lastroi');
 
     % 获取多边形的位置信息
-    position = h.Position;
+    if nroi == lastroi
+        position = h.Position;
+    else
+        position = rois.position{nroi};
+    end
     imshow(img, 'Parent', axImage);
     hold(axImage, 'on');
     h = drawpolygon('Position', position, 'Parent', axImage);
 
     % 生成ROI掩码并绘制信号
     mask = poly2mask(position(:, 1), position(:, 2), ncols, nrows);
-    sg = select_by_mask(mask, movie);
-    plot(sg, 'Parent', axSig);
 
     % 更新ROI信息
-    rois.position{nroi} = position;
+    if nroi == lastroi
     rois.boundary = bwboundaries(mask);
     rois.bwmask(rois.bwmask == nroi) = 0;
     rois.bwmask(mask) = nroi;
+    rois.position{nroi} = position;
+    end
 
     % 保存更新的ROI信息
     setappdata(fig, 'rois', rois);
     setappdata(fig, 'h', h);
-    setappdata(fig, 'sg', sg);
+    % setappdata(fig, 'sg', sg);
 
     % 更新背景
-    updatebackground(fig, nroi, innerdis, outerdis);
+    updatebackground(fig, nroi, innerdis, outerdis, bgthreshold);
+    setappdata(fig, 'lastroi', nroi);
 end
 
 % 通过掩码提取信号轨迹
 function trace = select_by_mask(bwmask, movie)
     trace = mean(movie(bwmask(:), :), 1);
+end
+
+function [trace, bg_mask] = selectbg_by_mask(bwmask, movie, bgthreshold)
+    % Step 1: 计算掩膜区域在时间维度上的平均图像
+    avg_image = zeros(size(bwmask));  % 初始化一个与bwmask大小相同的图像
+    avg_image(bwmask) = mean(movie(bwmask(:), :), 2);  % 计算bwmask内像素的平均值
+
+    % Step 2: 找到bwmask掩膜内平均图像中后5%的像素值
+    % 提取bwmask区域内的像素值
+    masked_pixels = avg_image(bwmask);  % 提取bwmask内像素的平均值
+    sorted_pixels = sort(masked_pixels);  % 对这些像素进行排序
+    threshold_index = round(length(sorted_pixels) * bgthreshold);  % 找到后5%的阈值索引
+    threshold_value = sorted_pixels(threshold_index);  % 阈值对应的像素值
+
+    % Step 3: 生成背景掩膜（在bwmask区域内的低5%像素作为背景）
+    bg_mask = (avg_image <= threshold_value) & bwmask;  % 背景掩膜同时考虑bwmask
+    
+    % Step 4: 根据背景掩膜计算背景的时间轨迹
+    % 只在bg_mask内的像素进行背景时间变化轨迹的计算
+    trace = mean(movie(bg_mask(:), :), 1);  % 在时间维度上平均背景区域的像素
 end
 
 
