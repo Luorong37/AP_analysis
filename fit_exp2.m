@@ -46,18 +46,38 @@ fitted_curves = zeros(size(traces));
 params = cell(size(traces,2),1);
 gofs = cell(size(traces,2),1);
 
+
+
+
 % Perform photobleaching correction for each ROI
 for i = 1:size(traces, 2)
     % Extract the current trace
+    disp(i)
+    ft = fittype('exp2');
+    opts = fitoptions(ft);
+    % 这些值可以根据数据的范围进行调整
+    opts.Lower = [-Inf, -Inf, -Inf, -Inf];  % 根据数据进行调整
+    opts.Upper = [Inf, Inf, Inf, Inf];      % 根据数据进行调整
     current_trace = traces(:, i);
-    
+    opts.StartPoint = [mean(current_trace), 1e-5, 0, 1e-5];
     % Fit the exponential decay model to the trace
-    [fit_params,gof] = fit(time', current_trace,'exp2'); 
+    try
+    [fit_params,gof] = fit(time', current_trace, ft, opts); 
+    catch ME
+        ft = fittype('poly1');
+        opts = fitoptions(ft);
+         [fit_params,gof] = fit(time', current_trace, ft, opts);
+    end
     params{i} = fit_params;
     gofs{i} = gof;
 
     % Generate the fitted curve from the fit parameters
-    fitted_curve = fit_params.a * exp(fit_params.b * time) + fit_params.c * exp(fit_params.d * time);
+    switch type(ft)
+        case 'exp2'
+            fitted_curve = fit_params.a * exp(fit_params.b * time) + fit_params.c * exp(fit_params.d * time);
+        case 'poly1'
+            fitted_curve = fit_params.p1 *time + fit_params.p2;
+    end
     fitted_curves(:, i) = fitted_curve;
     
     % Correct the original trace by dividing by the fitted curve to mitigate photobleaching effect

@@ -11,7 +11,7 @@
 %   1. Set the folder_path and file variables to point to your data.
 %   2. Specify the frame rate (freq) of your data.
 %   3. Run the script.
-%
+% 
 % Example:
 %   folder_path = 'F:\20240321\';
 %   file = '20240321.tif'; % Include the format in the file name.
@@ -26,15 +26,15 @@
 
 clear; clc;
 %% Loading raw data
-nowtime = string(datetime('now'));
+nowtime = string(datetime( 'now'));
 % Replace colons with hyphens to get the desired output format
 nowtime = strrep(nowtime , ':', '-');
 fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\zsy\20241004 solaris_Citrine_Kv2.1 608\100 nM';
-file = 'field1';  % must add format.do not add '\' at last
+folder_path = 'E:\1_Data\ZRXin\241112-analysis\';
+file = 'slice5-15';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
@@ -67,6 +67,9 @@ peakfinding = true;
 options.colors = colors;
 map = [];
 mask = [];
+movie_vol_2D = reshape(mean(movie,2), ncols, nrows, []);
+avg_image  = (movie_vol_2D - min(movie_vol_2D(:))) / (max(movie_vol_2D(:)) - min(movie_vol_2D(:)));
+
 
 % Save code
 code_path = fullfile(save_path,'Code');
@@ -92,12 +95,13 @@ if save_stack
     create_tiff_stack(file_path);
 end
 
-preload = questdlg('Load previous data?','load data','mask','ROIs','No','Cancel');
+preload = questdlg('Load previous data?','load data','rois_corrected','ROIs','No','Cancel');
 switch preload
-    case 'mask'
+    case 'rois_corrected'
         [mask_filename,mask_foldername] = uigetfile(save_path);
         mask_data = load(fullfile(mask_foldername,mask_filename));
-        mask = mask_data.rois.bwmask;
+        mask = mask_data.rois_corrected.bwmask;
+        rois = mask_data.rois_corrected;
     case 'ROIs'
         [roi_filename,roi_foldername] = uigetfile(save_path);
         rois_data = load(fullfile(roi_foldername,roi_filename));
@@ -135,7 +139,8 @@ t1 = tic; % Start a timer
 
 % with or wihout Mask and Map
 if exist('preload','var')
-    if strcmp(preload,'No')
+    if any(strcmp(preload,{'No',''} ...
+            ))
         [rois, traces] = select_ROI(movie, nrows, ncols, mask, map);
     else
         [~, traces] = select_ROI(movie, nrows, ncols, mask, map);
@@ -150,8 +155,6 @@ traces_original = traces;
 % if do not need a map, run the following code:
 % map = [];
 % [bwmask, traces] = select_ROI(movie, nrows, ncols, t, mask, map);
-movie_vol_2D = reshape(mean(movie,2), ncols, nrows, []);
-avg_image  = (movie_vol_2D - min(movie_vol_2D(:))) / (max(movie_vol_2D(:)) - min(movie_vol_2D(:)));
 
 fig_filename = fullfile(save_path, '1_raw_trace.fig');
 png_filename = fullfile(save_path, '1_raw_trace.png');
@@ -200,11 +203,35 @@ saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(roi_filename, 'rois_corrected','background','background_fitted','background_mask','traces_bgcorr','traces_bgfitcorr', ...
     'innerdis','outerdis','bgthreshold');
-traces = traces_bgfitcorr;
 %% Correction
 
 % fit
-[traces_corrected, fitted_curves] = fit_exp2(traces);
+% exp2 fit
+% [traces_corrected, fitted_curves] = fit_exp2(traces);
+
+% highpass fit
+% 设置填充长度，将信号在头尾各填充5%的长度
+padlength = round(0.05 * size(traces, 1));
+
+% 对信号进行填充，以减少边界效应
+padded_traces = [repmat(traces(1, :), padlength, 1); ...
+                 traces; ...
+                 repmat(traces(end, :), padlength, 1)];
+
+% 初始化存储滤波后信号的矩阵，大小与填充后的信号相同
+filtered_traces = zeros(size(padded_traces));
+
+for i =  1:size(traces, 2)
+    disp(['Processing ROI',i]);
+    current_trace = padded_traces(:, i);
+    filtered_traces(:,i) = highpass(current_trace,1/t(end),freq);
+end
+
+% 去掉填充部分，保留原始长度的滤波后信号
+traces_corrected = filtered_traces(padlength+1:end-padlength, :);
+
+% normalize
+traces_corrected = traces_corrected./mean(traces_bgfitcorr);
 
 % plot
 fig = figure();
@@ -216,13 +243,63 @@ fited_axe = subplot(2,1,2);
 for i = 1: size(traces_corrected,2)
     plot(traces(:,i),'Color',colors(i,:),'Parent',fit_axe);
     hold(fit_axe, 'on');
-    plot(fitted_curves(:,i),'Color',colors(i,:),'LineWidth',2,'Parent',fit_axe);
-    hold(fit_axe, 'on');
+    % plot(fitted_curves(:,i),'Color',colors(i,:),'LineWidth',2,'Parent',fit_axe);
+    % hold(fit_axe, 'on');
     plot(traces_corrected(:,i),'Color',colors(i,:),'Parent',fited_axe);
     hold(fited_axe, 'on');
 end
 hold off;
 
+% note
+title(fit_axe, 'Original and Fitted Curves');
+title(fited_axe, 'Corrected Traces');
+legend(fit_axe, 'Original Trace', 'Fitted Curve');
+
+fig_filename = fullfile(save_path, '2_fitted_trace.fig');
+png_filename = fullfile(save_path, '2_fitted_trace.png');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+
+fprintf('Finished expotential fit\n')
+
+%% background pick 本节测试中，不跑
+
+% fit
+% [traces_corrected, fitted_curves] = fit_exp2(traces);
+traces_corrected = zeros(size(traces));
+for i =  1:size(traces, 2)
+    current_trace = traces(:, i);
+    traces_corrected(:,i) = highpass(current_trace,1/(2*t(end)),freq);
+end
+
+
+% plot
+fig = figure();
+set(fig,'Position',get(0,'Screensize'));
+fit_axe = subplot(2,1,1);
+fited_axe = subplot(2,1,2);
+traces_picked = [];
+%mask_picked = mask;
+% plot
+for i = 1: size(traces_corrected,2)
+    current_trace = traces_corrected(:,i);
+    tracelp = lowpass(current_trace,40,freq);
+    if max(abs(zscore(tracelp))) > 5
+    plot(traces(:,i),'Parent',fit_axe);
+    hold(fit_axe, 'on');
+    % plot(fitted_curves(:,i),'LineWidth',2,'Parent',fit_axe);
+    % hold(fit_axe, 'on');
+    plot(current_trace,'Parent',fited_axe);
+    hold(fited_axe, 'on');
+    traces_picked = [traces_picked current_trace];
+    else
+        mask_picked(mask_picked == i) = 0;
+    end
+end
+hold off;
+%bwmask = mask_picked;
+traces_corrected = traces_picked;
 % note
 title(fit_axe, 'Original and Fitted Curves');
 title(fited_axe, 'Corrected Traces');
@@ -244,9 +321,10 @@ if peakfinding
     % also peak_finding(traces,MinPeakProminence_factor) for diy factor
     [peaks_polarity, peaks_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = ...
                                             peak_finding(traces_corrected);
-    traces_corr_flipped = traces_corrected.*peaks_polarity + 1 - peaks_polarity;
+    traces_corr_flipped = traces_corrected.*peaks_polarity;
 
     % plot trace
+
     fig = figure();
     set(fig,'Position',get(0,'Screensize'));
     offset_array = offset_plot(traces_corr_flipped,t); 
@@ -255,44 +333,52 @@ if peakfinding
     % plot label
     for i = 1:nrois
         % plot threshold
-        plot(t,ones(1,numel(t)).*(peaks_threshold(i)*peaks_polarity(i)+ 1 -peaks_polarity(i)) ...
+        plot(t,ones(1,numel(t)).*(peaks_threshold(i)*peaks_polarity(i)) ...
             + offset_array(i),'Color',colors(i,:),'LineWidth',2); hold on;
         % plot peak
         dt = t(2)-t(1);
-        plot(peaks_index{i}.*dt, ( peaks_amplitude{i}.*peaks_polarity(i)+ 1 -peaks_polarity(i)) ...
+        plot(peaks_index{i}.*dt, (peaks_amplitude{i}.*peaks_polarity(i)) ...
             + offset_array(i),'v','Color',colors(i,:),'MarkerFaceColor',colors(i,:)); hold on;
+
+        %         % plot threshold
+        % plot(t,ones(1,numel(t)).*(peaks_threshold(i)*peaks_polarity(i)+ 1 -peaks_polarity(i)) ...
+        %     + offset_array(i),'Color',colors(i,:),'LineWidth',2); hold on;
+        % % plot peak
+        % dt = t(2)-t(1);
+        % plot(peaks_index{i}.*dt, (peaks_amplitude{i}.*peaks_polarity(i)+ 1 -peaks_polarity(i)) ...
+        %     + offset_array(i),'v','Color',colors(i,:),'MarkerFaceColor',colors(i,:)); hold on;
     end
-
-end
-
 fig_filename = fullfile(save_path, '3_peak_finding.fig');
 png_filename = fullfile(save_path, '3_peak_finding.png');
 peak_filename = fullfile(save_path, '3_peak_finding.mat');
  
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-save(peak_filename, 'peaks_polarity', 'peaks_threshold', 'peaks_index', 'peaks_amplitude', 'peaks_sensitivity');
+save(peak_filename, 'traces_corrected', 'peaks_polarity', 'peaks_threshold', 'peaks_index', 'peaks_amplitude', 'peaks_sensitivity');
+
+end
+
 %% Sensitivity and SNR Analysis
 AP_window_width = 10 ; % number of frames to for AP window (defined = 40)
    
 % set up
 fig = figure();
 set(fig,'Position',get(0,'Screensize'));
-sentivity_trace = zeros(nframes,nrois);
-SNR_traces = zeros(nframes,nrois);
-baselines = zeros(nframes,nrois);
+sentivity_trace = zeros(nframes,size(traces_corrected,2));
+SNR_traces = zeros(nframes,size(traces_corrected,2));
+baselines = zeros(nframes,size(traces_corrected,2));
 
 % plot fluorescent image
 f_axe = subplot(1,3,1);
 f_im = reshape(movie, ncols, nrows, []);hold on;
 im_adj = uint16(mean(f_im, 3));
 imshow(im_adj,[min(im_adj,[],'all'),max(im_adj,[],'all')]);
-for i = 1:nrois
-    roi = (bwmask == i);
+roiseq = unique(sort(bwmask(:)));
+for i = 1:size(traces_corrected,2)
+    roi = (bwmask == roiseq(i+1));
     boundary = cell2mat(bwboundaries(roi));
-    plot(boundary(:, 2), boundary(:, 1), 'Color', colors(i,:), 'LineWidth', 2, 'Parent', f_axe);hold on;
-            text(mean(boundary(:, 2)) + 12, mean(boundary(:, 1)) - 12, num2str(i), ...
-            'Color', colors(i,:), 'FontSize', 12, 'Parent', f_axe); hold on;
+    plot(boundary(:, 2), boundary(:, 1), 'LineWidth', 2, 'Parent', f_axe);hold on;
+            text(mean(boundary(:, 2)) + 12, mean(boundary(:, 1)) - 12, num2str(roiseq(i+1)),'FontSize', 12, 'Parent', f_axe); hold on;
 end
 hold on;
 title('Fluorescent Image');
@@ -301,7 +387,7 @@ title('Fluorescent Image');
 sensitivity_axe = subplot(1,3,2);
 title('Sensitivity');
 hold on;
-for i = 1 : nrois
+for i = 1 : size(traces_corrected,2)
     % Calculate Sensitivity
     % sentivity_trace(:,i) = traces_corrected(:,i)*peaks_polarity(i)+ 1 -peaks_polarity(i);
     sentivity_trace(:,i) = traces_corrected(:,i) - 1 ;
@@ -312,7 +398,7 @@ end
 SNR_axe = subplot(1,3,3);
 title('SNR');
 hold on;
-for i = 1 : nrois
+for i = 1 :size(traces_corrected,2)
     % Calculate SNR
     if peakfinding
         [SNR_traces(:,i),baselines(i)]  = calculate_SNR(traces_corrected(:,i),peaks_index{i},AP_window_width);
@@ -347,6 +433,7 @@ for i = 1:nrois % i for trace
 
     % each peak
     for j = 1:peaks_num % j for peak
+
         peak_index_ij = peaks_index_i(j);
         peak_amp_ij = peaks_amp_i(j);
 
@@ -479,7 +566,8 @@ trace_AP_mean = [];
 for i = 1:nrois % i for trace
     %判断是否为有AP的trace
     peaks_num = length(peaks_index{i});
-    if cellfun('isempty',AP_list{i}) == 0
+    if cellfun(['isempt' ...
+            'y'],AP_list{i}) == 0
         plot_col = plot_col + 1;
         subplot(2,ceil(plot_cols/2),plot_col);
         set(gca,'color','none');
@@ -692,9 +780,9 @@ saveas(gcf, png_filename, 'png');
 save(mat_filename,'heatmap_corrtest',"heatmap_speartest");
 
 %% Save parameter
-% 定义保存路径和文件名
-save_filename = fullfile(save_path, '-1_workspace_variables.mat');
-
-% 保存当前工作区中的所有变量到.mat文件
-clear movie;
-save(save_filename);
+  % 定义保存路径和文件名
+ save_filename = fullfile(save_path, '-1_workspace_variables.mat');
+ 
+ % 保存当前工作区中的所有变量到.mat文件
+ clear movie;
+ save(save_filename);

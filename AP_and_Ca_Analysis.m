@@ -193,45 +193,48 @@ mat_filename = fullfile(save_path, '0_Sensitivity_Map.mat');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-save(mat_filename, 'map','map_ca');
+save(mat_filename, 'map', 'map_ca', 'quick_map', 'mapbin', 'mapbin_ca');
+
 
 t2 = toc(t1); % Get the elapsed time
 fprintf('Finished mask creating after %d s\n',round(t2))
+
+
 %% Photobleaching correction
-
-mean_movie = mean(movie,1);
-mean_movie_ca = mean(movie_ca,1);
-
-% fit
-[traces_corrected, fitted_curves] = fit_exp2(mean_movie');
-[traces_corrected_ca, fitted_curves_ca] = fit_exp2(mean_movie_ca');
-
-% plot
-fig = figure();
-set(fig,'Position',get(0,'Screensize'));
-v_axe = subplot(2,1,1);
-calcium_axe = subplot(2,1,2);
-
-plot(t,mean_movie,'LineWidth',2,'Parent',v_axe);
-hold(v_axe, 'on');
-plot(t,fitted_curves,'r','LineWidth',2,'Parent',v_axe);
-hold(v_axe, 'on');
-plot(t_ca,mean_movie_ca,'LineWidth',2,'Parent',calcium_axe);
-hold(calcium_axe, 'on');
-plot(t_ca,fitted_curves_ca,'r','LineWidth',2,'Parent',calcium_axe);
-hold(v_axe, 'on');
-
-% note
-title(v_axe, 'Voltage trace');
-title(calcium_axe, 'Calcium trace');
-
-fig_filename = fullfile(save_path, '2_fitted_trace.fig');
-png_filename = fullfile(save_path, '2_fitted_trace.png');
-
-saveas(gcf, fig_filename, 'fig');
-saveas(gcf, png_filename, 'png');
-
-fprintf('Finished exp2 fit\n')
+% 
+% mean_movie = mean(movie,1);
+% mean_movie_ca = mean(movie_ca,1);
+% 
+% % fit
+% [traces_corrected, fitted_curves] = fit_exp2(mean_movie');
+% [traces_corrected_ca, fitted_curves_ca] = fit_exp2(mean_movie_ca');
+% 
+% % plot
+% fig = figure();
+% set(fig,'Position',get(0,'Screensize'));
+% v_axe = subplot(2,1,1);
+% calcium_axe = subplot(2,1,2);
+% 
+% plot(t,mean_movie,'LineWidth',2,'Parent',v_axe);
+% hold(v_axe, 'on');
+% plot(t,fitted_curves,'r','LineWidth',2,'Parent',v_axe);
+% hold(v_axe, 'on');
+% plot(t_ca,mean_movie_ca,'LineWidth',2,'Parent',calcium_axe);
+% hold(calcium_axe, 'on');
+% plot(t_ca,fitted_curves_ca,'r','LineWidth',2,'Parent',calcium_axe);
+% hold(v_axe, 'on');
+% 
+% % note
+% title(v_axe, 'Voltage trace');
+% title(calcium_axe, 'Calcium trace');
+% 
+% fig_filename = fullfile(save_path, '2_fitted_trace.fig');
+% png_filename = fullfile(save_path, '2_fitted_trace.png');
+% 
+% saveas(gcf, fig_filename, 'fig');
+% saveas(gcf, png_filename, 'png');
+% 
+% fprintf('Finished exp2 fit\n')
 %% Select ROI
 t1 = tic; % Start a timer
 
@@ -250,10 +253,13 @@ else
     offset_load = load(offset_filename);
     offset = offset_load.offset;
 end
-[bwmask, bwmask_ca, traces, traces_ca, offset] = select_ROI_dual(movie , movie_ca, ...
+[rois, traces, traces_ca, offset] = select_ROI_dual(movie , movie_ca, ...
     nrows, ncols, correct, map, map_ca, mask, mask_ca,offset);
 
 nrois = size(traces,2);
+traces_original = traces;
+traces_ca_original = traces_ca;
+
 
 fig_filename = fullfile(save_path, '1_raw_trace.fig');
 png_filename = fullfile(save_path, '1_raw_trace.png');
@@ -261,10 +267,93 @@ roi_filename = fullfile(save_path, '1_raw_ROI.mat');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-save(roi_filename, 'bwmask', 'bwmask_ca','offset');
+save(roi_filename, 'rois', 'traces', 'traces_ca', 'offset', 'nrows', 'ncols', 'nrois', 'traces_original', 'traces_ca_original');
 
 t2 = toc(t1); % Get the elapsed time
 fprintf('Saved ROI figure after %d s\n',round(t2))
+
+%% Background Correction Ca(optional)
+rois_ca.bwmask = rois.bwmask_ca;
+rois_ca.position = rois.position_ca;
+rois_ca.boundary = rois.boundary_ca;
+fig = background_correction(movie_ca, ncols_ca, nrows_ca, rois_ca);
+
+waitfor(fig);
+% [~,background] = select_ROI(movie, nrows, ncols,background ,[]);
+% traces_bgcorr = traces - background;
+
+rois_corr_ca = rois_corrected;
+traces_bgfitcorr_ca = traces_bgfitcorr;
+
+figure()
+subplot(2,2,1)
+imshow(rois_ca.bwmask)
+title('Row rois')
+
+subplot(2,2,2)
+for i = 1:nrois
+    plot(traces_ca(:,i));hold on
+end
+title('Row traces')
+
+subplot(2,2,3)
+imshow(rois_corr_ca.bwmask)
+title('Corrected rois')
+
+subplot(2,2,4)
+for i = 1:nrois
+    plot(traces_bgfitcorr_ca(:,i));hold on
+end
+title('Background corrected traces')
+
+fig_filename = fullfile(save_path, '1_background_trace_ca.fig');
+png_filename = fullfile(save_path, '1_background_trace_ca.png');
+save_filename = fullfile(save_path, '1_background_ROI_ca.mat');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+save(save_filename, 'rois', 'rois_corr_ca','background','background_fitted', 'traces_bgcorr', 'traces_bgfitcorr', 'background_mask', 'innerdis', 'outerdis', 'bgthreshold');
+
+traces_ca = traces_bgfitcorr_ca;
+
+%% Background Correction V (optional)
+fig = background_correction(movie, ncols, nrows, rois);
+
+waitfor(fig);
+% [~,background] = select_ROI(movie, nrows, ncols,background ,[]);
+% traces_bgcorr = traces - background;
+
+figure()
+subplot(2,2,1)
+imshow(rois.bwmask)
+title('Row rois')
+
+subplot(2,2,2)
+for i = 1:nrois
+    plot(traces(:,i));hold on
+end
+title('Row traces')
+
+subplot(2,2,3)
+imshow(rois_corrected.bwmask)
+title('Corrected rois')
+
+subplot(2,2,4)
+for i = 1:nrois
+    plot(traces_bgfitcorr(:,i));hold on
+end
+title('Background corrected traces')
+
+fig_filename = fullfile(save_path, '1_background_trace.fig');
+png_filename = fullfile(save_path, '1_background_trace.png');
+roi_filename = fullfile(save_path, '1_background_ROI.mat');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+save(roi_filename, 'rois_corrected','background','background_fitted','background_mask','traces_bgcorr','traces_bgfitcorr', ...
+    'innerdis','outerdis','bgthreshold');
+traces = traces_bgfitcorr;
+
 %% Correction
 
 % fit
@@ -347,7 +436,7 @@ saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(peak_filename, 'peaks_polarity', 'peaks_threshold', 'peaks_index', 'peaks_amplitude', 'peaks_sensitivity');
 
-%% SNR Analysis
+%% dFF and SNR Analysis
 % set up
 fig = figure();
 set(fig,'Position',get(0,'Screensize'));
@@ -356,7 +445,7 @@ SNR_traces = zeros(nframes,nrois);
 baselines = zeros(nframes,nrois);
 
 % plot fluorescent image
-f_axe = subplot(1,3,1);
+f_axe = subplot(1,5,1);
 f_im = reshape(movie, ncols, nrows, []);hold on;
 im_adj = uint16(mean(f_im, 3));
 imshow(im_adj,[min(im_adj,[],'all'),max(im_adj,[],'all')]);
@@ -371,7 +460,7 @@ hold on;
 title('Fluorescent Image');
 
 % plot calcium
-calcium_axe = subplot(1,3,2);
+calcium_SNR_axe = subplot(1,5,2);
 title('calcium');
 hold on;
 
@@ -388,9 +477,10 @@ for i = 1 : nrois
     SNR_traces_ca(:,i) = calculate_SNR_Ca(traces_corrected_ca(:,i),traces_smoothed_ca(:,i));
 end
 [~] = offset_plot(SNR_traces_ca,t_ca);
+hold off;
 
 % plot SNR
-SNR_axe = subplot(1,3,3);
+SNR_axe = subplot(1,5,3);
 title('SNR');
 hold on;
 for i = 1 : nrois
@@ -403,18 +493,44 @@ for i = 1 : nrois
 % ;
 end
 [~] = offset_plot(SNR_traces,t);
+hold off;
 
-fig_filename = fullfile(save_path, '4_SNR.fig');
-png_filename = fullfile(save_path, '4_SNR.png');
-trace_filename = fullfile(save_path, '4_SNR.mat');
+% plot calcium
+calcium_dff_axe = subplot(1,5,4);
+title('calcium sensitivity');
+hold on;
 
-save(trace_filename,"SNR_traces_ca",'SNR_traces');
+% 设计低通滤波器
+fs = 10; % 采样频率 (Hz)
+fc = 1; % 截止频率 (Hz)
+[b, a] = butter(4, fc/(fs/2)); % 4阶Butterworth低通滤波器
+traces_smoothed_ca = zeros(size(traces_corrected_ca));  % 使用双向滤波器进行零相位滤波
+
+for i = 1 : nrois
+    % Calculate SNR
+    traces_smoothed_ca(:,i) = filtfilt(b, a, traces_corrected_ca(:,i));
+end
+[~] = offset_plot(traces_smoothed_ca,t_ca);
+hold off;
+
+% plot Sensitivity
+sensitivity_axe = subplot(1,5,5);
+title('Sensitivity');
+hold on;
+[~] = offset_plot(traces_corrected,t);
+hold off;
+
+fig_filename = fullfile(save_path, '4_Signal analysis.fig');
+png_filename = fullfile(save_path, '4_Signal analysis.png');
+trace_filename = fullfile(save_path, '4_Signal analysis.mat');
+
+save(trace_filename,"SNR_traces_ca",'SNR_traces','traces_smoothed_ca','traces_corrected');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 %% plot stacked figure
 
 % 创建一个新图形窗口
-figure()
+figure('Name','SNR')
 linemaxroi = 3; % 每行最多绘制3个ROI
 % 计算需要绘制的行数
 plotlines = floor(nrois/linemaxroi);
@@ -477,6 +593,56 @@ trace_filename = fullfile(save_path, '2_stacked_trace.mat');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 save(trace_filename, 't','t_ca','SNR_traces','traces_corrected_ca');
+
+
+% 创建一个新图形窗口
+figure('Name','Sensitivity')
+linemaxroi = 3; % 每行最多绘制3个ROI
+% 计算需要绘制的行数
+plotlines = floor(nrois/linemaxroi);
+if mod(nrois,linemaxroi) == 0 
+    plotlines = plotlines;
+else
+    plotlines = plotlines + 1;
+end
+
+xlimit = [0,max(max(t_ca),max(t))];
+ylimitv = [min(traces_corrected,[],'all'),max(traces_corrected,[],'all')];
+ylimitca = [min(traces_smoothed_ca,[],'all'),max(traces_smoothed_ca,[],'all')];
+
+for i = 0: nrois-1
+    index = floor(i/linemaxroi)*linemaxroi*2 + mod(i,linemaxroi) + 1;
+    tsubplot(plotlines*2,linemaxroi,index,'compact');
+
+    plot(t_ca,traces_smoothed_ca(:,i+1),'g');ylim(ylimitca);xlim(xlimit);
+    set(gca, 'XTickLabel', []);
+    set(gca, 'YTickLabel', []);
+    set(gca, 'TickLength', [0 0]);
+    set(gca, 'XColor', 'none'); % 隐藏 x 轴线
+    set(gca, 'YColor', 'none'); % 隐藏
+    set(gca, 'Box', 'off');
+    set(gca, 'Color', 'none'); % 设置背景为无色
+
+
+    tsubplot(plotlines*2,linemaxroi,index+linemaxroi,'compact');
+    plot(t,traces_corrected(:,i+1),'r');ylim(ylimitv);xlim(xlimit);
+    set(gca, 'YDir', 'reverse');
+    set(gca, 'XTickLabel', []);
+    set(gca, 'YTickLabel', []);
+    set(gca, 'TickLength', [0 0]);
+    set(gca, 'XColor', 'none'); % 隐藏 x 轴线
+    set(gca, 'YColor', 'none'); % 隐藏
+    set(gca, 'Box', 'off');
+    set(gca, 'Color', 'none'); % 设置背景为无色
+end
+
+fig_filename = fullfile(save_path, '2_stacked_trace_sensitivity.fig');
+png_filename = fullfile(save_path, '2_stacked_trace_sensitivity.png');
+trace_filename = fullfile(save_path, '2_stacked_trace_sensitivity.mat');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+save(trace_filename, 't','t_ca','traces_corrected','traces_smoothed_ca');
 
 
 %% Accumulate Voltage signal

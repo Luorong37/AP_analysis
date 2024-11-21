@@ -238,11 +238,24 @@ end
 
 function [mask, boundary, position] = axe_select(ncols, nrows, axe, color)
 % 在给定的轴上让用户选择ROI并生成掩码
+trypoly = true;
+while trypoly
+    % 交互式绘制多边形，'Parent' 指定在特定 axes 中绘制
     rois_polygon = drawpolygon('Color', color, 'LineWidth', 1, 'Parent', axe);  % 绘制多边形
-    position = rois_polygon.Position;  % 获取顶点坐标
-    mask = poly2mask(position(:, 1), position(:, 2), ncols, nrows);  % 生成二值掩码
-    boundary = cell2mat(bwboundaries(mask));  % 提取边界
-    delete(rois_polygon);  % 删除绘制的多边形
+    num_vertices = size(rois_polygon.Position, 1);
+    if num_vertices < 3
+        trypoly = true;
+        msgbox('Illegal polygon,try plot polygon again!','Message','error')
+        delete(rois_polygon);
+    else
+        trypoly = false;  % 如果绘制成功，退出循环
+    end
+end
+
+position = rois_polygon.Position;  % 获取顶点坐标
+mask = poly2mask(position(:, 1), position(:, 2), ncols, nrows);  % 生成二值掩码
+boundary = cell2mat(bwboundaries(mask));  % 提取边界
+delete(rois_polygon);  % 删除绘制的多边形
 end
 
 function [image_rois, image_text, map_rois, map_text] = plot_rois(boundary, color, num_rois, image_axe, map_axe)

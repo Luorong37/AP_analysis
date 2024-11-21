@@ -176,7 +176,19 @@ function updatebackground(fig, nroi, innerdis, outerdis, bgthreshold)
 
         % 根据掩码提取信号
         [bg, bg_mask] = selectbg_by_mask(expandregion, movie,bgthreshold);
-        bg_fitted = polyval(polyfit(1:length(bg), bg, 1), 1:length(bg));
+        % bg_fitted = polyval(polyfit(1:length(bg), bg, 1), 1:length(bg));
+        % 设置填充长度，将信号在头尾各填充5的长度
+        padlength = round(0.05 * length(bg));
+
+        % 对信号进行填充，以减少边界效应
+        padded_traces = [repmat(bg(1), padlength, 1)', bg, repmat(bg(end), padlength, 1)'];
+
+        % 对每一列（每一个独立信号）进行低通滤波
+            % 对填充后的信号应用低通滤波器
+        filtered_traces = lowpass(padded_traces,1/10,400);
+        
+        % 去掉填充部分，保留原始长度的滤波后信号
+        bg_fitted = filtered_traces(padlength+1:end-padlength);
 
         sg = select_by_mask(bwmask, movie);
         
@@ -248,7 +260,7 @@ function saveROI(fig, innerdis, outerdis, bgthreshold)
 
     % 提示保存成功
     disp('ROI updated. Background selected.');
-    msgbox('ROI updated. Background selected.', 'Done', 'help');
+    msgbox('ROI updated. Background selected. Please close GUI window for continue.', 'Done', 'help');
 end
 
 % 绘制ROI的信号轨迹

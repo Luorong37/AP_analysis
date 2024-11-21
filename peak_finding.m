@@ -49,36 +49,50 @@ function [peaks_polarity, peaks_threshold, peaks_index, peaks_amplitude, peaks_s
     i = 0;
     set(gcf, 'KeyPressFcn', @(src, event) set_space_pressed(event, fig));
     reselect = false;
+    flipped = false;
     % 对每个ROI进行峰值检测
-    while i < nrois
+    while i <= nrois
         if reselect
             i = i;
             reselect = false;
-        else
+        elseif i ~= nrois
             i = i + 1;
         end
         clf;
         current_trace = traces(:,i);
 
         % 确定峰值极性
-        if abs(min(current_trace) - mean(current_trace)) < max(abs(current_trace) - mean(current_trace))
+        % abs(min(current_trace) - mean(current_trace)) < max(abs(current_trace) - mean(current_trace))
+        if abs(min(current_trace) - mean(current_trace)) < abs(max(current_trace) - mean(current_trace))
             peaks_polarity(i) = 1;
             polarity = 'Positive';        
         else
             peaks_polarity(i) = -1;
             polarity = 'Negative';
         end
-
+        
+        % manually flipped polarity
+        if flipped
+            if strcmp(polarity,'Positive')
+                polarity = 'Negative';
+                peaks_polarity(i) = -1;
+            elseif strcmp(polarity,'Negative')
+                polarity = 'Positive';   
+                peaks_polarity(i) = 1;
+            end
+            flipped = false;
+        end
         % plot trace
-        plot_trace = current_trace * peaks_polarity(i)+ 1 -peaks_polarity(i) ;
-        plot(plot_trace, 'Color', colors(i,:)); hold on;
+        % plot_trace = current_trace * peaks_polarity(i)+ 1 -peaks_polarity(i) ;
+        plot_trace = current_trace * peaks_polarity(i) ;
+        plot(plot_trace); hold on;
         title(sprintf(['ROI %d, polarity = %s\n' ...
             'If no peaks, click a point above trace\n' ...
-            'Press SPACE for continue, Press ENTER for end, Press R for reselect\n'], i , polarity));
+            'Press SPACE for continue, Press ENTER for end, Press R for reselect, Press F for manually flip polarity\n'], i , polarity));
 
         % set threshold
         [~, peaks_threshold(i)] = ginput(1) ;
-        plot(ones(1,size(traces,1)).*peaks_threshold(i),'Color',colors(i,:),'LineWidth',2);
+        plot(ones(1,size(traces,1)).*peaks_threshold(i),'LineWidth',2);
         hold on;
         
 
@@ -87,17 +101,19 @@ function [peaks_polarity, peaks_threshold, peaks_index, peaks_amplitude, peaks_s
         [peak_y, peak_x] = findpeaks(plot_trace, 'MinPeakProminence', ...
             MinPeakProminence, 'MinPeakHeight', peaks_threshold(i));
         
-        peaks_threshold(i) = (peaks_threshold(i) + peaks_polarity(i) -1)/peaks_polarity(i);
+        % peaks_threshold(i) = (peaks_threshold(i) + peaks_polarity(i) -1)/peaks_polarity(i);
+        peaks_threshold(i) = peaks_threshold(i)*peaks_polarity(i)
         peaks_index{i} = peak_x;
-        current_trace = current_trace;
+        % current_trace = current_trace;
         peaks_sensitivity{i} = current_trace(peak_x)-mean(current_trace);
 
         peaks_amplitude{i}  = peak_y;
         % plot peak
-        plot(peak_x, (peaks_amplitude{i}),'v','Color',colors(i,:),'MarkerFaceColor',colors(i,:));
+        plot(peak_x, (peaks_amplitude{i}),'v','MarkerFaceColor',colors(i,:));
         hold off;
-        peaks_amplitude{i} = (peaks_amplitude{i} + peaks_polarity(i) -1)/peaks_polarity(i);
-        
+        % peaks_amplitude{i} = (peaks_amplitude{i} + peaks_polarity(i) -1)/peaks_polarity(i);
+        peaks_amplitude{i} = peaks_amplitude{i} * peaks_polarity(i);
+
         if numel(peak_x) == 0
             peaks_polarity(i) = 0;
         end
@@ -107,12 +123,16 @@ function [peaks_polarity, peaks_threshold, peaks_index, peaks_amplitude, peaks_s
         % Wait for user input
         fig.UserData = [];
         waitfor(fig, 'UserData');
-        if strcmp(fig.UserData, 'stop')
+        switch  fig.UserData
+            case  'stop'
             break;
-        elseif strcmp(fig.UserData, 'spacePressed')
+            case 'spacePressed'
             continue;
-        elseif strcmp(fig.UserData,'reselect')
+            case {'reselect','flipped'}
             reselect = true;
+            if strcmp(fig.UserData,'flipped')
+                flipped = true;
+            end
             continue
         end
     end
@@ -127,5 +147,7 @@ elseif strcmp(event.Key, 'return')
     fig.UserData = 'stop';
 elseif strcmp(event.Key, 'r')
     fig.UserData = 'reselect';
+elseif strcmp(event.Key, 'f') 
+    fig.UserData = 'flipped';
 end
 end
