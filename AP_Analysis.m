@@ -33,8 +33,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\ZRXin\241112-analysis\';
-file = 'slice5-15';  % must add format.do not add '\' at last
+folder_path = 'E:\1_Data\LSZ\';
+file = 'slice2-1';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
@@ -88,7 +88,7 @@ fprintf('All codes have been copied to %s\n', code_path);
 
 
 %% ----------------------Optional part------------------------
-
+% This part can load previous selected Mask
 % Save data
 save_stack = false;
 if save_stack
@@ -113,7 +113,7 @@ end
 t1 = tic; % Start a timer
 fprintf('Creating a map...\n')
 % if SNR is low, please large the bin.
-bin = 4; % defined bin = 4
+bin = 1; % defined bin = 1
 [quick_map] = create_map(movie, nrows, ncols, bin);
 map = quick_map;
 
@@ -141,12 +141,12 @@ t1 = tic; % Start a timer
 if exist('preload','var')
     if any(strcmp(preload,{'No',''} ...
             ))
-        [rois, traces] = select_ROI(movie, nrows, ncols, mask, map);
+        [rois, traces] = select_ROI(movie, ncols, nrows,  mask, map);
     else
-        [~, traces] = select_ROI(movie, nrows, ncols, mask, map);
+        [~, traces] = select_ROI(movie, ncols, nrows, mask, map);
     end
 else
-    [rois, traces] = select_ROI(movie, nrows, ncols, mask, map);
+    [rois, traces] = select_ROI(movie, ncols, nrows, mask, map);
 end
 nrois = max(rois.bwmask,[],'all');
 bwmask = rois.bwmask;
@@ -222,7 +222,7 @@ padded_traces = [repmat(traces(1, :), padlength, 1); ...
 filtered_traces = zeros(size(padded_traces));
 
 for i =  1:size(traces, 2)
-    disp(['Processing ROI',i]);
+    disp(['Processing ROI',num2str(i)]);
     current_trace = padded_traces(:, i);
     filtered_traces(:,i) = highpass(current_trace,1/t(end),freq);
 end
@@ -608,7 +608,6 @@ for i = 1:nrois % i for trace
         trace_AP_mean = [trace_AP_mean; AP_mean*peaks_polarity(i)];
     end
 end
-
 
 if ~isempty(trace_AP_mean)
     overall_mean = mean(trace_AP_mean, 1, 'omitnan');

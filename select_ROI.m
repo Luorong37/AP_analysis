@@ -1,4 +1,4 @@
-function [rois, traces] = select_ROI(movie, nrows, ncols, mask, map)
+function [rois, traces] = select_ROI(movie, ncols, nrows, mask, map)
 % 
 % ----------Written by Liu-Yang Luorong and ChatGPT----------
 % ----------POWERED by Zoulab in Peking University----------
@@ -12,7 +12,7 @@ function [rois, traces] = select_ROI(movie, nrows, ncols, mask, map)
 %   最终输出每个ROI的二值掩码和对应的平均强度时间轨迹。
 %
 %   语法：
-%   [rois, traces] = select_ROI(movie, nrows, ncols, mask, map)
+%   [rois, traces] = select_ROI(movie, ncols, nrows, mask, map)
 %
 %   输入参数：
 %   movie - 一个二维矩阵，表示电影数据，尺寸为 [ncols*nrows, nframes]。
@@ -34,19 +34,26 @@ function [rois, traces] = select_ROI(movie, nrows, ncols, mask, map)
 %   - 用户按空格键继续选择ROIs，按回车键结束选择过程，按 'R' 重新选择当前ROI。
 %
 %   示例：
-%   [rois, traces] = select_ROI(movie_data, nrows, ncols, [], sensitivity_map);
+%   [rois, traces] = select_ROI(movie_data, ncols, nrows, [], sensitivity_map);
 %
 %   注意事项：
 %   - 函数需要交互式MATLAB图形环境才能正常工作。
 %   - 如果提供了'mask'参数，则跳过手动ROIs选择，直接使用预定义的掩模。
 %   - 用户可以按空格键继续选择ROIs，按回车键结束选择，按 'R' 重新选择当前ROI。
 
+if nargin < 4
+mask = [];
+end
+if nargin < 5
+map = [];
+end
+
 % 初始化变量
 traces = [];
-rois.bwmask = zeros(nrows, ncols);  % 初始化二值掩码
+rois.bwmask = zeros(nrows,ncols);  % 初始化二值掩码
 rois.boundary = {};  % 存储每个ROI的边界
 rois.position = {};  % 存储每个ROI的顶点坐标
-movie_2D = reshape(movie, ncols, nrows, []);  % 重塑电影数据为二维图像
+% movie_2D = reshape(movie, ncols*nrows, []);  % 重塑电影数据为二维图像
 colors = lines(100);  % 使用预定义的颜色线来标记不同的ROI
 % key = '';  % 用于跟踪用户按键
 selected = false;  % 标记是否已完成选择
@@ -58,9 +65,9 @@ set(fig, 'Position', get(0, 'Screensize'));
 
 % 如果提供了敏感度图，创建带有地图的GUI界面；否则，创建仅显示电影的界面
 if ~isempty(map)
-    [map_axe, image_axe, ~, trace_axe] = GUIwithmap(map, movie_2D);
+    [map_axe, image_axe, ~, trace_axe] = GUIwithmap(map,  mean(reshape(movie, ncols, nrows,[]), 3));
 else
-    [image_axe, ~, trace_axe] = GUIwithoutmap(movie_2D);
+    [image_axe, ~, trace_axe] = GUIwithoutmap( mean(reshape(movie, ncols, nrows,[]), 3));
     map_axe = [];
 end
 title(sprintf(['Click an axe to select ROIs.' ...
@@ -169,7 +176,8 @@ function key = wait_for_key(fig)
     key = fig.UserData.space;
 end
 
-function [map_axe, image_axe, im_adj, trace_axe] = GUIwithmap(map, movie_2D)
+function [map_axe, image_axe, im_adj, trace_axe] = GUIwithmap(map, im_adj)
+
 % 创建带有敏感度地图和电影的GUI界面
     subplot(2,2,2);
     map_axe = gca;
@@ -182,7 +190,7 @@ function [map_axe, image_axe, im_adj, trace_axe] = GUIwithmap(map, movie_2D)
     % 显示电影数据
     subplot(1,2,1);
     image_axe = gca;
-    im_adj = mean(movie_2D, 3);  % 计算电影的平均图像
+    %im_adj = uint16(im_adj);
     normalized_img = (im_adj - min(im_adj(:))) / (max(im_adj(:)) - min(im_adj(:)));  % 归一化图像
     imshow(normalized_img);
     hold on;
@@ -196,11 +204,13 @@ function [map_axe, image_axe, im_adj, trace_axe] = GUIwithmap(map, movie_2D)
     ylabel('Intensity');
 end
 
-function [image_axe, im_adj, trace_axe] = GUIwithoutmap(movie_2D)
+function [image_axe, im_adj, trace_axe] = GUIwithoutmap(im_adj)
+
 % 创建仅显示电影的GUI界面
     subplot(1,2,1);
     image_axe = gca;
-    im_adj = uint16(mean(movie_2D, 3));  % 显示电影的平均图像
+    im_adj = uint16(im_adj);
+     % = uint16(mean(reshape(movie, ncols*nrows,[]), 3));  % 显示电影的平均图像
     imshow(im_adj, [min(im_adj,[],'all'), max(im_adj,[],'all')]);
     hold on;
     title('Fluorescent Image');
@@ -214,13 +224,14 @@ function [image_axe, im_adj, trace_axe] = GUIwithoutmap(movie_2D)
 end
 
 function traces = select_by_mask(bwmask, colors, movie, image_axe, trace_axe)
+% movie need to be 2D array
 % 使用给定掩码选择ROI并计算轨迹
 num_rois = max(bwmask(:));  % ROI数量
 traces = [];
 for i = 1:num_rois
     color = colors(mod(i - 1, length(colors)) + 1, :);  % 选择颜色
     mask = (bwmask == i);  % 获取当前ROI掩码
-    trace = mean(movie(mask, :), 1);  % 计算平均强度
+    trace = mean(movie(mask(:), :), 1);  % 计算平均强度
     boundary = cell2mat(bwboundaries(mask));  % 提取边界
 
     traces = [traces, trace'];  % 保存轨迹
@@ -253,7 +264,7 @@ while trypoly
 end
 
 position = rois_polygon.Position;  % 获取顶点坐标
-mask = poly2mask(position(:, 1), position(:, 2), ncols, nrows);  % 生成二值掩码
+mask = poly2mask(position(:, 1), position(:, 2), nrows, ncols);  % 生成二值掩码
 boundary = cell2mat(bwboundaries(mask));  % 提取边界
 delete(rois_polygon);  % 删除绘制的多边形
 end
