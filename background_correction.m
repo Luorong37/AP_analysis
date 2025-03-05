@@ -197,8 +197,9 @@ function updatebackground(fig, nroi, innerdis, outerdis, bgthreshold)
         background_fitted(:, i) = bg_fitted;
         traces_bgcorr(:, i) = sg-bg; 
         traces_bgfitcorr(:, i) = sg-bg_fitted; 
-        max_dff = (min(sg-bg_fitted)-mean(sg-bg_fitted))/mean(sg-bg_fitted);
-        
+        neg_dff = (min(sg-bg_fitted)-mean(sg-bg_fitted))/mean(sg-bg_fitted);
+        pos_dff = (max(sg-bg_fitted)-mean(sg-bg_fitted))/mean(sg-bg_fitted);
+
         % 绘制区域
         hold(axImage,'on')
 
@@ -227,7 +228,7 @@ function updatebackground(fig, nroi, innerdis, outerdis, bgthreshold)
             plot(sg-bg, 'Parent', axSigcorr);hold(axSigcorr,'on');
             plot(sg-bg_fitted,'r', 'Parent', axSigcorr);
             plot(zeros(size(bg))','r','LineWidth', 2, 'Parent', axSigcorr);hold(axSigcorr,'off');
-            title(axSigcorr,sprintf('Corrected Signal, max dF/F = %f2', max_dff));
+            title(axSigcorr,sprintf('Corrected Signal, max positive dF/F = %f2, max negative dF/F = %f2', pos_dff, neg_dff));
         end
         end
     end

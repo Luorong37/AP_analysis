@@ -39,6 +39,10 @@ catch
     sortable = false;
 end
 
+if isempty(idx)
+    sortable = false;
+end
+
 if sortable
     file_names = file_names(idx);
 
@@ -135,6 +139,11 @@ fprintf('Stacked tif created.\n')
 
 else
     fprintf('tifs are not sortable.\n')
+    for i = 1:length(file_names)
+        source_file = fullfile(file_path, file_names{i});
+        destination_file = fullfile(save_path, file_names{i});
+        copyfile(source_file, destination_file);
+    end
 end
 end
 

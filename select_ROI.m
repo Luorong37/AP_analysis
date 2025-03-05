@@ -50,7 +50,7 @@ end
 
 % 初始化变量
 traces = [];
-rois.bwmask = zeros(nrows,ncols);  % 初始化二值掩码
+rois.bwmask = zeros(ncols,nrows);  % 初始化二值掩码
 rois.boundary = {};  % 存储每个ROI的边界
 rois.position = {};  % 存储每个ROI的顶点坐标
 % movie_2D = reshape(movie, ncols*nrows, []);  % 重塑电影数据为二维图像
@@ -63,11 +63,13 @@ fig = gcf;
 set(gcf, 'KeyPressFcn', @(src, event) set_key_pressed(event, fig));  % 设置按键事件
 set(fig, 'Position', get(0, 'Screensize'));
 
+
 % 如果提供了敏感度图，创建带有地图的GUI界面；否则，创建仅显示电影的界面
+    im =  mean(reshape(movie, ncols, nrows,[]), 3);
 if ~isempty(map)
-    [map_axe, image_axe, ~, trace_axe] = GUIwithmap(map,  mean(reshape(movie, ncols, nrows,[]), 3));
+    [map_axe, image_axe, ~, trace_axe] = GUIwithmap(map, im);
 else
-    [image_axe, ~, trace_axe] = GUIwithoutmap( mean(reshape(movie, ncols, nrows,[]), 3));
+    [image_axe, ~, trace_axe] = GUIwithoutmap( im);
     map_axe = [];
 end
 title(sprintf(['Click an axe to select ROIs.' ...
@@ -264,7 +266,7 @@ while trypoly
 end
 
 position = rois_polygon.Position;  % 获取顶点坐标
-mask = poly2mask(position(:, 1), position(:, 2), nrows, ncols);  % 生成二值掩码
+mask = poly2mask(position(:, 1), position(:, 2), ncols, nrows);  % 生成二值掩码
 boundary = cell2mat(bwboundaries(mask));  % 提取边界
 delete(rois_polygon);  % 删除绘制的多边形
 end

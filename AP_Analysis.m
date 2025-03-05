@@ -18,6 +18,7 @@
 %   freq = 400; % Frequency in Hz
 %
 % Author: Liu-Yang Luorong
+
 % Version: 4.0
 % Date: 2024.07
 % GitHub: https://github.com/Luorong37/AP_analysis
@@ -33,8 +34,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\LSZ\';
-file = 'slice2-1';  % must add format.do not add '\' at last
+folder_path = 'U:\Luorong\24.12.29_DUEPLEX';
+file = 'S2R8+GABA';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
@@ -95,13 +96,8 @@ if save_stack
     create_tiff_stack(file_path);
 end
 
-preload = questdlg('Load previous data?','load data','rois_corrected','ROIs','No','Cancel');
+preload = questdlg('Load previous data?','load data','ROIs','No','Cancel');
 switch preload
-    case 'rois_corrected'
-        [mask_filename,mask_foldername] = uigetfile(save_path);
-        mask_data = load(fullfile(mask_foldername,mask_filename));
-        mask = mask_data.rois_corrected.bwmask;
-        rois = mask_data.rois_corrected;
     case 'ROIs'
         [roi_filename,roi_foldername] = uigetfile(save_path);
         rois_data = load(fullfile(roi_foldername,roi_filename));
@@ -109,11 +105,11 @@ switch preload
         mask = rois.bwmask;
 end
 % -----------------------------------------------------------
-%% Create a map (optional)
+%% Create a map (optional) 开发中，不好用就请使用自己之前储存的create map。
 t1 = tic; % Start a timer
 fprintf('Creating a map...\n')
-% if SNR is low, please large the bin.
-bin = 1; % defined bin = 1
+% if the map cannot figure out active cells, please large the bin.
+bin = 8; % defined bin = 4
 [quick_map] = create_map(movie, nrows, ncols, bin);
 map = quick_map;
 
@@ -184,7 +180,7 @@ for i = 1:nrois
     plot(traces(:,i));hold on
 end
 title('Row traces')
-
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             
 subplot(2,2,3)
 imshow(rois_corrected.bwmask)
 title('Corrected rois')
@@ -224,7 +220,7 @@ filtered_traces = zeros(size(padded_traces));
 for i =  1:size(traces, 2)
     disp(['Processing ROI',num2str(i)]);
     current_trace = padded_traces(:, i);
-    filtered_traces(:,i) = highpass(current_trace,1/t(end),freq);
+    filtered_traces(:,i) = highpass(current_trace,0.5 /t(end),freq); 
 end
 
 % 去掉填充部分，保留原始长度的滤波后信号
@@ -314,6 +310,7 @@ saveas(gcf, png_filename, 'png');
 fprintf('Finished expotential fit\n')
 
 %% Peak finding
+
 peakfinding = true; % defined as true
  
 if peakfinding

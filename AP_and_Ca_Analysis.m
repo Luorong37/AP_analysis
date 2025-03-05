@@ -37,7 +37,7 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'G:\Slice\20240905-P2a-G8s';
+folder_path = 'H:\Slice\20240905-P2a-G8s';
 file = '20240905-153142POA';  % must add format.
 file_path = fullfile(folder_path, file);
 file_path_ca = [file_path,'_Green']; % defined name 
@@ -146,7 +146,7 @@ else
 end
 
 % mask_path = 'E:\0_Code\Luorong\Tools'; % define as ''
-mask_path = 'G:\Slice\20240905-P2a-G8s\20240905-153142POA_Analysis\2024-09-26 12-44-40';
+mask_path = '';
 if isempty(mask_path)
     mask = []; 
     mask_ca = [];
@@ -244,7 +244,7 @@ t1 = tic; % Start a timer
 
 % with or wihout Mask and Map
 correct = false; %true for correct offset
-offset_path = 'D:\1_Data\2b. Dual-color imaging in SCN\2024.05.30_dual_P2A\20240530-merge_Analysis\2024-09-26 13-50-02';
+offset_path = '';
 
 if isempty(offset_path)
     offset = [];
@@ -450,7 +450,7 @@ f_im = reshape(movie, ncols, nrows, []);hold on;
 im_adj = uint16(mean(f_im, 3));
 imshow(im_adj,[min(im_adj,[],'all'),max(im_adj,[],'all')]);
 for i = 1:nrois
-    roi = (bwmask == i);
+    roi = (rois.bwmask == i);
     boundary = cell2mat(bwboundaries(roi));
     plot(boundary(:, 2), boundary(:, 1), 'Color', colors(i,:), 'LineWidth', 2, 'Parent', f_axe);hold on;
             text(mean(boundary(:, 2)) + 12, mean(boundary(:, 1)) - 12, num2str(i), ...

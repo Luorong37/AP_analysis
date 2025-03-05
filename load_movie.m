@@ -49,40 +49,7 @@ nframes = NaN;
 
 % Check if folder_path is a folder or path to a tif movie
 if isfolder(file_path)
-    % Get all TIFF file names in folder
-    file_list = dir(fullfile(file_path, '*.tif'));
-    file_names = {file_list.name};
-
-    % Sort file names
-    % other wise, will be like [4, 40, 400, 4000, 4001]
-    file_nums = cellfun(@(x) extractFileNumber(x), file_names);
-    [~, idx] = sort(file_nums);
-    file_sortedaddress = fullfile(file_path,file_names(idx));
-
-    % Load first image
-    first_im = fullfile(file_path, file_names{1});
-    t = Tiff(first_im, 'r');
-    tifsize = gettifsize(t);
-    nrows = tifsize(1);
-    ncols = tifsize(2);
-
-    % judge to merge single tifs or tif stacks
-    if t.lastDirectory()
-        [movie, nframes] = readsingletifs(file_sortedaddress,tifsize);
-        fprintf('All single frame tifs movie loaded\n')
-    else
-        stacks_num = numel(file_sortedaddress);
-        movie = [];
-        nframes = 0;
-        for i = 1:stacks_num
-            fprintf('Loading %s, ',file_sortedaddress{i})
-            [current_movie, current_nframes] = readstacktifs(file_sortedaddress{i},tifsize);
-            movie = cat(2,movie,current_movie);
-            nframes = nframes + current_nframes;
-            fprintf('%s loaded\n',file_sortedaddress{i})
-        end
-        fprintf('All stacked frame tifs movie merged\n')
-    end
+    [nrows, ncols, movie, nframes] = readfoldertifs(file_path);
 
 else
     [~, ~, file_extension] = fileparts(file_path);
@@ -112,6 +79,16 @@ else
                 ncols = ROI_info(4);
             end
 
+            while ~feof(fileID)
+                fileline =  fgetl(fileID);
+                if contains(fileline,'nrow')
+                    nrows = str2double(cell2mat(regexp(fileline,'\d*\.?\d*','match')));
+                end
+                if contains(fileline,'ncol')
+                    ncols = str2double(cell2mat(regexp(fileline,'\d*\.?\d*','match')));
+                end
+            end
+            fclose(fileID);
             %open file readBinMov
             % read file into tmp vector
             Movid = fopen(file_path);                  % open file
@@ -286,7 +263,40 @@ function [movie, nframes] = readsingletifs(file_sortedaddress, tifsize)
 end
 
 
+function [nrows, ncols, movie, nframes] = readfoldertifs(file_path)
+% Get all TIFF file names in folder
+file_list = dir(fullfile(file_path, '*.tif'));
+file_names = {file_list.name};
 
+% Sort file names
+% other wise, will be like [4, 40, 400, 4000, 4001]
+file_nums = cellfun(@(x) extractFileNumber(x), file_names);
+[~, idx] = sort(file_nums);
+file_sortedaddress = fullfile(file_path,file_names(idx));
 
+% Load first image
+first_im = fullfile(file_path, file_names{1});
+t = Tiff(first_im, 'r');
+tifsize = gettifsize(t);
+nrows = tifsize(1);
+ncols = tifsize(2);
 
-
+% judge to merge single tifs or tif stacks
+if t.lastDirectory()
+    % thies means in a folder, the first tif is a single tif, means all tifs are single tif 
+    [movie, nframes] = readsingletifs(file_sortedaddress,tifsize);
+    fprintf('All single frame tifs movie loaded\n')
+else
+    stacks_num = numel(file_sortedaddress);
+    movie = [];
+    nframes = 0;
+    for i = 1:stacks_num
+        fprintf('Loading %s, ',file_sortedaddress{i})
+        [current_movie, current_nframes] = readstacktifs(file_sortedaddress{i},tifsize);
+        movie = cat(2,movie,current_movie);
+        nframes = nframes + current_nframes;
+        fprintf('%s loaded\n',file_sortedaddress{i})
+    end
+    fprintf('All stacked frame tifs movie merged\n')
+end
+end

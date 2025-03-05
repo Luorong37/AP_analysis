@@ -10,7 +10,7 @@ function process_all_tiff_folders(root_path, save_root_path)
     % process_all_tiff_folders('E:\1_Data\Luorong\20240709_optopatch', 'E:\1_Data\Luorong\processed\');
     
     % Get all subfolders
-    subfolders = get_subfolders_with_tiffs(root_path);
+    subfolders = get_subfolders(root_path);
     
     % Process each subfolder
     for i = 1:length(subfolders)
@@ -27,9 +27,11 @@ function process_all_tiff_folders(root_path, save_root_path)
         % Copy non-TIFF files to the new folder
         copy_non_tiff_files(subfolders{i}, save_path);
     end
+    create_tiff_stack(root_path, save_root_path);
+    copy_non_tiff_files(root_path, save_root_path);
 end
 
-function subfolders = get_subfolders_with_tiffs(root_path)
+function subfolders = get_subfolders(root_path)
     % GET_SUBFOLDERS_WITH_TIFFS Recursively finds all subfolders containing TIFF files.
     %
     % Parameters:
@@ -44,12 +46,13 @@ function subfolders = get_subfolders_with_tiffs(root_path)
     for i = 1:length(folder_list)
         if folder_list(i).isdir && ~strcmp(folder_list(i).name, '.') && ~strcmp(folder_list(i).name, '..')
             current_folder = fullfile(root_path, folder_list(i).name);
-            tif_files = dir(fullfile(current_folder, '*.tif'));
-            if ~isempty(tif_files)
-                subfolders{end+1} = current_folder;
-            end
+            % tif_files = dir(fullfile(current_folder, '*.tif'));
+            % if ~isempty(tif_files)
+            %     subfolders{end+1} = current_folder;
+            % end
+            subfolders{end+1} = current_folder;
             % Recursively search subdirectories
-            subfolders = [subfolders, get_subfolders_with_tiffs(current_folder)];
+            subfolders = [subfolders, get_subfolders(current_folder)];
         end
     end
 end

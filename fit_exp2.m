@@ -52,7 +52,6 @@ gofs = cell(size(traces,2),1);
 % Perform photobleaching correction for each ROI
 for i = 1:size(traces, 2)
     % Extract the current trace
-    disp(i)
     ft = fittype('exp2');
     opts = fitoptions(ft);
     % 这些值可以根据数据的范围进行调整
