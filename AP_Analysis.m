@@ -34,8 +34,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'U:\Luorong\24.12.29_DUEPLEX';
-file = 'S2R8+GABA';  % must add format.do not add '\' at last
+folder_path = 'E:\1_Data\HHX_GRlab\2025.04.03\2\Slice4';
+file = 'record2';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
