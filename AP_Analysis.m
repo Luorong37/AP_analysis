@@ -34,10 +34,10 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\HHX_GRlab\2025.04.03\2\Slice4';
-file = 'record2';  % must add format.do not add '\' at last
+folder_path = 'G:\250410-zrx-neuron\cepehid1b\cell4\40x bin4 400hz 0-3min';
+file = 'movie.bin';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
-freq = 400; % Hz
+freq = 500; % Hz
 % -----------------------------------------------------------
 
 % read path
@@ -203,7 +203,7 @@ save(roi_filename, 'rois_corrected','background','background_fitted','background
 
 % fit
 % exp2 fit
-% [traces_corrected, fitted_curves] = fit_exp2(traces);
+%[traces_corrected, fitted_curves] = fit_exp2(traces);
 
 % highpass fit
 % 设置填充长度，将信号在头尾各填充5%的长度
@@ -220,7 +220,7 @@ filtered_traces = zeros(size(padded_traces));
 for i =  1:size(traces, 2)
     disp(['Processing ROI',num2str(i)]);
     current_trace = padded_traces(:, i);
-    filtered_traces(:,i) = highpass(current_trace,0.5 /t(end),freq); 
+    filtered_traces(:,i) = highpass(current_trace,10/t(end),freq); %0.5
 end
 
 % 去掉填充部分，保留原始长度的滤波后信号
@@ -363,32 +363,33 @@ fig = figure();
 set(fig,'Position',get(0,'Screensize'));
 sentivity_trace = zeros(nframes,size(traces_corrected,2));
 SNR_traces = zeros(nframes,size(traces_corrected,2));
+for i = 1 : size(traces_corrected,2)
+    % Calculate Sensitivity
+    % sentivity_trace(:,i) = traces_corrected(:,i)*peaks_polarity(i)+ 1 -peaks_polarity(i);
+    sentivity_trace(:,i) = traces_corrected(:,i) ;
+end
 baselines = zeros(nframes,size(traces_corrected,2));
 
-% plot fluorescent image
-f_axe = subplot(1,3,1);
-f_im = reshape(movie, ncols, nrows, []);hold on;
-im_adj = uint16(mean(f_im, 3));
-imshow(im_adj,[min(im_adj,[],'all'),max(im_adj,[],'all')]);
-roiseq = unique(sort(bwmask(:)));
-for i = 1:size(traces_corrected,2)
-    roi = (bwmask == roiseq(i+1));
-    boundary = cell2mat(bwboundaries(roi));
-    plot(boundary(:, 2), boundary(:, 1), 'LineWidth', 2, 'Parent', f_axe);hold on;
-            text(mean(boundary(:, 2)) + 12, mean(boundary(:, 1)) - 12, num2str(roiseq(i+1)),'FontSize', 12, 'Parent', f_axe); hold on;
-end
-hold on;
-title('Fluorescent Image');
+% % plot fluorescent image
+% f_axe = subplot(1,3,1);
+% f_im = reshape(movie, ncols, nrows, []);hold on;
+% im_adj = uint16(mean(f_im, 3));
+% imshow(im_adj,[min(im_adj,[],'all'),max(im_adj,[],'all')]);
+% roiseq = unique(sort(bwmask(:)));
+% for i = 1:size(traces_corrected,2)
+%     roi = (bwmask == roiseq(i+1));
+%     boundary = cell2mat(bwboundaries(roi));
+%     plot(boundary(:, 2), boundary(:, 1), 'LineWidth', 2, 'Parent', f_axe);hold on;
+%             text(mean(boundary(:, 2)) + 12, mean(boundary(:, 1)) - 12, num2str(roiseq(i+1)),'FontSize', 12, 'Parent', f_axe); hold on;
+% end
+% hold on;
+% title('Fluorescent Image');
 
 % plot sensitivity
 sensitivity_axe = subplot(1,3,2);
 title('Sensitivity');
 hold on;
-for i = 1 : size(traces_corrected,2)
-    % Calculate Sensitivity
-    % sentivity_trace(:,i) = traces_corrected(:,i)*peaks_polarity(i)+ 1 -peaks_polarity(i);
-    sentivity_trace(:,i) = traces_corrected(:,i) - 1 ;
-end
+
     [~] = offset_plot(sentivity_trace,t);
 
 % plot SNR
@@ -457,7 +458,7 @@ for i = 1:nrois % i for trace
 
         % Calculate;
         Amplitude = abs(peak_amp_ij);
-        Sensitivity = AP_sensitivity(AP_window_width+1) - 1 ;
+        Sensitivity = AP_sensitivity(AP_window_width+1)*100 ;
         SNR = abs(AP_SNR(AP_window_width+1));
         FWHM = calculate_FWHM(AP_amp, dt, peaks_polarity(i));
 
@@ -505,21 +506,21 @@ for i = 1:length(AP_list)
             SNR_i(j)  = each_AP.SNR;
         end
 
-        % plot AP parameters
-        scatter(i,FWHM_i,'filled','Parent',FWHM_axe);hold on;
-        xlabel('ROI number','Parent',FWHM_axe);
-        ylabel('FWHM(ms)','Parent',FWHM_axe);
-       
-        
-        scatter(i,amp_i,'filled','Parent',amp_axe);hold on;
-        xlabel('ROI number','Parent',amp_axe);
-        ylabel('Amplitude','Parent',amp_axe);
-        
-
-        scatter(i,number_i,'filled','Parent',num_axe);hold on;
-        xlabel('ROI number','Parent',num_axe);
-        ylabel('AP number','Parent',num_axe);
-        
+        % % plot AP parameters
+        % scatter(i,FWHM_i,'filled','Parent',FWHM_axe);hold on;
+        % xlabel('ROI number','Parent',FWHM_axe);
+        % ylabel('FWHM(ms)','Parent',FWHM_axe);
+        % 
+        % 
+        % scatter(i,amp_i,'filled','Parent',amp_axe);hold on;
+        % xlabel('ROI number','Parent',amp_axe);
+        % ylabel('Amplitude','Parent',amp_axe);
+        % 
+        % 
+        % scatter(i,number_i,'filled','Parent',num_axe);hold on;
+        % xlabel('ROI number','Parent',num_axe);
+        % ylabel('AP number','Parent',num_axe);
+        % 
 
         % 为当前trace创建一个表格
         T = table(number_i, amp_i, FWHM_i, sensitivity_i, SNR_i, ...

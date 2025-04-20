@@ -81,6 +81,7 @@ x = (1:nframe)';
 f = fit(x,avg_trace','exp2');
 fitted_curves = f.a*exp(f.b*x)+f.c*exp(f.d*x);
 movie_binned_corrected = movie_binned ./ fitted_curves';
+movie_binned_corrected = wdenoise(movie_binned_corrected',DenoisingMethod="FDR")';
 k = 5;
 n = 3;
 print_count = 0;
@@ -116,6 +117,7 @@ for i = 1:npixels
     print_count = fprintf('Calculating %.2f %% \n', i/npixels*100);
     % pixel_trace_corrected = movie_binned(i, :);
     pixel_trace_corrected = movie_binned_corrected(i, :);
+    % pixel_trace_corrected = wdenoise(movie_binned_corrected(i, :));
     % pixel_trace_corrected =  movie_binned(i, :) - movie_binned_corrected (i, :);
     baseline =mean(pixel_trace_corrected );
     if strcmp(mode,'voltage')
