@@ -102,7 +102,7 @@ function [peaks_polarity, peaks_threshold, peaks_index, peaks_amplitude, peaks_s
             MinPeakProminence, 'MinPeakHeight', peaks_threshold(i));
         
         % peaks_threshold(i) = (peaks_threshold(i) + peaks_polarity(i) -1)/peaks_polarity(i);
-        peaks_threshold(i) = peaks_threshold(i)*peaks_polarity(i)
+        peaks_threshold(i) = peaks_threshold(i)*peaks_polarity(i);
         peaks_index{i} = peak_x;
         % current_trace = current_trace;
         peaks_sensitivity{i} = current_trace(peak_x)-mean(current_trace);

@@ -37,7 +37,7 @@ fprintf('Loading...\n')
 folder_path = 'G:\250410-zrx-neuron\cepehid1b\cell4\40x bin4 400hz 0-3min';
 file = 'movie.bin';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
-freq = 500; % Hz
+freq = 400; % Hz
 % -----------------------------------------------------------
 
 % read path
