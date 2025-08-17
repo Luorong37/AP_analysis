@@ -78,37 +78,40 @@ avg_trace = mean(movie_binned,1);
 x = (1:nframe)';
 % f = fit(x,avg_trace','poly1');
 % fitted_curves = x*f.p1+f.p2;
-f = fit(x,avg_trace','exp2');
-fitted_curves = f.a*exp(f.b*x)+f.c*exp(f.d*x);
-movie_binned_corrected = movie_binned ./ fitted_curves';
-movie_binned_corrected = wdenoise(movie_binned_corrected',DenoisingMethod="FDR")';
+% f = fit(x,avg_trace','exp2');
+% fitted_curves = f.a*exp(f.b*x)+f.c*exp(f.d*x);
+% movie_binned_corrected = movie_binned ./ fitted_curves';
+% movie_binned_corrected = wdenoise(movie_binned_corrected',DenoisingMethod="FDR")';
 k = 5;
 n = 3;
+
 print_count = 0;
 % % 定义滤波器参数
-% fs = 400;                % 采样频率，单位为帧/秒（根据实际情况调整）
-% cutoff_freq_time = 1/10; % 截止频率，单位为Hz（根据需要调整）
-% order_time = 2;          % 滤波器阶数
-% 
-% % 设计巴特沃斯滤波器
-% [b_time, a_time] = butter(order_time, cutoff_freq_time/(fs/2), 'low');
-% 
-% 
-% % 设置填充长度，将信号在头尾各填充5%的长度
-% padlength = round(0.05 * size(movie_binned, 2));
-% 
-% % 对信号进行填充，以减少边界效应
-% padded_movie = [repmat(movie_binned(:, 1), 1,padlength), ...
-%                  movie_binned, ...
-%                  repmat(movie_binned(:,end), 1,padlength)];
-% 
-% % 应用高通滤波器到所有像素的时间序列
-% % filtfilt 会自动对每一列（对应一个像素的时间序列）进行滤波
-% 
-% movie_binned_corrected = filtfilt(b_time, a_time, padded_movie');
-% movie_binned_corrected = movie_binned_corrected';
-% movie_binned_corrected = movie_binned_corrected(:,padlength+1:end-padlength);
+fs = 400;                % 采样频率，单位为帧/秒（根据实际情况调整）
+cutoff_freq_time = 1/10; % 截止频率，单位为Hz（根据需要调整）
+order_time = 2;          % 滤波器阶数
 
+% 设计巴特沃斯滤波器
+[b_time, a_time] = butter(order_time, cutoff_freq_time/(fs/2), 'low');
+
+% 设置填充长度，将信号在头尾各填充5%的长度
+padlength = round(0.05 * size(movie_binned, 2));
+
+% 对信号进行填充，以减少边界效应
+padded_movie = [repmat(movie_binned(:, 1), 1,padlength), ...
+                 movie_binned, ...
+                 repmat(movie_binned(:,end), 1,padlength)];
+
+% 应用高通滤波器到所有像素的时间序列
+% filtfilt 会自动对每一列（对应一个像素的时间序列）进行滤波
+
+movie_binned_corrected = filtfilt(b_time, a_time, padded_movie');
+movie_binned_corrected = movie_binned_corrected';
+movie_binned_corrected = movie_binned_corrected(:,padlength+1:end-padlength);
+% movie_binned_corrected = detrend(movie_binned',4)';
+
+%  movie_binned_corrected_3D =  reshape(movie_binned_corrected,ncols/bin,nrows/bin,[]);
+% select_ROI(movie_binned_corrected, ncols/bin, nrows/bin, [], [])
 
 for i = 1:npixels
     % fprintf('Processing %d / %d\n', i, npixels );
@@ -118,15 +121,17 @@ for i = 1:npixels
     % pixel_trace_corrected = movie_binned(i, :);
     pixel_trace_corrected = movie_binned_corrected(i, :);
     % pixel_trace_corrected = wdenoise(movie_binned_corrected(i, :));
+    % pixel_trace_corrected = detrend(movie_binned_corrected(i, :),4);
     % pixel_trace_corrected =  movie_binned(i, :) - movie_binned_corrected (i, :);
-    baseline =mean(pixel_trace_corrected );
+    % baseline =mean(pixel_trace_corrected);
+    baseline =mean(movie_binned(i, :)); % filted
     if strcmp(mode,'voltage')
         abstrace = abs(pixel_trace_corrected - baseline');
         maxpoint =  max(abstrace);
         maxpointindex = abstrace == maxpoint;
         pointdff = ((pixel_trace_corrected(maxpointindex)-mean(baseline))/mean(baseline));
         % quick_map(i) = pointdff;
-        quick_map(i) = sign(pointdff) .* (1 - exp(-k * abs(pointdff*n).^n)) / (1 - exp(-k));
+        quick_map(i) = sign(pointdff(1)) .* (1 - exp(-k * abs(pointdff(1)*n).^n)) / (1 - exp(-k));
 
 
     elseif strcmp(mode,'calcium')

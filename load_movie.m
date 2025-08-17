@@ -58,8 +58,8 @@ else
             % Load first image
             t = Tiff(file_path, 'r');
             tifsize = gettifsize(t);
-            nrows = tifsize(1);
-            ncols = tifsize(2);
+            nrows = tifsize(2);
+            ncols = tifsize(1);
             t.close();
             [movie, nframes] = readstacktifs(file_path, tifsize);
             fprintf('Stacked frame tifs movie loaded\n')
@@ -136,93 +136,144 @@ function tifsize = gettifsize(t)
     tifsize = [t.getTag('ImageLength'),t.getTag('ImageWidth')];
 end
 
+% function tifframe = gettifframe(t)
+% count = 0;
+% print_count = 0;
+% try
+% tifframe = numel(imfinfo(t));
+% catch
+%     ifcount = true;
+% end
+% 
+% if isempty(tifframe)
+%       ifcount = true;
+% end
+% 
+% while ifcount
+%     count = count+1;
+%     if t.lastDirectory()
+%         tifframe = t.currentDirectory();
+%         fprintf(repmat('\b',1,print_count));   
+%         fprintf('%d frames found\n', count);
+%         break
+%     else
+%         fprintf(repmat('\b',1,print_count));   
+%         print_count = fprintf('Calculating frame %d ...\n', count);
+%         t.nextDirectory()
+%     end
+% end
+% end
 function tifframe = gettifframe(t)
-count = 0;
-print_count = 0;
-while true
-    count = count+1;
-    if t.lastDirectory()
-        tifframe = t.currentDirectory();
-        fprintf(repmat('\b',1,print_count));   
-        fprintf('%d frames found\n', count);
-        break
-    else
-        fprintf(repmat('\b',1,print_count));   
+try
+    tifframe = numel(imfinfo(t.FileName));
+catch
+     tifframe = 1 ;
+end
+
+if tifframe == 1  % 如果 imfinfo 出错，使用循环方式估计帧数
+    count = 1;
+    print_count = 0;
+    while ~t.lastDirectory()
+        t.nextDirectory();
+        count = count + 1;
+        fprintf(repmat('\b',1,print_count));
         print_count = fprintf('Calculating frame %d ...\n', count);
-        t.nextDirectory()
     end
+    tifframe = count;
+    fprintf(repmat('\b',1,print_count));
+    fprintf('%d frames found\n', count);
 end
 end
 
-function [movie, nframes]= readstacktifs(file_path,tifsize)
-    t1 = tic;
-     % Initialize parameter
-    t = Tiff(file_path, 'r');
-    print_text = 0;
+% % function [movie, nframes]= readstacktifs(file_path,tifsize)
+%     t1 = tic;
+%      % Initialize parameter
+%     t = Tiff(file_path, 'r');
+%     print_text = 0;
+% 
+%     % 初始化帧数
+%     nframes = gettifframe(t);  % 初始为1，因为至少有一帧
+%     t.setDirectory(1);
+% 
+%     nrows = tifsize(2);
+%     ncols = tifsize(1);
+%     movie = zeros(nrows*ncols, nframes, 'uint16');
+%     prev_percentage = 0; % Initialize with -1 so the first update is always printed
+% 
+%     tic;
+%         for i = 1:nframes
+%             % Read TIFF movie
+%             % current_image = imread(file_path, i);
+%             % 跳到当前帧
+%             t.setDirectory(i);
+% 
+%             % 读取当前帧的图像
+%             current_image = t.read();
+%             movie(:,i) = uint16(reshape(current_image, nrows*ncols, 1));
+% 
+%             % Calculate and display progress if percentage changes
+%             current_percentage = floor(((i - 1) / nframes) * 100);
+%             if current_percentage > prev_percentage
+%                 elapsed = toc;
+%                 remaining = elapsed / ((i - 1) / nframes) - elapsed;
+%                 fprintf(repmat('\b',1,print_text));   
+%                 print_text = fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
+%                     i - 1, nframes, current_percentage, remaining);
+%                 prev_percentage = current_percentage;
+%             end
+%         end
+%     % batchsize = 2000;
+%     % batchstart = 1;
+%     % while batchstart < nframes
+%     %     batchend = batchstart+batchsize;
+%     %     for i = batchstart:min(batchend,nframes)
+%     %         % Read TIFF movie
+%     %         % current_image = imread(file_path, i);
+%     %         % 跳到当前帧
+%     %         t.setDirectory(i);
+%     % 
+%     %         % 读取当前帧的图像
+%     %         current_image = t.read();
+%     %         movie(:,i) = uint16(reshape(current_image, nrows*ncols, 1));
+%     % 
+%     %         % Calculate and display progress if percentage changes
+%     %         current_percentage = floor((i / nframes) * 100);
+%     %         if current_percentage > prev_percentage
+%     %             elapsed = toc;
+%     %             remaining = elapsed / (i / nframes) - elapsed;
+%     %             fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
+%     %                 i, nframes, current_percentage, remaining);
+%     %             prev_percentage = current_percentage;
+%     %         end
+%     %     end
+%     %     batchstart = batchend + 1;
+%     %     if batchstart > nframes
+%     %         break
+%     %     end
+%     % end
+% %     t.close();
+% %     t2 = toc(t1); % Get the elapsed time
+% %     fprintf('Finished loading after %d s, ',round(t2))
+% % end
+function [movie, nframes] = readstacktifs(file_path, tifsize)
+    info = imfinfo(file_path);
+    nframes = numel(info);
+    nrows = tifsize(2);
+    ncols = tifsize(1);
+    dataType = info(1).BitDepth == 16 && "uint16" || "uint8";  % 自动判断数据类型
+    movie = zeros(nrows * ncols, nframes, dataType);
 
-    % 初始化帧数
-    nframes = gettifframe(t);  % 初始为1，因为至少有一帧
-    t.setDirectory(1);
+    fprintf('Reading multi-frame TIFF using memmap and parfor...\n');
 
-    nrows = tifsize(1);
-    ncols = tifsize(2);
-    movie = zeros(nrows*ncols, nframes, 'uint16');
-    prev_percentage = 0; % Initialize with -1 so the first update is always printed
+    parfor i = 1:nframes
+        offset = info(i).StripOffsets;
+        mm = memmapfile(file_path, ...
+            'Format', {dataType, [ncols, nrows], 'Data'}, ...
+            'Offset', offset(1));
+        movie(:, i) = reshape(mm.Data.Data', [], 1);
+    end
 
-    tic;
-        for i = 1:nframes
-            % Read TIFF movie
-            % current_image = imread(file_path, i);
-            % 跳到当前帧
-            t.setDirectory(i);
-            
-            % 读取当前帧的图像
-            current_image = t.read();
-            movie(:,i) = uint16(reshape(current_image, nrows*ncols, 1));
-
-            % Calculate and display progress if percentage changes
-            current_percentage = floor(((i - 1) / nframes) * 100);
-            if current_percentage > prev_percentage
-                elapsed = toc;
-                remaining = elapsed / ((i - 1) / nframes) - elapsed;
-                fprintf(repmat('\b',1,print_text));   
-                print_text = fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
-                    i - 1, nframes, current_percentage, remaining);
-                prev_percentage = current_percentage;
-            end
-        end
-    % batchsize = 2000;
-    % batchstart = 1;
-    % while batchstart < nframes
-    %     batchend = batchstart+batchsize;
-    %     for i = batchstart:min(batchend,nframes)
-    %         % Read TIFF movie
-    %         % current_image = imread(file_path, i);
-    %         % 跳到当前帧
-    %         t.setDirectory(i);
-    % 
-    %         % 读取当前帧的图像
-    %         current_image = t.read();
-    %         movie(:,i) = uint16(reshape(current_image, nrows*ncols, 1));
-    % 
-    %         % Calculate and display progress if percentage changes
-    %         current_percentage = floor((i / nframes) * 100);
-    %         if current_percentage > prev_percentage
-    %             elapsed = toc;
-    %             remaining = elapsed / (i / nframes) - elapsed;
-    %             fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
-    %                 i, nframes, current_percentage, remaining);
-    %             prev_percentage = current_percentage;
-    %         end
-    %     end
-    %     batchstart = batchend + 1;
-    %     if batchstart > nframes
-    %         break
-    %     end
-    % end
-    t.close();
-    t2 = toc(t1); % Get the elapsed time
-    fprintf('Finished loading after %d s, ',round(t2))
+    fprintf('Completed reading %d frames.\n', nframes);
 end
 
 function [movie, nframes] = readsingletifs(file_sortedaddress, tifsize)
@@ -230,8 +281,8 @@ function [movie, nframes] = readsingletifs(file_sortedaddress, tifsize)
     % Loop through all TIF files and populate intensity time series parameter
     prev_percentage = 0; % Initialize with -1 so the first update is always printed
     nframes = numel(file_sortedaddress);
-    nrows = tifsize(1);
-    ncols = tifsize(2);
+    nrows = tifsize(2);
+    ncols = tifsize(1);
     movie = zeros(nrows*ncols,nframes, 'uint16');
     print_text = 0;
 
@@ -278,8 +329,8 @@ file_sortedaddress = fullfile(file_path,file_names(idx));
 first_im = fullfile(file_path, file_names{1});
 t = Tiff(first_im, 'r');
 tifsize = gettifsize(t);
-nrows = tifsize(1);
-ncols = tifsize(2);
+nrows = tifsize(2);
+ncols = tifsize(1);
 
 % judge to merge single tifs or tif stacks
 if t.lastDirectory()
@@ -300,3 +351,49 @@ else
     fprintf('All stacked frame tifs movie merged\n')
 end
 end
+
+% %function [nrows, ncols, movie, nframes] = readfoldertifs(imageDirectory2)
+%     % 获取文件夹下所有 tif 文件
+%     imageFiles = dir(fullfile(imageDirectory2, '*.tif'));
+%     numImages = numel(imageFiles);
+% 
+%     if numImages == 0
+%         error('No .tif files found in the specified directory.');
+%     end
+% 
+%     % 读取第一个文件的信息以获取图像维度和数据类型
+%     filename = fullfile(imageDirectory2, imageFiles(1).name);
+%     imageInfo = imfinfo(filename);
+%     imageData = imread(filename);
+%     [nrows, ncols] = size(imageData);
+%     dataSize = [imageInfo.Width, imageInfo.Height];
+%     dataType = class(imageData);
+% 
+%     % 预分配 cell 数组用于 parfor 存储
+%     Y = cell(1, numImages);
+% 
+%     % 并行读取每张图像数据
+%     parfor i = 1:numImages
+%         fname = fullfile(imageDirectory2, imageFiles(i).name);
+%         info = imfinfo(fname);
+%         try
+%             offset = info.StripOffsets;
+%             mm = memmapfile(fname, ...
+%                 'Format', {dataType, dataSize, 'Data'}, ...
+%                 'Offset', offset(1));
+%             % 注意转置图像维度（必要时）
+%             Y{i} = mm.Data.Data';
+%         catch ME
+%             warning('File %s cannot be read with memmapfile. Switching to imread. Reason: %s', fname, ME.message);
+%             im = imread(fname);
+%             Y{i} = im';
+%         end
+%     end
+% 
+%     % 将图像堆栈拼接成 3D 矩阵
+%     movie3D = cat(3, Y{:});
+% 
+%     % 重塑为 (nrows*ncols, nframes)
+%     movie = reshape(movie3D, [], numImages);
+%     nframes = numImages;
+% end

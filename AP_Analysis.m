@@ -34,8 +34,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'G:\250410-zrx-neuron\cepehid1b\cell4\40x bin4 400hz 0-3min';
-file = 'movie.bin';  % must add format.do not add '\' at last
+folder_path = 'E:\1_Data\LLH\20250808_LLH_mouse11_Cepheid2_hypothalamus\slice4';
+file = '\movie2';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------

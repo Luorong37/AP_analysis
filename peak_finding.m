@@ -1,5 +1,5 @@
 function [peaks_polarity, peaks_threshold, peaks_index, peaks_amplitude, peaks_sensitivity] = ...
-                                            peak_finding(traces,MinPeakProminence_factor)
+                                            peak_finding(traces,MinPeakProminence_factor,save_path)
     % PEAK_FINDING 寻找给定ROI信号中的峰值
     %
     %   此函数通过用户交互方式，帮助检测和识别给定信号中的峰值。用户可以在每个ROI信号上手动
@@ -32,6 +32,12 @@ function [peaks_polarity, peaks_threshold, peaks_index, peaks_amplitude, peaks_s
     % 初始化变量
     if nargin < 2
     MinPeakProminence_factor = 0.5; % 定义最小峰值显著性因子
+    end
+
+    if nargin < 3
+        savefig = false; % 定义最小峰值显著性因子
+    else
+        savefig = true;
     end
 
     nrois = size(traces,2);
@@ -125,8 +131,16 @@ function [peaks_polarity, peaks_threshold, peaks_index, peaks_amplitude, peaks_s
         waitfor(fig, 'UserData');
         switch  fig.UserData
             case  'stop'
+                if savefig
+                    saveas(gcf,fullfile(save_path,sprintf('%d peaks found in ROI %d, Polarity %s.fig',numel(peak_x),i,polarity)));
+                    saveas(gcf,fullfile(save_path,sprintf('%d peaks found in ROI %d, Polarity %s.png',numel(peak_x),i,polarity)));
+                end
             break;
             case 'spacePressed'
+                if savefig
+                    saveas(gcf,fullfile(save_path,sprintf('%d peaks found in ROI %d, Polarity %s.fig',numel(peak_x),i,polarity)));
+                    saveas(gcf,fullfile(save_path,sprintf('%d peaks found in ROI %d, Polarity %s.png',numel(peak_x),i,polarity)));
+                end
             continue;
             case {'reselect','flipped'}
             reselect = true;

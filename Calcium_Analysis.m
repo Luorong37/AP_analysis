@@ -18,10 +18,10 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = [folder_path '_Green']; % defined name. please change if not
-file_name = '\';  % must add format.
+folder_path = ['F:\250424-zrx-neuron-1.5WLong+Dual color\3S2(0-12)-P2A-GCAMP6S\CELL2\40x bin4 0-5']; % defined name. please change if not
+file_name = '\GCAMP6S40Hz.fig';  % must add format.
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
-freq = 10; % Hz (defined = 10)
+freq = 400; % Hz (defined = 10)
 % -----------------------------------------------------------
 
 % read path

@@ -37,8 +37,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'H:\Slice\20240905-P2a-G8s';
-file = '20240905-153142POA';  % must add format.
+folder_path = 'E:\1_Data\LSZ\8.2 HVI2-ST-Cy3b\Exo LplA\ROI1';
+file = '';  % must add format.
 file_path = fullfile(folder_path, file);
 file_path_ca = [file_path,'_Green']; % defined name 
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
@@ -469,7 +469,7 @@ fs = 10; % 采样频率 (Hz)
 fc = 1; % 截止频率 (Hz)
 [b, a] = butter(4, fc/(fs/2)); % 4阶Butterworth低通滤波器
 traces_smoothed_ca = zeros(size(traces_corrected_ca));  % 使用双向滤波器进行零相位滤波
-SNR_traces_ca = zeros(size(traces_corrected_ca));
+SNR_traces_ca = zeros(size(tr aces_corrected_ca));
 
 for i = 1 : nrois
     % Calculate SNR
