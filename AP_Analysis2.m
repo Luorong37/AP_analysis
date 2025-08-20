@@ -36,8 +36,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\LSZ\8.2 HVI2-ST-Cy3b\Exo LplA';
-file = '\ROI1';  % must add format.do not add '\' at last
+folder_path = 'E:\1_Data\LLH\20250817_LLH_mouse13_Cepheid2_hypothalamus\slice4';
+file = '\movie2';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 % -----------------------------------------------------------
@@ -83,6 +83,7 @@ avg_image  = (movie_vol_2D - min(movie_vol_2D(:))) / (max(movie_vol_2D(:)) - min
 end
 
 [dt, colors, t, mask, avg_image] = presetting(freq, nframes, movie, ncols, nrows);
+x = (1:nframe)' * dt;
 
 % Save code
 code_path = fullfile(save_path,'Code');
@@ -150,7 +151,7 @@ fprintf('Finished mask creating after %d s\n',round(t2))
 
 %% Select ROI
 t1 = tic; % Start a timer
-
+figure()
 % with or wihout Mask and Map
 if exist('preload','var')
     if any(strcmp(preload,{'No',''} ))
@@ -226,7 +227,12 @@ saveas(gcf, png_filename, 'png');
 end
 
 fprintf('Correcting Bleaching...\n')
-[traces_corrected,baseline] = highpass_bleach_remove(traces_bgfitcorr,freq);
+
+% highpass bleach
+[traces_corrected,baseline] = highpass_bleach_remove(traces_bgfitcorr,freq,1/t);
+% 1/t for remove fake hyperpolarization
+
+
 plot_corrected(traces_corrected, traces, baseline, colors, save_path);
 fprintf('Finished\n');
 
@@ -275,48 +281,49 @@ parts = 1;
 MinPeakProminence_factor = 0.36;
 % Peak finding
 [peaks_index, peaks_amplitude, peaks_polarity, parts_results] = peak_finding_auto(traces_denoised , save_path,'parts',parts,'MinPeakProminence_factor',MinPeakProminence_factor,'RawTraces',traces_corrected,'MinPeakHeight', 0);
+%% 
 
-% %% manually reselction
-% MinPeakProminence_factor = 0.3;
-% part_re = 1;
-% roi_re = 24;
-% current_traces = traces_denoised(parts_results.index{part_re},roi_re);
-% 
-% [peaks_polarity_re, ~, peaks_index_re, peaks_amplitude_re, ~] = ...
-%                                             peak_finding(current_traces,MinPeakProminence_factor,save_path);
-% % saveas(gcf,fullfile(save_path,sprintf('repeakfinding of roi %d, p = %d.png',roi_re,part_re)));
-% % saveas(gcf,fullfile(save_path,sprintf('repeakfinding of roi %d, p = %d.fig',roi_re,part_re)));
-% 
-% parts_results.peaks_amplitude(part_re,roi_re) = peaks_amplitude_re;
-% parts_results.peaks_index(part_re,roi_re) = {peaks_index_re{1} + parts_results.index{part_re}(1)-1};
-% parts_results.peaks_polarity(part_re,roi_re) = peaks_polarity_re;
+%% manually reselction
+MinPeakProminence_factor = 0.3;
+part_re = 1;
+roi_re = 5;
+current_traces = traces_denoised(parts_results.index{part_re},roi_re);
 
-% peaks_index= cell(1,nrois);
+[peaks_polarity_re, ~, peaks_index_re, peaks_amplitude_re, ~] = ...
+                                            peak_finding(current_traces,MinPeakProminence_factor,save_path);
+% saveas(gcf,fullfile(save_path,sprintf('repeakfinding of roi %d, p = %d.png',roi_re,part_re)));
+% saveas(gcf,fullfile(save_path,sprintf('repeakfinding of roi %d, p = %d.fig',roi_re,part_re)));
+
+parts_results.peaks_amplitude(part_re,roi_re) = peaks_amplitude_re;
+parts_results.peaks_index(part_re,roi_re) = {peaks_index_re{1} + parts_results.index{part_re}(1)-1};
+parts_results.peaks_polarity(part_re,roi_re) = peaks_polarity_re;
+
+peaks_index= cell(1,nrois);
+for i = 1:parts
+    for j = 1:nrois
+        peaks_index{j} = [peaks_index{j} ;parts_results.peaks_index{i,j}];
+    end
+end
+
+peaks_amplitude = cell(1,nrois);
+for i = 1:parts
+    for j = 1:nrois
+        peaks_amplitude{j} = [peaks_amplitude{j} ;parts_results.peaks_amplitude{i,j}];
+    end
+end
+% 
+% peaks_sensitivity= cell(1,nrois);
 % for i = 1:parts
 %     for j = 1:nrois
-%         peaks_index{j} = [peaks_index{j} ;parts_results.peaks_index{i,j}];
+%         peaks_sensitivity{j} = [peaks_sensitivity{j} ;peaks_amplitude_part{i,j}];
 %     end
 % end
-% 
-% peaks_amplitude = cell(1,nrois);
-% for i = 1:parts
-%     for j = 1:nrois
-%         peaks_amplitude{j} = [peaks_amplitude{j} ;parts_results.peaks_amplitude{i,j}];
-%     end
-% end
-% % 
-% % peaks_sensitivity= cell(1,nrois);
-% % for i = 1:parts
-% %     for j = 1:nrois
-% %         peaks_sensitivity{j} = [peaks_sensitivity{j} ;peaks_amplitude_part{i,j}];
-% %     end
-% % end
-% 
-% peaks_polarity = cell(1,nrois);
-% for i = 1:nrois
-%     polarity_index = find(abs(peaks_polarity_part(:,i)) == max(abs(parts_results.peaks_polarity(:,i))));
-%     peaks_polarity{i} =peaks_polarity_part(polarity_index(1),i);
-% end
+
+peaks_polarity = cell(1,nrois);
+for i = 1:nrois
+    polarity_index = find(abs(peaks_polarity_part(:,i)) == max(abs(parts_results.peaks_polarity(:,i))));
+    peaks_polarity{i} =peaks_polarity_part(polarity_index(1),i);
+end
 
 
 %% Statistic AP, FWHM gated
@@ -328,7 +335,7 @@ offset_width = 5;
 AP_list = cell(1, nrois);
 
 % each trace
-for i = 1:nrois % i for trace
+parfor i = 1:nrois % i for trace
     peaks_num = length(peaks_index{i});
     each_trace_amp = traces_corrected(:,i);
     each_trace_sensitivity = traces_sensitivity(:,i);
@@ -367,7 +374,7 @@ for i = 1:nrois % i for trace
         Amplitude = abs(peak_amp_ij);
         Sensitivity = AP_sensitivity(AP_window_width+1)*100 ;
         SNR = abs(AP_SNR(AP_window_width+1));
-        f = false; % save each peak
+        f = true; % save each peak
         offset = peak_offset(AP_amp(AP_window_width-offset_width + 1:AP_window_width + offset_width+ 1), peaks_polarity{i});
         FWHM = calculate_FWHM(AP_amp, dt,  peaks_polarity{i},f);
         % FWHM = calculate_FWHM2(AP_amp, dt, peaks_polarity{i});
@@ -423,13 +430,14 @@ peaks_index_manually_gated = peaks_index;
 for i = 1:nrois
     figure()
     set(gcf,'Position',[0,0,2500,1800])
-    title(sprintf('noi %d, %d peaks. DELETE peaks in rectangle',i,length(peaks_x)));
+    
     hold on;
     plot(traces_SNR(:,i).*peaks_polarity{i});
     % peaks_x = peaks_index{i}(~isnan(AP_data.FWHM{i})); 
     peaks_x = peaks_index{i}; 
     peaks_y = traces_SNR(peaks_x,i).*peaks_polarity{i};
     plot(peaks_x, peaks_y,'v','MarkerFaceColor','r');
+    title(sprintf('noi %d, %d peaks. DELETE peaks in rectangle',i,length(peaks_x)));
     % mkdir(fullfile(save_path,'FWHM gated peaks'));
     % saveas(gcf,fullfile(save_path,'FWHM gated peaks',sprintf('noi %d, peaks %d.png',i,length(peaks_x))))
     % saveas(gcf,fullfile(save_path,'FWHM gated peaks',sprintf('noi %d, peaks %d.fig',i,length(peaks_x))))
@@ -493,7 +501,7 @@ for i = 1:length(AP_list)
                 each_AP = AP_i{j};
                 number_i(j) = each_AP.AP_number;
                 amp_i(j,:)  = each_AP.AP_amp .* peaks_index_manually_gated{i}(j);
-                FWHM_i(j)  = each_AP.FWHM*1000*peaks_index_manually_gated{i}(j);
+                FWHM_i(j)  = each_AP.FWHM*peaks_index_manually_gated{i}(j);
                 sensitivity_i(j)  = each_AP.Sensitivity*peaks_index_manually_gated{i}(j);
                 SNR_i(j)  = each_AP.SNR*peaks_index_manually_gated{i}(j);
                 index_i(j) = peaks_index{i}(j)*peaks_index_manually_gated{i}(j);

@@ -34,7 +34,7 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\LLH\20250808_LLH_mouse11_Cepheid2_hypothalamus\slice4';
+folder_path = 'E:\1_Data\LLH\20250811_LLH_mouse13_Cepheid2_hypothalamus\slice1';
 file = '\movie2';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
@@ -345,6 +345,13 @@ if peakfinding
         % plot(peaks_index{i}.*dt, (peaks_amplitude{i}.*peaks_polarity(i)+ 1 -peaks_polarity(i)) ...
         %     + offset_array(i),'v','Color',colors(i,:),'MarkerFaceColor',colors(i,:)); hold on;
     end
+parts_results.index = [];
+parts_results.peaks_polarity = peaks_polarity;
+parts_results.peaks_amplitude = peaks_amplitude;
+parts_results.peaks_index = peaks_index;
+
+
+
 fig_filename = fullfile(save_path, '3_peak_finding.fig');
 png_filename = fullfile(save_path, '3_peak_finding.png');
 peak_filename = fullfile(save_path, '3_peak_finding.mat');

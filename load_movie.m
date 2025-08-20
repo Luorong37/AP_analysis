@@ -61,7 +61,7 @@ else
             nrows = tifsize(2);
             ncols = tifsize(1);
             t.close();
-            [movie, nframes] = readstacktifs(file_path, tifsize);
+            [movie, ncols, nrows, nframes] = readstacktifs(file_path, tifsize);
             fprintf('Stacked frame tifs movie loaded\n')
 
         case '.bin'
@@ -255,26 +255,65 @@ end
 % %     t2 = toc(t1); % Get the elapsed time
 % %     fprintf('Finished loading after %d s, ',round(t2))
 % % end
-function [movie, nframes] = readstacktifs(file_path, tifsize)
-    info = imfinfo(file_path);
+function [movie, ncols, nrows, nframes] = readstacktifs(file_path, asVector)
+% READSTACKTIFS - Robust reader for multi-frame TIFF stacks.
+% movie: [nrows x ncols x nframes] by default, or [(nrows*ncols) x nframes] if asVector=true
+% Also returns ncols, nrows, nframes for convenience.
+
+    if nargin < 2
+        asVector = false; % 默认返回 3D
+    end
+
+    info    = imfinfo(file_path);
     nframes = numel(info);
-    nrows = tifsize(2);
-    ncols = tifsize(1);
-    dataType = info(1).BitDepth == 16 && "uint16" || "uint8";  % 自动判断数据类型
-    movie = zeros(nrows * ncols, nframes, dataType);
+    nrows  = info(1).Height;
+    ncols   = info(1).Width;
+    spp     = isfield(info(1),'SamplesPerPixel') * info(1).SamplesPerPixel;
+    if spp == 0, spp = 1; end
 
-    fprintf('Reading multi-frame TIFF using memmap and parfor...\n');
+    % 先读一帧以确定类和通道处理
+    first = imread(file_path, 1, 'Info', info);
+    % 若多通道，默认转灰度（RGB 用 rgb2gray；>3 通道取第1通道，按需修改）
+    if ndims(first) == 3
+        if size(first,3) == 3
+            first = rgb2gray(first);
+        else
+            first = first(:,:,1);
+        end
+    end
+    className = class(first);
 
-    parfor i = 1:nframes
-        offset = info(i).StripOffsets;
-        mm = memmapfile(file_path, ...
-            'Format', {dataType, [ncols, nrows], 'Data'}, ...
-            'Offset', offset(1));
-        movie(:, i) = reshape(mm.Data.Data', [], 1);
+    % 预分配
+    movie = zeros(nrows, ncols, nframes, className);
+    movie(:,:,1) = first;
+
+    fprintf('Reading multi-frame TIFF via imread (parallel)… %d frames\n', nframes);
+
+    % 并行读取其余帧
+    parfor i = 2:nframes
+        f = imread(file_path, i, 'Info', info);
+        if ndims(f) == 3
+            if size(f,3) == 3
+                f = rgb2gray(f);
+            else
+                f = f(:,:,1);
+            end
+        end
+        % 强制转换到首帧类型，避免某些帧类名不同（极少见）
+        if ~strcmp(class(f), className)
+            f = cast(f, className);
+        end
+        movie(:,:,i) = f;
     end
 
     fprintf('Completed reading %d frames.\n', nframes);
+
+    % 可选：返回列向量堆叠
+    if asVector
+        movie = reshape(movie, nrows*ncols, nframes);
+    end
 end
+
 
 function [movie, nframes] = readsingletifs(file_sortedaddress, tifsize)
     t1 = tic;
