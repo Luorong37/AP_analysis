@@ -61,7 +61,7 @@ if sortable
     stack_base = [file_base '_stack'];
 
     tiff_file_name = fullfile(save_path, sprintf('%s%02d.tif', stack_base, file_counter));
-    t = Tiff(tiff_file_name, 'w8'); % 'w' might can not save stack that more than 4GB.
+    t = Tiff(tiff_file_name, 'w'); % 'w' might can not save stack that more than 4GB.
     current_file_size = 0;
 
     % Loop through all TIF files and create TIFF stack
@@ -86,7 +86,7 @@ if sortable
                     t.close();
                     file_counter = file_counter + 1;
                     tiff_file_name = fullfile(save_path, sprintf('%s%02d.tif', stack_base, file_counter));
-                    t = Tiff(tiff_file_name, 'w8');
+                    t = Tiff(tiff_file_name, 'w');
                     current_file_size = 0;
                     stack_counter = 1;
                     fprintf('Creating new stack file: %s\n', tiff_file_name);

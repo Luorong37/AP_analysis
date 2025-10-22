@@ -47,8 +47,8 @@ function [peaks_index, peaks_amplitude, peaks_polarity, parts_results] = ...
 p = inputParser;
 
 % 2. 添加必需参数（traces, parts, data_path）
-addRequired(p, 'traces', @isnumeric);     % 验证 traces 为数值
-addRequired(p, 'data_path');     % 验证 data_path 为字符串
+addRequired(p, 'traces');     % 验证 traces 为数值
+addRequired(p, 'save_path');     % 验证 data_path 为字符串
 
 % 3. 添加可选参数（名称-值对，带默认值和类型验证）
 addParameter(p, 'parts', 1, @isnumeric);      % 验证 parts 为数值

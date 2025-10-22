@@ -1,4 +1,4 @@
-!gitfunction baseline = baseline_filtter(t, trace)
+function baseline = baseline_filtter(t, trace)
     % extractBaseline - Extracts the baseline from a intensity-time series using low-pass filtering.
     %
     % Syntax:  baseline = baseline_filtter(t, trace)

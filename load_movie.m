@@ -61,7 +61,7 @@ else
             nrows = tifsize(2);
             ncols = tifsize(1);
             t.close();
-            [movie, ncols, nrows, nframes] = readstacktifs(file_path, tifsize);
+            [movie, nframes] = readstacktifs(file_path, tifsize);
             fprintf('Stacked frame tifs movie loaded\n')
 
         case '.bin'
@@ -255,7 +255,7 @@ end
 % %     t2 = toc(t1); % Get the elapsed time
 % %     fprintf('Finished loading after %d s, ',round(t2))
 % % end
-function [movie, ncols, nrows, nframes] = readstacktifs(file_path, asVector)
+function [movie, nframes] = readstacktifs(file_path, asVector)
 % READSTACKTIFS - Robust reader for multi-frame TIFF stacks.
 % movie: [nrows x ncols x nframes] by default, or [(nrows*ncols) x nframes] if asVector=true
 % Also returns ncols, nrows, nframes for convenience.
@@ -268,19 +268,19 @@ function [movie, ncols, nrows, nframes] = readstacktifs(file_path, asVector)
     nframes = numel(info);
     nrows  = info(1).Height;
     ncols   = info(1).Width;
-    spp     = isfield(info(1),'SamplesPerPixel') * info(1).SamplesPerPixel;
-    if spp == 0, spp = 1; end
+    % spp     = isfield(info(1),'SamplesPerPixel') * info(1).SamplesPerPixel;
+    % if spp == 0, spp = 1; end
 
-    % 先读一帧以确定类和通道处理
+    % % 先读一帧以确定类和通道处理
     first = imread(file_path, 1, 'Info', info);
-    % 若多通道，默认转灰度（RGB 用 rgb2gray；>3 通道取第1通道，按需修改）
-    if ndims(first) == 3
-        if size(first,3) == 3
-            first = rgb2gray(first);
-        else
-            first = first(:,:,1);
-        end
-    end
+    % % 若多通道，默认转灰度（RGB 用 rgb2gray；>3 通道取第1通道，按需修改）
+    % if ndims(first) == 3
+    %     if size(first,3) == 3
+    %         first = rgb2gray(first);
+    %     else
+    %         first = first(:,:,1);
+    %     end
+    % end
     className = class(first);
 
     % 预分配
@@ -290,23 +290,32 @@ function [movie, ncols, nrows, nframes] = readstacktifs(file_path, asVector)
     fprintf('Reading multi-frame TIFF via imread (parallel)… %d frames\n', nframes);
 
     % 并行读取其余帧
+    
+    print_text = 0;
+    t1 = tic;
     parfor i = 2:nframes
         f = imread(file_path, i, 'Info', info);
-        if ndims(f) == 3
-            if size(f,3) == 3
-                f = rgb2gray(f);
-            else
-                f = f(:,:,1);
-            end
-        end
-        % 强制转换到首帧类型，避免某些帧类名不同（极少见）
-        if ~strcmp(class(f), className)
-            f = cast(f, className);
-        end
+
+        % if ndims(f) == 3
+        %     if size(f,3) == 3
+        %         f = rgb2gray(f);
+        %     else
+        %         f = f(:,:,1);
+        %     end
+        % end % 强制转换到首帧类型，避免某些帧类名不同（极少见） if ~strcmp(class(f), className)
+        %     f = cast(f, className);
+        % end
         movie(:,:,i) = f;
+        elapsed = toc;
+        current_percentage = floor((i / nframes) * 100);
+        remaining = (elapsed / i) * (nframes-i) ;
+        print_text = fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
+                i, nframes, current_percentage, remaining);
+        prev_percentage = current_percentage;
     end
 
-    fprintf('Completed reading %d frames.\n', nframes);
+    t2 = toc(t1);
+    fprintf('Finished loading after %d s, ',round(t2))
 
     % 可选：返回列向量堆叠
     if asVector

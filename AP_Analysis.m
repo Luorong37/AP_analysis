@@ -34,10 +34,11 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\LLH\20250811_LLH_mouse13_Cepheid2_hypothalamus\slice1';
-file = '\movie2';  % must add format.do not add '\' at last
+folder_path = 'E:\1_Data\CC';
+file = '\slice10';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
+gpu = true ; % defined gpu open 
 % -----------------------------------------------------------
 
 % read path
@@ -55,9 +56,11 @@ save_path = fullfile(folder_path, [file_name, '_Analysis'], nowtime);
 mkdir(save_path);
 
 % Load image file
+if gpu
+    gcp;
+end
 
 [movie, ncols, nrows, nframes] = load_movie(file_path);
-
 
 % Define parameters
 dt = 1 / freq; % Calculate time axis

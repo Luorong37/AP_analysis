@@ -26,7 +26,7 @@
 % See also calculate_firing_rate, calculate_FWHM, create_map, calculate_SNR, fit_exp1, highpassfilter, select_ROI
 
 
-
+clear; clc;
 %## 写一个画图的段落
 %% Loading raw data
 nowtime = string(datetime( 'now'));
@@ -36,10 +36,11 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\LLH\20250817_LLH_mouse13_Cepheid2_hypothalamus\slice4';
-file = '\movie2';  % must add format.do not add '\' at last
+folder_path = 'E:\1_Data\Luorong\25.10.17_invivo\#77\';
+file = '\R1_8h';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
+gpu = true; % defined gpu open
 % -----------------------------------------------------------
 
 % Create an analysis folder
@@ -63,7 +64,9 @@ end
 [file_path, save_path] = create_folder(folder_path, file, nowtime);
 
 % Load image file
-gcp;
+if gpu
+    gcp;
+end
 [movie, ncols, nrows, nframes] = load_movie(file_path);
 
 % Presetting
@@ -82,8 +85,8 @@ avg_image  = (movie_vol_2D - min(movie_vol_2D(:))) / (max(movie_vol_2D(:)) - min
 
 end
 
-[dt, colors, t, mask, avg_image] = presetting(freq, nframes, movie, ncols, nrows);
-x = (1:nframe)' * dt;
+[dt, colors, t, map, mask, options]= presetting(freq, nframes, movie, ncols, nrows);
+x = (1:nframes)' * dt;
 
 % Save code
 code_path = fullfile(save_path,'Code');
@@ -98,33 +101,181 @@ for k = 1:length(requiredFiles)
 end
 % 提示完成
 fprintf('All codes have been copied to %s\n', code_path);
+%% motion correction
+% this section is drived from demo_1p_low_RAM of NoRMCorre
+fprintf('Motion correcting...\n');
+t1 = tic;
+% [M1f,shifts1] = motion_correction(reshape(movie, ncols, nrows, []),'file_path',file_path);
+d1 = ncols;
+d2 = nrows;
 
-%% ----------------------Optional part------------------------
-% This part can load previous selected Mask
-% Save data
-save_stack = false;
-if save_stack
-    create_tiff_stack(file_path);
+h5_list = dir(fullfile(file_path, '*.h5'));
+if isempty(h5_list)
+    presave = true;
+else
+    presave = false;
 end
 
-preload = questdlg('Load previous data?','load data','ROIs','No','Cancel');
-switch preload
-    case 'ROIs'
-        [roi_filename,roi_foldername] = uigetfile(save_path);
-        rois_data = load(fullfile(roi_foldername,roi_filename));
-        rois = rois_data.rois;
-        mask = rois.bwmask;
+bin_width = 200;
+max_shift = [20 20];
+grid_size = [128,128];
+overlap_pre = [32,32];
+mot_uf = 4;
+iter = 1;
+correct_bidir = false;
+% appropriate name through options_r.tiff_filename or options_r.h5_filename
+
+
+if isfolder(file_path)
+    file_list = dir(fullfile(file_path, '*.tif'));
+    file_nums = length(file_list);
+    movie_mc = [];
+    
+    if file_nums ~= length(h5_list)
+         presave = logical([zeros(length(h5_list),1),ones(file_nums-length(h5_list),1)]);
+    end
+
+    for i = 1:file_nums
+        file = fullfile(file_path,file_list(i).name);
+        if presave(i)
+            [h5_name] = create_highpass_temple(file);
+        else
+            h5_name = fullfile(file_path,h5_list(i).name);
+        end
+        % [~, filename, ~] = fileparts(['\' file_list(i).name]);
+        options_r = NoRMCorreSetParms('d1',d1,'d2',d2,'bin_width',bin_width,'max_shift',max_shift,'grid_size',grid_size,'overlap_pre', overlap_pre,'mot_uf' , mot_uf,'iter',iter,'correct_bidir',correct_bidir);
+
+        %register using the high pass filtered data and apply shifts to original data
+        tic; [~,shifts1,~] = normcorre_batch(h5_name,options_r); toc % register filtered data
+        % exclude boundaries due to high pass filtering effects
+
+        % if you save the file directly in memory make sure you save it with a
+        % name that does not exist. Change options_r.tiff_filename
+        % or options_r.h5_filename accordingly.
+        %
+        tic; Mr = apply_shifts(file,shifts1,options_r); toc % apply shifts to full dataset
+
+        mc_filename = fullfile(save_path, ['0_motion_correction_',file_list(i).name]);
+        save_tiffs(Mr,mc_filename)
+        %save(mc_filename,'Mr','d1','d2','bin_width','max_shift','grid_size' ,'overlap_pre','mot_uf','iter','correct_bidir');
+
+        movie_mc = cat(3,movie_mc,Mr);
+    end
+    movie_vol_2D = mean(movie_mc,3);
+    avg_image  = (movie_vol_2D - min(movie_vol_2D(:))) / (max(movie_vol_2D(:)) - min(movie_vol_2D(:)));
+    movie = reshape(movie_mc, ncols*nrows, []);
+else
+        if presave
+            [h5_name] = create_highpass_temple(file_path);
+        else
+            h5_name = fullfile(file_path,h5_list.name);
+        end
+    [~, filename, ~] = fileparts(['\' file_path]);
+
+    options_r = NoRMCorreSetParms('d1',d1,'d2',d2,'bin_width',bin_width,'max_shift',max_shift,'grid_size',grid_size, ...
+        'overlap_pre', overlap_pre,'mot_uf' , mot_uf,'iter',iter,'correct_bidir',correct_bidir);
+
+    % options_r = NoRMCorreSetParms('d1',d1,'d2',d2,'bin_width',200,'max_shift',[20 20],'grid_size' ,[128,128],'overlap_pre', [32,32],'mot_uf' , 4,'iter',1,'correct_bidir',false);
+
+    %register using the high pass filtered data and apply shifts to original data
+    tic; [~,shifts1,~] = normcorre_batch(h5_name,options_r); toc % register filtered data
+    % exclude boundaries due to high pass filtering effects
+
+    % if you save the file directly in memory make sure you save it with a
+    % name that does not exist. Change options_r.tiff_filename
+    % or options_r.h5_filename accordingly.
+    %
+    tic; Mr = apply_shifts(file_path,shifts1,options_r); toc % apply shifts to full dataset
+    mc_filename = fullfile(save_path, ['0_motion_correction_',filename]);
+    save_tiffs(Mr,mc_filename)
+    %save(mc_filename,'Mr','d1','d2','bin_width','max_shift','grid_size' ,'overlap_pre','mot_uf','iter','correct_bidir');
+
+    movie = reshape(Mr, ncols*nrows, []);
+    movie_vol_2D = mean(Mr,3);
+    avg_image  = (movie_vol_2D - min(movie_vol_2D(:))) / (max(movie_vol_2D(:)) - min(movie_vol_2D(:)));
 end
-% -----------------------------------------------------------
-%% ----------------------Optional part------------------------
-% motion correction
-[M1f,shifts1] = motion_correction(reshape(movie, ncols, nrows, []), nrows, ncols);
-movie = reshape(M1f, ncols*nrows, []);
+%first try out rigid motion correction
+%     % exclude boundaries due to high pass filtering effects
+% options_r = NoRMCorreSetParms('d1',d1,'d2',d2,'bin_width',200,'max_shift',[20 20],'grid_size' ,[128,128],'overlap_pre', [32,32],'mot_uf' , 4,'iter',1,'correct_bidir',false);
+%
+% %register using the high pass filtered data and apply shifts to original data
+% tic; [M1,shifts1,template1] = normcorre_batch(h5_name,options_r); toc % register filtered data
+%     % exclude boundaries due to high pass filtering effects
+%
+% % if you save the file directly in memory make sure you save it with a
+% % name that does not exist. Change options_r.tiff_filename
+% % or options_r.h5_filename accordingly.
+% %
+% tic; Mr = apply_shifts(file_path,shifts1,options_r); toc % apply shifts to full dataset
+%
+% movie = reshape(Mr, ncols*nrows, []);
+% movie_vol_2D = mean(Mr,3);
+% avg_image  = (movie_vol_2D - min(movie_vol_2D(:))) / (max(movie_vol_2D(:)) - min(movie_vol_2D(:)));
+
+t2 = toc(t1);
+fprintf('Finished motion correction after %d s\n',round(t2))
+
+function [h5_name] = create_highpass_temple(file_path)
+gSig = 7; 
+gSiz = 3*gSig; 
+psf = fspecial('gaussian', round(2*gSiz), gSig);
+ind_nonzero = (psf(:)>=max(psf(:,1)));
+psf = psf-mean(psf(ind_nonzero));
+psf(~ind_nonzero) = 0;   % only use pixels within the center disk
+[filepath,file_name,~] = fileparts(file_path);
+h5_name = fullfile(filepath,[file_name,'_filtered_data.h5']);
+chunksize = 1000;    % read 500 frames at a time
+
+cnt = 1;
+while (1)  % read filter and save file in chunks
+    Yf = single(read_file(file_path,cnt,chunksize));
+    if isempty(Yf)
+        break
+    else
+        Y = imfilter(Yf,psf,'symmetric');
+        saveash5(Y,h5_name);
+        cnt = cnt + size(Y,ndims(Y));
+    end
+    disp(cnt)
+end
+end
+
+% save_tiffs(Mr,mc_filename)
+function save_tiffs(movie,tiff_file_name)
+fprintf('Saving results as tiff...\n')
+tic;
+t = Tiff(tiff_file_name, 'w');
+batch_start = 1;
+[ncols,nrows,batch_end] = size(movie);
+    for j = batch_start:batch_end
+        current_image = movie(:,:,j);         % 读取当前图片
+
+        t.setTag('ImageLength', nrows);
+        t.setTag('ImageWidth', ncols);
+        t.setTag('Photometric', Tiff.Photometric.MinIsBlack);
+        t.setTag('BitsPerSample', 16);
+        t.setTag('SamplesPerPixel', 1);
+        t.setTag('RowsPerStrip', 16);
+        t.setTag('PlanarConfiguration', Tiff.PlanarConfiguration.Chunky);
+        t.setTag('Compression', Tiff.Compression.None);
+        t.setTag('Software', 'MATLAB');
+        t.write(current_image);
+
+        if j < batch_end
+            t.writeDirectory();
+        end
+
+    end
+    t.close();
+ toc;
+end
+
 %% Create a map (optional)
 t1 = tic; % Start a timer
 fprintf('Creating a map...\n')
 % if the map cannot figure out active cells, please large the bin.
 bin = 8; % defined bin = 4
+
 [quick_map] = create_map(movie, nrows, ncols, bin);
 map = quick_map;
 
@@ -148,22 +299,63 @@ plot_map(quick_map, save_path, map);
 
 t2 = toc(t1); % Get the elapsed time
 fprintf('Finished mask creating after %d s\n',round(t2))
-
+%% Load Mask (optinal)
+methods = questdlg('Load previous data?','load data','previous ROIs','cellpose','Cancel');
+switch methods
+    case 'previous ROIs'
+        [roi_filename,roi_foldername] = uigetfile(save_path);
+        rois_data = load(fullfile(roi_foldername,roi_filename));
+    try
+        rois = rois_data.rois;
+        mask = rois.bwmask;
+    catch ME
+        rois.bwmask = bwmask;
+        mask = rois.bwmask;
+    end
+    case 'cellpose'
+    fprintf('cellpose running......\n');
+    cp = cellpose(ExecutionEnvironment="gpu");
+    avgdia = 15;
+    gamma_image = imadjust(avg_image,[],[],1.2); % recommend raise the gamma factor from 1 to 4.
+    mask = segmentCells2D(cp, gamma_image , ImageCellDiameter = avgdia,FlowErrorThreshold = 3,CellThreshold = -3);% CellThreshold = -2, ,  FlowErrorThreshold = 2
+    fprintf('%d cells are found.\n',max(mask(:)));
+    figure()
+    % 使用labeloverlay函数显示图像
+    overlayImage = labeloverlay(gamma_image, mask,'Transparency', 0.6);
+    % 显示结果
+    imshow(overlayImage);
+    title('cellpose mask');
+    fig_filename = fullfile(save_path, '0_cellpose_mask.fig');
+    png_filename = fullfile(save_path, '0_cellpose_mask.png');
+    mat_filename = fullfile(save_path, '0_cellpose_mask.mat');
+    
+    saveas(gcf, fig_filename, 'fig');
+    saveas(gcf, png_filename, 'png');
+    save(mat_filename, 'mask');
+end
 %% Select ROI
 t1 = tic; % Start a timer
 figure()
-% with or wihout Mask and Map
-if exist('preload','var')
-    if any(strcmp(preload,{'No',''} ))
+% with or without Mask and Map
+if exist('methods','var')
+    if any(strcmp(methods,{'No',''} ))
         [rois, traces] = select_ROI(movie, ncols, nrows, mask, map);
+        nrois = max(rois.bwmask,[],'all');
     else
         [~, traces] = select_ROI(movie, ncols, nrows, mask, map);
+        nois = max(mask(:));
+        rois.bwmask = mask;
     end
 else
     [rois, traces] = select_ROI(movie, ncols, nrows, mask, map);
+    nrois = max(rois.bwmask,[],'all');
 end
-nrois = max(rois.bwmask,[],'all');
+
+try
 bwmask = rois.bwmask;
+catch ME
+
+end
 traces_original = traces;
 
 % if do not need a map, run the following code:
@@ -180,11 +372,11 @@ save(roi_filename, 'rois','avg_image','traces');
 
 h = msgbox('All rois saved.', 'Done', 'help');
 uiwait(h);
-close(gcf);
+%close(gcf);
 %% Signal Process %%
 
 % Background Correction
-fprintf('Removing Background...')
+fprintf('Removing Background...\n')
 [background, background_fitted, traces_bgcorr, traces_bgfitcorr, background_mask]...
     = remove_background(movie, ncols, nrows, rois);
 roi_filename = fullfile(save_path, '1_background_ROI.mat');
@@ -229,9 +421,10 @@ end
 fprintf('Correcting Bleaching...\n')
 
 % highpass bleach
-[traces_corrected,baseline] = highpass_bleach_remove(traces_bgfitcorr,freq,1/t);
+% fc = 1/200000;
+fc = 1/t(end);
+[traces_corrected,baseline] = highpass_bleach_remove(traces_bgfitcorr,freq,fc );
 % 1/t for remove fake hyperpolarization
-
 
 plot_corrected(traces_corrected, traces, baseline, colors, save_path);
 fprintf('Finished\n');
@@ -241,7 +434,7 @@ fprintf('Finished\n');
 % wavelet降噪
 Dnmethods = 'FDR';
 Dnlevel = 8;
-fprintf('Wavelet Denoising...\')
+fprintf('Wavelet Denoising...\n')
 traces_denoised = wdenoise(traces_corrected, Dnlevel ,DenoisingMethod=Dnmethods);
 
 traces_filename = fullfile(save_path, '2_processed_traces.mat');
@@ -256,15 +449,22 @@ traces_SNR = traces_corrected./std(noise);
 
 traces_filename = fullfile(save_path, '3_calculated_traces.mat');
 save(traces_filename,"traces_sensitivity", 'traces_corrected', 'baseline', 'noise','traces_SNR')
+figure()
+%plot raw
+subplot(1,3,1);
+title('raw');
+hold on;
+[~] = offset_plot(traces,t);
+
 
 % plot sensitivity
-subplot(1,2,1);
+subplot(1,3,2);
 title('Sensitivity');
 hold on;
 [~] = offset_plot(traces_sensitivity,t);
 
 % plot SNR
-subplot(1,2,2);
+subplot(1,3,3);
 title('SNR');
 hold on;
 [~] = offset_plot(traces_SNR,t);
@@ -278,25 +478,50 @@ saveas(gcf, png_filename, 'png');
 %% AP Processing %%
 
 parts = 1;
-MinPeakProminence_factor = 0.36;
-% Peak finding
-[peaks_index, peaks_amplitude, peaks_polarity, parts_results] = peak_finding_auto(traces_denoised , save_path,'parts',parts,'MinPeakProminence_factor',MinPeakProminence_factor,'RawTraces',traces_corrected,'MinPeakHeight', 0);
-%% 
+MinPeakProminence_factor = 0.50;
+MinPeakDistance_factor = 5;
 
+findmode = 'dn';% find via denoised traces
+%findmode = 'cr';% find via bleach corrected traces
+
+% Peak finding
+switch findmode
+    case 'cr'
+    [peaks_index, peaks_amplitude, peaks_polarity, parts_results] = peak_finding_auto(traces_corrected , save_path,'parts',parts, ...
+    'MinPeakProminence_factor',MinPeakProminence_factor,'MinPeakHeight', 0, 'MinPeakDistance_factor' , MinPeakDistance_factor);
+    case 'dn'
+        [peaks_index, peaks_amplitude, peaks_polarity, parts_results] = peak_finding_auto(traces_denoised , save_path,'parts',parts, ...
+    'MinPeakProminence_factor',MinPeakProminence_factor,'RawTraces',traces_corrected,'MinPeakHeight', 0, 'MinPeakDistance_factor' , MinPeakDistance_factor);
+end
 %% manually reselction
 MinPeakProminence_factor = 0.3;
-part_re = 1;
-roi_re = 5;
-current_traces = traces_denoised(parts_results.index{part_re},roi_re);
+pr = 1;
+rr = 19;
+allr = true; % manually select all trace
+if allr
+    r0 = 1;
+    p0 = 1;
+else
+    r0 = rr;
+    p0 = pr;
+end
+for pr = p0:pr
+    for rr = r0:rr
+        switch findmode
+             case 'cr'
+                 current_traces = traces_corrected(parts_results.index{pr},rr);
+                 case 'dn'
+current_traces = traces_denoised(parts_results.index{pr},rr);
+        end
 
 [peaks_polarity_re, ~, peaks_index_re, peaks_amplitude_re, ~] = ...
                                             peak_finding(current_traces,MinPeakProminence_factor,save_path);
 % saveas(gcf,fullfile(save_path,sprintf('repeakfinding of roi %d, p = %d.png',roi_re,part_re)));
 % saveas(gcf,fullfile(save_path,sprintf('repeakfinding of roi %d, p = %d.fig',roi_re,part_re)));
 
-parts_results.peaks_amplitude(part_re,roi_re) = peaks_amplitude_re;
-parts_results.peaks_index(part_re,roi_re) = {peaks_index_re{1} + parts_results.index{part_re}(1)-1};
-parts_results.peaks_polarity(part_re,roi_re) = peaks_polarity_re;
+parts_results.peaks_amplitude(pr,rr) = peaks_amplitude_re;
+parts_results.peaks_index(pr,rr) = {peaks_index_re{1} + parts_results.index{pr}(1)-1};
+parts_results.peaks_polarity(pr,rr) = peaks_polarity_re;
 
 peaks_index= cell(1,nrois);
 for i = 1:parts
@@ -321,27 +546,29 @@ end
 
 peaks_polarity = cell(1,nrois);
 for i = 1:nrois
-    polarity_index = find(abs(peaks_polarity_part(:,i)) == max(abs(parts_results.peaks_polarity(:,i))));
-    peaks_polarity{i} =peaks_polarity_part(polarity_index(1),i);
+    polarity_index = find(abs(parts_results.peaks_polarity(:,i)) == max(abs(parts_results.peaks_polarity(:,i))));
+    peaks_polarity{i} =parts_results.peaks_polarity(polarity_index(1),i);
+end
+    end
 end
 
 
 %% Statistic AP, FWHM gated
 AP_window_width = 15; % number of frames to for AP window (defined = 40)
-offset_width = 5;
+offset_width = 3;
 % AP_list = AP_statistic(nrois, peaks_index, peaks_amplitude, traces_corrected, traces_sensitivity, traces_SNR, AP_window_width, nframes, dt, peaks_polarity, save_path);
 
 % function [AP_list,peaks_index_corrected]  = AP_statistic(nrois, peaks_index, peaks_amplitude, traces_corrected, traces_sensitivity, traces_SNR, AP_window_width, nframes, dt, peaks_polarity, save_path)
 AP_list = cell(1, nrois);
 
 % each trace
-parfor i = 1:nrois % i for trace
+for i = 1:nrois % i for trace
     peaks_num = length(peaks_index{i});
     each_trace_amp = traces_corrected(:,i);
     each_trace_sensitivity = traces_sensitivity(:,i);
     each_trace_SNR = traces_SNR(:,i);
     AP_list{i} = cell(1, length(peaks_index{i}));
-    
+    fprintf('ROI %d processing\n',i);
     j = 1;
     % each peak
     while j <= peaks_num % j for peak
@@ -374,14 +601,14 @@ parfor i = 1:nrois % i for trace
         Amplitude = abs(peak_amp_ij);
         Sensitivity = AP_sensitivity(AP_window_width+1)*100 ;
         SNR = abs(AP_SNR(AP_window_width+1));
-        f = true; % save each peak
+        f = false; % save each peak
         offset = peak_offset(AP_amp(AP_window_width-offset_width + 1:AP_window_width + offset_width+ 1), peaks_polarity{i});
         FWHM = calculate_FWHM(AP_amp, dt,  peaks_polarity{i},f);
         % FWHM = calculate_FWHM2(AP_amp, dt, peaks_polarity{i});
         if isempty(offset)
             offset = 99;
         end
-        if abs(offset) > 2 ||FWHM <= 2.5
+        if all(abs(offset) > 2) ||FWHM <= 2.5
             FWHM = NaN;
         end
 
@@ -423,6 +650,111 @@ end
 
 save(fullfile(save_path,'FWHM gated peaks.mat'),'peaks_index','peaks_polarity','peaks_amplitude')
 peaks_index_manually_gated = [];
+% AP_window_width = 15; % number of frames to for AP window (defined = 40)
+% offset_width = MinPeakDistance_factor;
+% % AP_list = AP_statistic(nrois, peaks_index, peaks_amplitude, traces_corrected, traces_sensitivity, traces_SNR, AP_window_width, nframes, dt, peaks_polarity, save_path);
+% 
+% % function [AP_list,peaks_index_corrected]  = AP_statistic(nrois, peaks_index, peaks_amplitude, traces_corrected, traces_sensitivity, traces_SNR, AP_window_width, nframes, dt, peaks_polarity, save_path)
+% AP_list = cell(1, nrois);
+% 
+% % each trace
+% for i = 1:nrois % i for trace
+%     peaks_num = length(peaks_index{i});
+%     each_trace_amp = traces_corrected(:,i);
+%     each_trace_sensitivity = traces_sensitivity(:,i);
+%     each_trace_SNR = traces_SNR(:,i);
+%     AP_list{i} = cell(1, length(peaks_index{i}));
+% 
+%     j = 1;
+%     % each peak
+%     while j <= peaks_num % j for peak
+% 
+%         peak_index_ij = peaks_index{i}(j);
+%         peak_amp_ij = peaks_amplitude{i}(j);
+% 
+%         % keep in board
+%         AP_start_index = max(1, peak_index_ij - AP_window_width);
+%         AP_end_index = min(nframes, peak_index_ij + AP_window_width);
+%         AP_index = AP_start_index : AP_end_index;
+% 
+%         % search
+%         AP_amp = each_trace_amp(AP_start_index:AP_end_index)';
+%         AP_sensitivity = each_trace_sensitivity(AP_start_index:AP_end_index)';
+%         AP_SNR = each_trace_SNR(AP_start_index:AP_end_index)';
+% 
+%         % fill NaN
+%         if 1 > peak_index_ij - AP_window_width
+%             AP_amp = [NaN(1,0 - (peak_index_ij - AP_window_width)+1), AP_amp];
+%             AP_sensitivity = [NaN(1,0 - (peak_index_ij - AP_window_width)+1),AP_sensitivity];
+%             AP_SNR = [NaN(1,0 - (peak_index_ij - AP_window_width)+1),AP_SNR];
+%         elseif nframes < peak_index_ij + AP_window_width
+%             AP_amp = [AP_amp, NaN(1,peak_index_ij + AP_window_width - nframes)];
+%             AP_sensitivity = [AP_sensitivity, NaN(1,peak_index_ij + AP_window_width - nframes)];
+%             AP_SNR = [AP_SNR, NaN(1,peak_index_ij + AP_window_width - nframes)];
+%         end
+% 
+%         % Calculate;
+%         Amplitude = abs(peak_amp_ij);
+%         Sensitivity = AP_sensitivity(AP_window_width+1)*100 ;
+%         SNR = abs(AP_SNR(AP_window_width+1));
+%         f = false; % save each peak
+%         AP_amp_cut = AP_amp(AP_window_width-offset_width + 1:AP_window_width + offset_width+ 1);
+%         if AP_amp(AP_window_width + 1)*peaks_polarity{i} < AP_amp(AP_window_width) *peaks_polarity{i}...
+%             || AP_amp(AP_window_width + 1)*peaks_polarity{i} < AP_amp(AP_window_width+2)*peaks_polarity{i}
+%             offset = peak_offset(AP_amp_cut, peaks_polarity{i});
+%             FWHM = calculate_FWHM(AP_amp, dt,  peaks_polarity{i},f);
+%         % FWHM = calculate_FWHM2(AP_amp, dt, peaks_polarity{i});
+%         else
+%             offset = 99;
+%             FWHM = NaN;
+%         end
+% 
+%         if isempty(offset) || abs(offset) > 2 || FWHM <= 2.5
+%             FWHM = NaN;
+%         end
+% 
+%         if isnan(FWHM)
+%             try
+%             FWHM = calculate_FWHM(AP_amp, dt,  peaks_polarity{i},true);
+%             catch
+%                 figure()
+%                 plot(AP_amp); hold on;
+%             end
+%             title(sprintf('failed peak at noi %d, peaks %d',i,j))
+%             if ~isfolder(fullfile(save_path,'failed peaks',sprintf('roi %d',i)))
+%             mkdir(fullfile(save_path,'failed peaks',sprintf('roi %d',i)));
+%             end
+%             saveas(gcf,fullfile(save_path,'failed peaks',sprintf('roi %d',i),sprintf('false peak at noi %d, peaks %d.png',i,j)))
+%             close(gcf)
+%         elseif f
+%             title(sprintf('finded peak at noi %d, peaks %d',i,j))
+%             if ~isfolder(fullfile(save_path,'finded peaks',sprintf('roi %d',i)))
+%             mkdir(fullfile(save_path,'finded peaks',sprintf('roi %d',i)));
+%             end
+%             saveas(gcf,fullfile(save_path,'finded peaks',sprintf('roi %d',i),sprintf('finded  peak at noi %d, peaks %d.png',i,j)))
+%             close(gcf)
+%         end
+%         % sprintf('roi % d peaks %d FWHM:%d',i,j,FWHM);
+% 
+%         % save AP data
+%         each_AP = struct('Trace', i, 'AP_number', j, 'AP_index',AP_index, ...
+%             'AP_amp',AP_amp,'Amplitude', Amplitude,'FWHM',FWHM, ...
+%             'AP_sensitivity',AP_sensitivity,'Sensitivity',Sensitivity, ...
+%             'AP_SNR', AP_SNR, 'SNR', SNR);
+%         AP_list{i}{j} = each_AP;
+%         if ~isempty(offset)  && offset ~= 0  
+%             peaks_index{i}(j) = peaks_index{i}(j) + offset;
+%             fprintf('peaksindex %d in roi %d redirection\n',peaks_index{i}(j),i)
+%             j = j -1;
+%         end
+%         j = j + 1;
+%     end
+% 
+% 
+% end
+% % end
+% save(fullfile(save_path,'FWHM gated peaks.mat'),'peaks_index','peaks_polarity','peaks_amplitude')
+% peaks_index_manually_gated = [];
 %% manually gate (optional)
 
 peaks_index_manually_gated = peaks_index;
@@ -529,7 +861,7 @@ for i = 1:length(AP_list)
         avg_FWHM(i) = mean(FWHM_i,'omitmissing');
         avg_sensitivity(i) = mean(sensitivity_i,'omitmissing');
         avg_SNR(i) = mean(SNR_i,'omitmissing');
-        AP_number(i) = number_i(end);
+        AP_number(i) = number_i(end) - sum(isnan(peaks_index_manually_gated{i}));
         ROI_number(i) = i;
         AP_data.amp{i} = amp_i;
         AP_data.FWHM{i} = FWHM_i;
@@ -879,8 +1211,8 @@ saveas(gcf, png_filename, 'png');
 save_filename = fullfile(save_path, '-1_workspace_variables.mat');
 
 % % 保存当前工作区中的所有变量到.mat文件
-% clear movie;
-% save(save_filename);
+clear movie;
+save(save_filename);
 
 
 
