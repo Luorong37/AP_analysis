@@ -34,8 +34,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\CC';
-file = '\slice10';  % must add format.do not add '\' at last
+folder_path = 'E:\1_Data\ZRXin\251114-VARNAM2-200nl\ROI3-1\';
+file = '';  % must add format.do not add '\' at last
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 gpu = true ; % defined gpu open 
@@ -112,7 +112,7 @@ end
 t1 = tic; % Start a timer
 fprintf('Creating a map...\n')
 % if the map cannot figure out active cells, please large the bin.
-bin = 8; % defined bin = 4
+bin = 1; % defined bin = 4
 [quick_map] = create_map(movie, nrows, ncols, bin);
 map = quick_map;
 

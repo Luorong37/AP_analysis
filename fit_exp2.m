@@ -52,13 +52,25 @@ gofs = cell(size(traces,2),1);
 % Perform photobleaching correction for each ROI
 for i = 1:size(traces, 2)
     % Extract the current trace
+    current_trace = traces(:, i);
+    
+    % --- 动态参数估算 ---
+    max_val = max(current_trace);
+    min_val = min(current_trace);
+    mean_val = mean(current_trace);
+    
     ft = fittype('exp2');
     opts = fitoptions(ft);
-    % 这些值可以根据数据的范围进行调整
-    opts.Lower = [-Inf, -Inf, -Inf, -Inf];  % 根据数据进行调整
-    opts.Upper = [Inf, Inf, Inf, Inf];      % 根据数据进行调整
-    current_trace = traces(:, i);
-    opts.StartPoint = [mean(current_trace), 1e-5, 0, 1e-5];
+    
+    % --- 自动选取 Upper 和 Lower ---
+    % a, c (振幅): 最小为0，最大为信号最大值的2倍（给拟合留空间）
+    % b, d (速率): 最小为-1（极速衰减），最大为0（不衰减）。强制为负是防止曲线向上翘。
+    opts.Lower = [0, -1, 0, -1];  
+    opts.Upper = [max_val*2, 0, max_val*2, 0]; 
+    
+    % --- 智能设置起始点 (StartPoint) ---
+    % 一个快成分，一个慢成分通常效果最好
+    opts.StartPoint = [mean_val/2, -1e-3, mean_val/2, -1e-5];
     % Fit the exponential decay model to the trace
     try
     [fit_params,gof] = fit(time', current_trace, ft, opts); 

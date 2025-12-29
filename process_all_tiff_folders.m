@@ -10,8 +10,9 @@ function process_all_tiff_folders(root_path, save_root_path)
     % process_all_tiff_folders('E:\1_Data\Luorong\20240709_optopatch', 'E:\1_Data\Luorong\processed\');
     
     % Get all subfolders
+
     subfolders = get_subfolders(root_path);
-    
+
     % Process each subfolder
     for i = 1:length(subfolders)
         fprintf('Processing folder: %s\n', subfolders{i});

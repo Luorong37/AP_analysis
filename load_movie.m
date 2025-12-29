@@ -1,4 +1,4 @@
-function [movie,ncols,nrows,nframes] = load_movie(file_path)
+function [movie,ncols,nrows,nframes,fext] = load_movie(file_path)
 
 % ----------Write by Liu-Yang Luorong and ChatGPT----------
 % ----------POWERED by Zoulab in Peking University----------
@@ -46,10 +46,9 @@ nrows = NaN;
 ncols = NaN;
 nframes = NaN;
 
-
 % Check if folder_path is a folder or path to a tif movie
 if isfolder(file_path)
-    [nrows, ncols, movie, nframes] = readfoldertifs(file_path);
+    [nrows, ncols, movie, nframes,fext] = readfoldertifs(file_path);
 
 else
     [~, ~, file_extension] = fileparts(file_path);
@@ -61,8 +60,10 @@ else
             nrows = tifsize(2);
             ncols = tifsize(1);
             t.close();
-            [movie, nframes] = readstacktifs(file_path, tifsize);
+            %[movie, nframes] = readstacktifs(file_path, tifsize);
+            [movie, nframes] = readstacktifs(file_path);
             fprintf('Stacked frame tifs movie loaded\n')
+            fext = '.tif';
 
         case '.bin'
             filename = [fileparts(file_path) '\movie_info.txt'];  % 指定文本文件的名称
@@ -99,17 +100,19 @@ else
             nframes = length(Mov)/(nrows*ncols);
             movie = reshape(Mov, [nrows, ncols, nframes]);
             movie = permute(movie, [2 1 3]);
-            movie = reshape(movie, [nrows*ncols, nframes]);
+            % movie = reshape(movie, [nrows*ncols, nframes]);
             % fclose(fileID);
+            fext = '.bin';
 
         case '.mat'
 
             fprintf('Loading saved data...\n')
-            file = load(file_path);
-            movie = file.movie;
-            ncols = file.ncols;
-            nrows = file.nrows;
-            nframes = file.nframes;
+            load(file_path);
+            
+            ncols = size(movie,1);
+            nrows = size(movie,2);
+            nframes = size(movie,3);
+            fext = '.mat';
     end
 end
 
@@ -264,6 +267,7 @@ function [movie, nframes] = readstacktifs(file_path, asVector)
         asVector = false; % 默认返回 3D
     end
 
+    poolsize = 8;                       % 并行worker数，自行修改
     info    = imfinfo(file_path);
     nframes = numel(info);
     nrows  = info(1).Height;
@@ -285,37 +289,112 @@ function [movie, nframes] = readstacktifs(file_path, asVector)
 
     % 预分配
     movie = zeros(nrows, ncols, nframes, className);
-    movie(:,:,1) = first;
-
-    fprintf('Reading multi-frame TIFF via imread (parallel)… %d frames\n', nframes);
-
-    % 并行读取其余帧
     
-    print_text = 0;
-    t1 = tic;
-    parfor i = 2:nframes
-        f = imread(file_path, i, 'Info', info);
+    
+    % 直接读单个tiff
+    % print_text = fprintf('Reading multi-frame TIFF containing %d frames\n, please wait about %.0f seconds', nframes, nframes/1000 + 1);
+    t0 = tic;
+    % t  = Tiff(file_path, 'r');
+    % for k = 1:nframes
+    %     img = t.read();
+    %     movie(:,:,k) = img;        % 预分配好类型/大小
+    %     if k < nframes, t.nextDirectory(); end
+    % end
+    % t.close();
+    
+    % 并行分段读取
+    % 分配工作负载：每个worker读取的帧的范围
+    frames_per_worker = ceil(nframes / poolsize); % 假设使用8个worker
+    movie_cell = cell(1, 8);
 
-        % if ndims(f) == 3
-        %     if size(f,3) == 3
-        %         f = rgb2gray(f);
-        %     else
-        %         f = f(:,:,1);
-        %     end
-        % end % 强制转换到首帧类型，避免某些帧类名不同（极少见） if ~strcmp(class(f), className)
-        %     f = cast(f, className);
-        % end
-        movie(:,:,i) = f;
-        elapsed = toc;
-        current_percentage = floor((i / nframes) * 100);
-        remaining = (elapsed / i) * (nframes-i) ;
-        print_text = fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
-                i, nframes, current_percentage, remaining);
-        prev_percentage = current_percentage;
+    % 进度：worker -> 客户端
+    q        = parallel.pool.DataQueue;
+    nDone    = 0;    % 累计已完成数
+    print_text = 0;
+    prevPcnt = 0;    % 上一次已打印的百分比
+    afterEach(q, @updateProgress);  % 嵌套函数，能直接用 nframes/t0/nDone/prevPcnt
+
+    % --- 关闭警告（客户端 + 各 worker）并读取tif---
+    
+    % 1) 关闭
+    pool = gcp;                        % 确保已开池
+    warning('off','all');              % 客户端
+    spmd, warning('off','all');  end    % worker
+
+    parfor k = 1:poolsize
+        % 每个worker的起始和结束帧
+        start_frame = (k - 1) * frames_per_worker + 1;
+        end_frame = min(k * frames_per_worker, nframes);
+        % 创建每个 worker 的独立矩阵
+        worker_movie = zeros(nrows, ncols, end_frame - start_frame + 1, className);
+        % 读取该worker负责的帧
+        t = Tiff(file_path, 'r');
+        for frame = start_frame:end_frame
+            t.setDirectory(frame); % 设置要读取的目录
+            img = t.read();
+            worker_movie(:,:,frame - start_frame + 1) = img;
+            send(q, 1);  % 每完成一个发一个通知（内容可忽略）
+        end
+        t.close();
+        % 将 worker 结果进行存储
+        movie_cell{k} = worker_movie;
     end
 
-    t2 = toc(t1);
-    fprintf('Finished loading after %d s, ',round(t2))
+    for i = 1:poolsize
+        start_frame = (i - 1) * frames_per_worker + 1;
+        end_frame = min(i * frames_per_worker, nframes);
+        movie(:,:,start_frame:end_frame) = movie_cell{i};
+    end
+
+    % 2) 恢复原先警告状态
+    spmd, warning('on','all');  end    % worker
+    warning('on','all');               % 客户端
+
+    % -------- 嵌套回调：只在百分比增加时打印 --------
+    function updateProgress(~)
+        nDone  = nDone + 1;
+        pcnt   = floor(nDone / nframes * 100);
+        if pcnt > prevPcnt
+            elapsed   = toc(t0);
+            remaining = (elapsed / nDone) * (nframes - nDone);
+            fprintf(repmat('\b',1,print_text));    % 擦除上次的进度信息
+            print_text = fprintf('Processing %d/%d (%d%% complete). Estimated time remaining: %.1f s\n', ...    % 输出进度信息
+                    nDone, nframes, pcnt, remaining);
+            prevPcnt = pcnt;
+        end
+    end
+
+    % elapsed = toc(t0);
+    % fprintf(repmat('\b',1,print_text));    % 擦除上次的进度信息
+    % fprintf('Loaded %d frames in %.2f s\n', nframes, elapsed);
+    t1 = toc(t0);
+    fprintf('Finished loading after %d s, ',round(t1));
+
+    
+
+    % ##Old code
+    % print_text = 0;
+    % t1 = tic;
+    % parfor i = 2:nframes
+    %     f = imread(file_path, i, 'Info', info);
+    % 
+    %     % if ndims(f) == 3
+    %     %     if size(f,3) == 3
+    %     %         f = rgb2gray(f);
+    %     %     else
+    %     %         f = f(:,:,1);
+    %     %     end
+    %     % end % 强制转换到首帧类型，避免某些帧类名不同（极少见） if ~strcmp(class(f), className)
+    %     %     f = cast(f, className);
+    %     % end
+    %     movie(:,:,i) = f;
+    %     elapsed = toc;
+    %     current_percentage = floor((i / nframes) * 100);
+    %     remaining = (elapsed / i) * (nframes-i) ;
+    %     print_text = fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
+    %             i, nframes, current_percentage, remaining);
+    %     prev_percentage = current_percentage;
+    % end
 
     % 可选：返回列向量堆叠
     if asVector
@@ -323,54 +402,138 @@ function [movie, nframes] = readstacktifs(file_path, asVector)
     end
 end
 
-
 function [movie, nframes] = readsingletifs(file_sortedaddress, tifsize)
-    t1 = tic;
-    % Loop through all TIF files and populate intensity time series parameter
-    prev_percentage = 0; % Initialize with -1 so the first update is always printed
-    nframes = numel(file_sortedaddress);
-    nrows = tifsize(2);
-    ncols = tifsize(1);
-    movie = zeros(nrows*ncols,nframes, 'uint16');
-    print_text = 0;
+    t0 = tic;
 
-    % Load batch of TIF files
-    tic;
-    for i = 1:nframes
-        % Read the current image, store the image directly in 'movie'
-        current_tif = file_sortedaddress{i};
-        warning('off');
-        t = Tiff(current_tif,'r');
-        warning('on');
-        current_image = t.read();
-        movie(:,i) = uint16(reshape(current_image, nrows*ncols, 1));
-        t.close();
-        % Calculate and display progress if percentage changes
-        current_percentage = floor((i / nframes) * 100);
-        if current_percentage > prev_percentage
-            elapsed = toc;
-            remaining = (elapsed / i) * (nframes-i) ;
-            fprintf(repmat('\b',1,print_text));   
-            print_text = fprintf('Processing %d/%d files (%d%% complete). Estimated time remaining: %.2f seconds\n', ...
-                i, nframes, current_percentage, remaining);
-            prev_percentage = current_percentage;
-        end
+    nframes = numel(file_sortedaddress);
+    nrows   = tifsize(2);
+    ncols   = tifsize(1);
+    movie   = zeros(nrows*ncols, nframes, 'uint16');
+
+    fprintf('Reading single TIFF via read (parallel)… %d frames\n', nframes);
+
+    % 进度：worker -> 客户端
+    q        = parallel.pool.DataQueue;
+    nDone    = 0;    % 累计已完成数
+    print_text = 0;
+    prevPcnt = 0;    % 上一次已打印的百分比
+    afterEach(q, @updateProgress);  % 嵌套函数，能直接用 nframes/t0/nDone/prevPcnt
+
+    % --- 关闭警告（客户端 + 各 worker）并读取tif---
     
+    % 1) 关闭
+    pool = gcp;                        % 确保已开池
+    warning('off','all');              % 客户端
+    spmd, warning('off','all');  end    % worker
+
+    % 并行读取
+    parfor i = 1:nframes
+        current_tif  = file_sortedaddress{i};
+        t = Tiff(current_tif,'r');
+        current_image = t.read(); 
+        t.close();
+        movie(:,i) = uint16(reshape(current_image, nrows*ncols, 1));
+
+        send(q, 1);  % 每完成一个发一个通知（内容可忽略）
     end
-    t2 = toc(t1);
-    fprintf('Finished loading after %d s, ',round(t2))
+
+    % 2) 恢复原先警告状态
+    spmd, warning('on','all');  end    % worker
+    warning('on','all');               % 客户端
+
+    fprintf('Loaded %d frames in %.2f s\n', nframes, toc(t0));
+
+    % -------- 嵌套回调：只在百分比增加时打印 --------
+    function updateProgress(~)
+        nDone  = nDone + 1;
+        pcnt   = floor(nDone / nframes * 100);
+        if pcnt > prevPcnt
+            elapsed   = toc(t0);
+            remaining = (elapsed / nDone) * (nframes - nDone);
+            fprintf(repmat('\b',1,print_text));    % 擦除上次的进度信息
+            print_text = fprintf('Processing %d/%d (%d%% complete). Estimated time remaining: %.1f s\n', ...    % 输出进度信息
+                    nDone, nframes, pcnt, remaining);
+            prevPcnt = pcnt;
+        end
+    end
 end
 
+% ##Old code
+% function [movie, nframes] = readsingletifs(file_sortedaddress, tifsize)
+%     t1 = tic;
+%     % Loop through all TIF files and populate intensity time series parameter
+%     nframes = numel(file_sortedaddress);
+%     nrows = tifsize(2);
+%     ncols = tifsize(1);
+%     movie = zeros(nrows*ncols,nframes, 'uint16');
+%     print_text = 0;
+% 
+%     % 预分配
+%     fprintf('Reading single TIFF via read (parallel)… %d frames\n', nframes);
+% 
+%     % 进度队列（worker -> 客户端）
+%     q = parallel.pool.DataQueue;
+%     nDone = 0;
+%     prev_percent = 0;
+%     afterEach(q, @updateProgress);
+% 
+%     parfor i = 1:nframes
+%        % Read the current image, store the image directly in 'movie'
+%         current_tif = file_sortedaddress{i};
+%         warning('off');
+%         t = Tiff(current_tif,'r');
+%         warning('on');
+%         current_image = t.read();
+%         movie(:,i) = uint16(reshape(current_image, nrows*ncols, 1));
+%         t.close();
+% 
+%        send(q, 1); % 报告完成1个
+%     end
+% 
+%     elapsed = toc(t1);
+%     fprintf('Loaded %d frames in %.2f s\n', nframes-1, elapsed);
+% 
+%     % --- 客户端进度更新函数 ---
+%     function updateProgress(i)
+%         persistent prev_percent_inner
+%         if isempty(prev_percent_inner)
+%             prev_percent_inner = 0;
+%         end
+% 
+%         nframes_local = evalin('base','nframes');
+%         percent = floor(i / nframes_local * 100);
+% 
+%         if percent > prev_percent_inner
+%             elapsed = toc(evalin('base','t0'));
+%             remaining = (elapsed / i) * (nframes_local - i);
+%             fprintf('Processing %d/%d (%d%% complete). ETA: %.1f s\n', ...
+%                 i, nframes_local, percent, remaining);
+%             prev_percent_inner = percent;
+%         end
+%     end
+%     t2 = toc(t1);
+%     fprintf('Finished loading after %d s, ',round(t2))
+% end
 
-function [nrows, ncols, movie, nframes] = readfoldertifs(file_path)
+
+function [nrows, ncols, movie, nframes,fext] = readfoldertifs(file_path)
 % Get all TIFF file names in folder
 file_list = dir(fullfile(file_path, '*.tif'));
 file_names = {file_list.name};
-
+if ~isempty(file_names)
 % Sort file names
 % other wise, will be like [4, 40, 400, 4000, 4001]
-file_nums = cellfun(@(x) extractFileNumber(x), file_names);
-[~, idx] = sort(file_nums);
+if length(file_names) > 400
+try
+file_nums = cellfun(@(x) extractFileNumber(x), file_names,'UniformOutput',false);
+[~, idx] = sort(cell2mat(file_nums));
+catch
+warning('illegal stacked name.')
+idx = 1:length(file_names);
+end
+else
+    idx = 1:length(file_names);
+end
 file_sortedaddress = fullfile(file_path,file_names(idx));
 
 % Load first image
@@ -398,8 +561,17 @@ else
     end
     fprintf('All stacked frame tifs movie merged\n')
 end
+fext = '.tif';
+else
+    file_list = dir(fullfile(file_path, '*.mat'));
+    file_names = {file_list.name};
+    load(fullfile(file_path, file_names{1}))
+    nrows = size(movie,2);
+    ncols = size(movie,1);
+    nframes = size(movie,3);
+    fext = '.mat';
 end
-
+end
 % %function [nrows, ncols, movie, nframes] = readfoldertifs(imageDirectory2)
 %     % 获取文件夹下所有 tif 文件
 %     imageFiles = dir(fullfile(imageDirectory2, '*.tif'));

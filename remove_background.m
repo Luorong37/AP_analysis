@@ -1,5 +1,5 @@
 function [background, background_fitted, traces_bgcorr, traces_bgfitcorr, background_mask]...
-    = remove_background(movie, ncols, nrows, rois, inner_distance, outer_distance, bg_threshold)
+    = remove_background(movie, ncols, nrows, rois, freq,bin, inner_distance, outer_distance, bg_threshold)
 % BACKGROUND_CORRECTION 非交互式工具用于视频数据中的背景校正
 %
 %   [BACKGROUND, BACKGROUND_FITTED, TRACES_BGCORR, TRACES_BGFITCORR, BACKGROUND_MASK]
@@ -23,10 +23,14 @@ function [background, background_fitted, traces_bgcorr, traces_bgfitcorr, backgr
 %     BACKGROUND_MASK     - 每个像素的背景归属掩码。
 
 % 
-if nargin <5
+if nargin <7
     inner_distance = 2;
     outer_distance = 32;
     bg_threshold = 0.05;
+end
+
+if length(size(movie)) == 3
+    movie = reshape(movie,ncols*nrows,[]);
 end
 
 % 预分配输出变量
@@ -59,18 +63,23 @@ for i = 1:num_rois
     expandmask1 = imdilate(bwmask, se1);
     expandmask2 = imdilate(bwmask, se2);
     expandregion = expandmask2 & ~expandmask1;
-
-    % 更新背景掩码
-    background_mask(expandregion) = i;
+   
+    % 去除运动矫正边缘
+    moviefilled = movie;
+    moviefilled(movie<(100*bin)) = 65535;
 
     % 根据掩码提取信号
-    [bg, bg_mask] = selectbg_by_mask(expandregion, movie, bg_threshold);
+    [bg, bg_mask] = selectbg_by_mask(expandregion, moviefilled, bg_threshold);
+
+    % 更新背景掩码
+    background_mask(bg_mask) = i;
 
     % 拟合背景轨迹
-    padlength = round(0.05 * length(bg));
-    padded_traces = [repmat(bg(1), padlength, 1)', bg, repmat(bg(end), padlength, 1)'];
-    filtered_traces = lowpass(padded_traces, 1/10, 400); % 低通滤波
-    bg_fitted = filtered_traces(padlength + 1:end - padlength);
+    % padlength = round(0.05 * length(bg));
+    % padded_traces = [repmat(bg(1), padlength, 1)', bg, repmat(bg(end), padlength, 1)'];
+    % filtered_traces = lowpass(padded_traces, 1/10, 400); % 低通滤波
+    % bg_fitted = filtered_traces(padlength + 1:end - padlength);
+    bg_fitted = smooth(bg,freq,'rloess')';
 
     % 提取原始信号
     sg = select_by_mask(bwmask, movie);

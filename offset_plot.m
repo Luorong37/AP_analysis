@@ -1,7 +1,5 @@
 function [offset_array] = offset_plot(traces_corrected,t)
-
-colors = lines(100);
-offset_array = zeros(size(traces_corrected,2));
+offset_array = zeros(1,size(traces_corrected,2));
 legendlist = {};
 for i = 1:size(traces_corrected,2)
     
@@ -21,15 +19,15 @@ for i = 1:size(traces_corrected,2)
         offset_array(i) = offset + offset_array(i-1);
     end
     
-    plot(t,  traces_corrected(:,i) + offset_array(i),'Color',colors(i,:)); hold on;
-    legendlist{end+1} = sprintf('ROI %d',i);
+    plot(t,  traces_corrected(:,i) + offset_array(i)); hold on;
+    %legendlist{end+1} = sprintf('ROI %d',i);
     % elseif polarity(i) == 1
     %     trace = (traces(:,i) - mean(traces(:,i))) + offset;
     %     plot(t,  trace ,'Color',colors(i,:)); hold on;
     %     offset_current = (max(trace(:))-min(trace(:)));
     %     offset = offset + offset_current;
 end
-legend(legendlist);hold on;
+%legend(legendlist);hold on;
 end
 % 创建stackedplot
 
