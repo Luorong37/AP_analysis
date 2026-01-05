@@ -38,8 +38,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'V:\Luorong\Invivo\25.12.22 invivo dual-color\Cam2_Rec9_5%Red_dg_2025-12-22 20-01-22';
-file = '\Cycle1';  % must add format.do not add '\' at las
+folder_path = 'E:\1_Data\Luorong\26.01.04 invivo dualcolor C122\Cam2_Rec3_5%Red_dg_2026-01-04 20-25-32';
+file = 'Cycle1';  % must add format.do not add '\' at last
 bin = 1;
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
@@ -91,7 +91,7 @@ if ~matim
     %     load(mat_path);
     %     [ncols, nrows, nframes] = size(movie);
     % end
-    fprintf("Finished loading movie after %d s\n", toc(tload));
+    fprintf("Finished loading movie after %.2d s\n", toc(tload));
 else
     [ncols, nrows, nframes] = size(movie);
     movie = reshape(movie,ncols*nrows, []);
@@ -138,21 +138,27 @@ fprintf('All codes have been copied to %s\n', code_path);
 
 %% Motion Correction (Support Save/Apply Shifts)
 fprintf('Initializing Motion Correction...\n');
-% --- 1. 配置参数 ---
-apply_only = 0;      % 是否使用之前的运动校正shift参数
-loadMC     = 0;      % 是否读取之前的运动校正结果
-Norigid    = 0;      % 是否开启非刚性校正
-hp         = 1;      % 是否开启高通滤波（用于辅助估算位移）默认开启
-template   = [];     % 手动输入校正模板
-
 % 确保 movie 是 3 维
 if ismatrix(movie)
     movie = reshape(movie, ncols, nrows, []);
 end
 
+% --- 1. 配置参数 ---
+apply_only = 0;      % 是否使用之前的运动校正shift参数
+loadMC     = 0;      % 是否读取之前的运动校正结果
+Norigid    = 0;      % 是否开启非刚性校正
+hp         = 1;      % 是否开启高通滤波（用于辅助估算位移）默认开启
+template   = mean(movie(:,:,6000:6200),3);     % 手动输入校正模板 mean(movie(:,:,6000:6200),3)
+plotmetric = 1;      % 是否作图
+dssave     = 0;      % 是否降采样保存
+
 % NoRMCorre 基础配置
-options_r = NoRMCorreSetParms('d1',ncols,'d2',nrows,'bin_width',200,'max_shift',10,'us_fac',30, ...
+init_batch = 6000; % can be modified manually
+
+options_r = NoRMCorreSetParms('d1',ncols,'d2',nrows,'bin_width',200,'max_shift',30,'us_fac',30,'iter',1,'correct_bidir',false);
+options_nr = NoRMCorreSetParms('d1',ncols,'d2',nrows,'bin_width',200,'max_shift',30,'us_fac',30, ...
     'grid_size',[128,128],'overlap_pre',[32,32],'mot_uf',4,'max_dev', [5,5],'iter',1,'correct_bidir',false);
+
 
 % 定义保存路径
 [folder_path, file_name, fext] = fileparts(file_path);
@@ -164,17 +170,17 @@ if loadMC
     [Mr, ncols, nrows, ~] = load_movie(mc_path);
 else
     t1 = tic;
-    
+
     % --- 内存优化：数据预处理 ---
-    if ~isa(movie, 'single'), movie = single(movie); end
-    movie = movie - min(movie(:)); % 原始数据保留在内存中
+    movie = single(movie);
+    % movie = movie - min(movie(:)); % 原始数据保留在内存中
 
     if apply_only
         % --- 功能：直接应用位移 ---
         [shift_filename, shift_foldername] = uigetfile(save_path, '选择位移文件');
         if isequal(shift_filename,0), return; end
         S = load(fullfile(shift_foldername, shift_filename));
-        
+
         fprintf(' -> Mode: Apply existing shifts...\n');
         Mr = apply_shifts(movie, S.shifts_r, options_r);
         if Norigid && isfield(S, 'shifts_nr'), Mr = apply_shifts(Mr, S.shifts_nr, S.options_nr); end
@@ -183,354 +189,150 @@ else
         if hp
             % 【高通滤波模式】
             fprintf(' -> High-pass mode: Filtering for better estimation...\n');
-            Y = create_temp_highpass(movie); 
+            Y = create_temp_highpass(movie);
         else
             Y = movie;
         end
 
-        fprintf(' -> Mode: Estimating shifts...\n');
+        fprintf(' -> Mode: Estimating shifts with rigid motion...\n');
         % 1. 刚体校正：用滤波后的图算位移(shifts_r)，但应用到原始 movie 上得到 Mr
-        [~, shifts_r, template1] = normcorre_batch(Y, options_r);
+        if plotmetric
+            [M1, shifts_r, template1] = normcorre_batch(Y, options_r);
+        else
+            [~, shifts_r, template1] = normcorre_batch(Y, options_r);
+            clear Y
+        end
         Mr = apply_shifts(movie, shifts_r, options_r);
-        
-        clear Y; % 估算完立即释放临时滤波数据
+
+        % clear Y; % 估算完立即释放临时滤波数据
 
         % 2. 非刚体校正 (根据需要)
-        shifts_nr = []; options_nr = [];
+        shifts_nr = [];
         if Norigid
-            options_nr = NoRMCorreSetParms('d1',ncols,'d2',nrows,'bin_width',200,'grid_size',[128,128]);
-            [~, shifts_nr, ~] = normcorre_batch(Y, options_nr, template1);
-            Mr = apply_shifts(Mr, shifts_nr, options_nr);
-      
+            fprintf(' -> Mode: Estimating shifts with Norigid motion...\n');
+            [M2, shifts_nr, ~] = normcorre_batch(M1, options_nr, template1);
+            Mpr = apply_shifts(Mr, shifts_nr, options_nr);
         end
-        
+
         % 保存
         fprintf(' -> Saving shifts and params...\n');
         save(shift_res_path, 'shifts_r', 'shifts_nr', 'template1', '-v7.3');
         save(params_save_path, 'options_r', 'options_nr', 'hp', 'Norigid');
     end
 
-    % 保存校正后的 TIFF
-    save_name = fullfile(folder_path, [file_name, '_motion_correction.tif']);
-    array2tif(uint16(Mr), save_name);
-    movie_vol_2D = mean(Mr, 3);
-    fprintf('Finished in %d s\n', round(toc(t1)));
+
+
+    % 保存校正后降采样的 TIFF
+    fprintf(' -> Downsampling corrected movie (tsub = 40) for saving...\n');
+
+    % 1. 设置下采样倍数 (400Hz -> 10Hz)
+    
+    if dssave
+        % 2. 执行下采样 (使用 NoRMCorre 自带函数)
+        % 如果你做了非刚性校正，存 Mpr；否则存 Mr
+        if Norigid && exist('Mpr', 'var')
+            Mr_ds = downsample_data(Mpr, 'time', tsub);
+        else
+            Mr_ds = downsample_data(Mr, 'time', tsub);
+        end
+
+        % 3. 重新计算显示范围 (Quantile) 确保 TIFF 亮度正常
+        nn_ds = quantile(Mr_ds(:), 0.0005);
+        mm_ds = quantile(Mr_ds(:), 0.99995);
+
+        % 4. 映射到 uint16 范围并保存
+        % 这样做可以确保保存后的 TIFF 在普通播放器里也能看清背景
+        Mr_ds = (Mr_ds - nn_ds) / (mm_ds - nn_ds) * 65535;
+        Mr_ds(Mr_ds < 0) = 0;
+        Mr_ds(Mr_ds > 65535) = 65535;
+
+        % 5. 保存 TIFF
+        save_name_ds = fullfile(save_path, ['motion_corrected_ds' mat2str(tsub) '.tif']);
+        array2tif(uint16(Mr_ds), save_name_ds);
+
+        % 6. 计算平均图用于后续 ROI 提取
+        movie_vol_2D = mean(Mr_ds, 3);
+        fprintf(' -> Downsampled movie saved. \n');
+    else
+        % 保存校正后的 TIFF
+        save_name = fullfile(folder_path, [file_name, '_motion_correction.tif']);
+        array2tif(uint16(Mr), save_name);
+        movie_vol_2D = mean(Mr, 3);
+        fprintf('Finished in %d s\n', round(toc(t1)));
+    end
+
 end
 
-% --- 3. 后处理 ---
+% --- 3. 后处理和作图 ---
 avg_image = (movie_vol_2D - min(movie_vol_2D(:))) ./ (max(movie_vol_2D(:)) - min(movie_vol_2D(:)));
 
-% --- 辅助子函数 ---
-function Y_hp = create_temp_highpass(movie)
-    % 内存中快速创建高通滤波版本
-    gSig = 7; gSiz = 17;
-    psf = fspecial('gaussian', round(2*gSiz), gSig);
-    ind = (psf >= max(psf(:,1)));
-    psf = psf - mean(psf(ind)); psf(~ind) = 0;
-    Y_hp = imfilter(movie, psf, 'symmetric');
+
+if ~Norigid
+    movie = reshape(uint16(Mr), ncols*nrows, []);
+else
+    movie = reshape(uint16(Mpr), ncols*nrows, []);
 end
 
-% % this section is drived from demo_1p_low_RAM of NoRMCorre
-% fprintf('Motion correcting...\n');
-% loadMC = 0;
-% Norigid = 0;
-% hp = 0;
-% template = [];
-% % template = reshape(mean(movie(:,6300:6400),2),ncols,nrows);
-% [folder_path, file_name, ~] = fileparts(file_path);
-% if loadMC
-%     mc_path = 'E:\1_Data\Luorong\25.12.11 invivo dual-color\Cam2_Rec7_25%Red_dg_2025-12-11 21-06-00\Cycle1_Analysis\2025-12-13 15-02-57\0_motion_correction_LEDred_rec7_cycles1_stack01_stack01.tif';
-%     [movie, ncols, nrows, nframes] = load_movie(mc_path);
-% 
-% else
-%     t1 = tic;
-%     % [M1f,shifts1] = motion_correction(reshape(movie, ncols, nrows, []),'file_path',file_path);
-%     d1 = ncols;
-%     d2 = nrows;
-% 
-%     init_batch = 0;
-%     bin_width = 100;
-%     max_shift = [20 20];
-%     grid_size = [128,128];
-%     overlap_pre = [32,32];
-%     mot_uf = 4;
-%     iter = 1;
-%     max_dev = [32,32];
-%     us_fac = 50;
-%     correct_bidir = false;
-% 
-%     border_nan = 'copy';
-%     gSig_filt = [3,3];
-%     shifts_method = 'cubic';
-% 
-%     % appropriate name through options_r.tiff_filename or options_r.h5_filename
-%     options_r = NoRMCorreSetParms('d1',d1,'d2',d2,'bin_width',bin_width,'max_shift',max_shift,'grid_size',grid_size, ...
-%         'overlap_pre', overlap_pre,'mot_uf' , mot_uf,'iter',iter,'max_dev',max_dev);
-% 
-%     options_nr = NoRMCorreSetParms('d1',d1,'d2',d2,'bin_width',20, ...
-%         'grid_size',grid_size,'mot_uf',mot_uf,'correct_bidir',correct_bidir, ...
-%         'overlap_pre',overlap_pre,'overlap_post',overlap_pre,'max_shift',max_shift);
-% 
-%     if isfolder(file_path)
-%         file_list = dir(fullfile(file_path, ['*',fext]));
-%         file_nums = length(file_list);
-% 
-%         movie_mc = [];
-% 
-%         % if file_nums ~= length(h5_list)
-%         %     presave = logical([zeros(length(h5_list),1),ones(file_nums-length(h5_list),1)]);
-%         % end
-% 
-%         for i = 1:file_nums
-%             file = fullfile(file_path,file_list(i).name);
-% 
-%             Mr = normcorr(file,options_r,options_nr,Norigid,hp,template);
-%             Mr = uint16(Mr);
-%             % mc_filename = fullfile(save_path, ['0_motion_correction_',file_list(i).name]);
-%             mc_filename = fullfile(folder_path, [file_list(i).name, '_motion_correction']);
-%             % save_tiffs(Mr,mc_filename)
-%             array2tif(Mr,mc_filename)
-%             %save(mc_filename,'Mr','d1','d2','bin_width','max_shift','grid_size' ,'overlap_pre','mot_uf','iter','correct_bidir');
-% 
-%             movie_mc = cat(3,movie_mc,Mr);
-% 
-%             % movie = reshape(movie_mc, ncols*nrows, []);
-%             % if presave(i)
-%             %     [h5_name] = create_highpass_temple(file);
-%             % else
-%             %     h5_name = fullfile(file_path,h5_list(i).name);
-%             % end
-%             % % [~, filename, ~] = fileparts(['\' file_list(i).name]);
-%             % options_r = NoRMCorreSetParms('d1',d1,'d2',d2,'bin_width',bin_width,'max_shift',max_shift,'grid_size',grid_size,'overlap_pre', overlap_pre,'mot_uf' , mot_uf,'iter',iter,'correct_bidir',correct_bidir);
-%             %
-%             % %register using the high pass filtered data and apply shifts to original data
-%             % tic; [~,shifts1,template1] = normcorre_batch(h5_name,options_r); toc % register filtered data
-%             % % exclude boundaries due to high pass filtering effects
-%             %
-%             % % if you save the file directly in memory make sure you save it with a
-%             % % name that does not exist. Change options_r.tiff_filename
-%             % % or options_r.h5_filename accordingly.
-%             % %
-%             % tic;
-%             %
-%             % if Norigid
-%             %
-%             %
-%             %     tic; [~,shifts2,template2] = normcorre_batch(M1,options_nr,template1); toc % register filtered data
-%             %     tic; Mr = apply_shifts(movie,shifts2,options_nr,0,0); toc % apply the shifts to the removed percentile
-%             % else
-%             %
-%             %     Mr = apply_shifts(file,shifts1,options_r); toc % apply shifts to full dataset
-%             % end
-% 
-% 
-%         end
-%         movie_vol_2D = mean(movie_mc,3);
-%         Mr = movie_mc;
-%     else
-%         Mr = normcorr(file_path,options_r,options_nr,Norigid,hp,template);
-% 
-%         % if presave
-%         %     [h5_name] = create_highpass_temple(file_path);
-%         % else
-%         %     h5_name = fullfile(folder_path,h5_list.name);
-%         % end
-%         % [~, filename, ~] = fileparts(['\' file_path]);
-%         %
-%         % options_r = NoRMCorreSetParms('d1',d1,'d2',d2,'bin_width',bin_width,'max_shift',max_shift,'grid_size',grid_size, ...
-%         %     'overlap_pre', overlap_pre,'mot_uf' , mot_uf,'iter',iter,'correct_bidir',correct_bidir);
-%         %
-%         %
-%         % %register using the high pass filtered data and apply shifts to original data
-%         % tic; [M1,shifts1,~] = normcorre_batch(h5_name,options_r); toc % register filtered data
-%         % % exclude boundaries due to high pass filtering effects
-%         %
-%         % % if you save the file directly in memory make sure you save it with a
-%         % % name that does not exist. Change options_r.tiff_filename
-%         % % or options_r.h5_filename accordingly.
-%         % %
-%         % tic;
-%         %
-%         % if Norigid
-%         %     options_nr = NoRMCorreSetParms('d1',d1,'d2',d2,'bin_width',bin_width, ...
-%         %         'grid_size',grid_size,'mot_uf',mot_uf,'correct_bidir',correct_bidir, ...
-%         %         'overlap_pre',32,'overlap_post',32,'max_shift',max_shift);
-%         %
-%         %     tic; [~,shifts2,template2] = normcorre_batch(M1,options_nr,template1); toc % register filtered data
-%         %     tic; Mr = apply_shifts(movie,shifts2,options_nr,0,0); toc % apply the shifts to the removed percentile
-%         % else
-%         %
-%         %
-%         %     Mr = apply_shifts(file_path,shifts1,options_r); toc % apply shifts to full dataset
-%         % end
-% 
-%         movie_vol_2D = mean(Mr,3);
-%         % mc_filename = fullfile(save_path, ['0_motion_correction_',file_name,'.tif']);
-%         mc_filename = fullfile(folder_path, [file_name, '_motion_correction.tif']);
-%         save_tiffs(Mr,mc_filename)
-%         % movie = reshape(Mr, ncols*nrows, []);
-%         %save(mc_filename,'Mr','d1','d2','bin_width','max_shift','grid_size' ,'overlap_pre','mot_uf','iter','correct_bidir');
-%     end
-%     %first try out rigid motion correction
-%     %     % exclude boundaries due to high pass filtering effects
-%     % options_r = NoRMCorreSetParms('d1',d1,'d2',d2,'bin_width',200,'max_shift',[20 20],'grid_size' ,[128,128],'overlap_pre', [32,32],'mot_uf' , 4,'iter',1,'correct_bidir',false);
-%     %
-%     % %register using the high pass filtered data and apply shifts to original data
-%     % tic; [M1,shifts1,template1] = normcorre_batch(h5_name,options_r); toc % register filtered data
-%     %     % exclude boundaries due to high pass filtering effects
-%     %
-%     % % if you save the file directly in memory make sure you save it with a
-%     % % name that does not exist. Change options_r.tiff_filename
-%     % % or options_r.h5_filename accordingly.
-%     % %
-%     % tic; Mr = apply_shifts(file_path,shifts1,options_r); toc % apply shifts to full dataset
-%     %
-% 
-% 
-%     % avg_image  = (movie_vol_2D - min(movie_vol_2D(:))) / (max(movie_vol_2D(:)) - min(movie_vol_2D(:)));
-% 
-%     t2 = toc(t1);
-%     fprintf('Finished motion correction after %d s\n',round(t2))
-% 
-% 
-% end
-% 
-% 
-% 
-% avg_image  = (movie_vol_2D - min(movie_vol_2D(:))) ./ (max(movie_vol_2D(:)) - min(movie_vol_2D(:)));
-% 
-% mcmat_filename = fullfile(save_path, '0_motion_correction.mat');
-% 
-% save(mcmat_filename, 'options_r', 'options_nr');
-% 
-% function [h5_name] = create_highpass_temple(file_path)
-% 
-% gSig = 7;
-% gSiz = 3*gSig;
-% psf = fspecial('gaussian', round(2*gSiz), gSig);
-% ind_nonzero = (psf(:)>=max(psf(:,1)));
-% psf = psf-mean(psf(ind_nonzero));
-% psf(~ind_nonzero) = 0;   % only use pixels within the center disk
-% [filepath,file_name,~] = fileparts(file_path);
-% h5_name = fullfile(filepath,[file_name,'_filtered_data.h5']);
-% chunksize = 1000;    % read 500 frames at a time
-% 
-% cnt = 1;
-% while (1)  % read filter and save file in chunks
-%     Yf = single(read_file(file_path,cnt,chunksize));
-%     if isempty(Yf)
-%         break
-%     else
-%         Y = imfilter(Yf,psf,'symmetric');
-%         saveash5(Y,h5_name);
-%         cnt = cnt + size(Y,ndims(Y));
-%     end
-%     disp(cnt)
-% end
-% end
-% 
-% % save_tiffs(Mr,mc_filename)
-% % function save_tiffs(movie,tiff_file_name)
-% % fprintf('Saving results as tiff...\n')
-% % tic;
-% % t = Tiff(tiff_file_name, 'w');
-% % batch_start = 1;
-% % [ncols,nrows,batch_end] = size(movie);
-% % for j = batch_start:batch_end
-% %     current_image = movie(:,:,j);         % 读取当前图片
-% %
-% %     t.setTag('ImageLength', nrows);
-% %     t.setTag('ImageWidth', ncols);
-% %     t.setTag('Photometric', Tiff.Photometric.MinIsBlack);
-% %     t.setTag('BitsPerSample', 16);
-% %     t.setTag('SamplesPerPixel', 1);
-% %     t.setTag('RowsPerStrip', 16);
-% %     t.setTag('PlanarConfiguration', Tiff.PlanarConfiguration.Chunky);
-% %     t.setTag('Compression', Tiff.Compression.None);
-% %     t.setTag('Software', 'MATLAB');
-% %     t.write(current_image);
-% %
-% %     if j < batch_end
-% %         t.writeDirectory();
-% %     end
-% %
-% % end
-% % t.close();
-% % toc;
-% % end
-% 
-% %
-% 
-% 
-% function Mr = normcorr(file_path,options_r,options_nr,Norigid,hp,template)
-% 
-% [folder_path, file_name, ~] = fileparts(file_path);
-% movie = load_movie(file_path);
-% 
-% if hp
-%     h5_list = dir(fullfile(folder_path, [file_name,'_filtered_data.h5']));
-%     if isempty(h5_list)
-%         fprintf('creating high-pass file......\n')
-%         presave = true;
-%     else
-%         fprintf('previous high-pass file found.\n')
-%         presave = false;
-%     end
-% 
-%     if presave
-%         [h5_name] = create_highpass_temple(file_path);
-%     else
-%         h5_name = fullfile(folder_path,h5_list.name);
-%     end
-% end
-% % [~, filename, ~] = fileparts(['\' file_path]);
-% 
-% %register using the high pass filtered data and apply shifts to original data
-% 
-% % f = figure;
-% % plot(detrend(mean(reshape(movie,size(movie,1)*size(movie,2),[]),1)))
-% % title('please select the range of temple\n')
-% % % [x,~] = ginput(2);
-% % % template = uint16(mean(movie(:,:,x(1):x(2)),3));
-% % close(f);
-% % imshow(imadjust(template))
-% % title('this image will be the template of motion correction\n')
-% % fprintf('%d frames will be the template of motion correction\n', x(2)-x(1));
-% fprintf('Rigid correcting...\n')
-% tic;
-% if hp
-%     fprintf('high-pass data was used for motion correction\n');
-%     if ~isempty(template)
-%         [Mr,shifts1,template1] = normcorre_batch(h5_name,options_r,template); toc % register filtered data
-%     else
-%         [Mr,shifts1,template1] = normcorre_batch(h5_name,options_r); toc % register filtered data
-%     end
-%     % Mr = apply_shifts(M1,shifts1,options_nr,0,0);
-% else
-%     fprintf('raw data was used for motion correction\n');
-%     if ~isempty(template)
-% 
-%         [Mr,~,~] = normcorre_batch(single(movie)-min(single(movie(:))),options_r,template); toc % register filtered data
-%     else
-%         [Mr,~,template1] = normcorre_batch(single(movie)-min(single(movie(:))),options_r); toc % register filtered data
-% 
-%     end
-% end
-% 
-%     if Norigid
-%         fprintf('Non-rigid correcting...\n')
-%         tic;
-%         [Mr,~,~] = normcorre_batch(Mr,options_nr,template1); toc % register filtered data
-%         tic;
-%         % Mr = apply_shifts(M1,shifts2,options_nr,0,0);
-%         % Mr = apply_shifts(movie,shifts2,options_nr,0,0); toc % apply the shifts to the removed percentile
-%         % else
-%         %     tic; Mr = apply_shifts(movie,shifts1,options_r); toc % apply shifts to full dataset
-%     end
-% end
+if plotmetric
+    fprintf(' -> Computing metrics. \n');
+    % compute metrics
 
+    [cY,mY,vY] = motion_metrics(Y,options_r.max_shift);
+    [cYf,mYf,vYf] = motion_metrics(reshape(movie, ncols,nrows, []),options_r.max_shift);
 
-movie = reshape(uint16(Mr), ncols*nrows, []);
+    [cM1,mM1,vM1] = motion_metrics(M1,options_r.max_shift);
+    [cM1f,mM1f,vM1f] = motion_metrics(Mr,options_r.max_shift);
+
+    % plot rigid shifts and metrics
+    shifts_rplot = squeeze(cat(3,shifts_r(:).shifts));
+    figure;
+    subplot(311); plot(shifts_rplot);
+    title('Rigid shifts','fontsize',14,'fontweight','bold');
+    legend('y-shifts','x-shifts');
+    subplot(312); plot(t,cY,t,cM1);
+    title('Correlation coefficients on filtered movie','fontsize',14,'fontweight','bold');
+    legend('raw','rigid');
+    subplot(313); plot(t,cYf,t,cM1f);
+    title('Correlation coefficients on full movie','fontsize',14,'fontweight','bold');
+    legend('raw','rigid');
+    saveas(gcf,fullfile(save_path,'rigidshifts.fig'))
+    saveas(gcf,fullfile(save_path,'rigidshifts.png'))
+    if Norigid
+        % plot shifts   compute metrics
+
+        [cM2,mM2,vM2] = motion_metrics(M2,options_nr.max_shift);
+        [cM2f,mM2f,vM2f] = motion_metrics(Mpr,options_nr.max_shift);
+
+        shifts_nrplot = cat(ndims(shifts_nr(1).shifts)+1,shifts_nr(:).shifts);
+        shifts_nrplot = reshape(shifts_nrplot,[],ndims(Y)-1,T);
+        shifts_x = squeeze(shifts_nrplot(:,2,:))';
+        shifts_y = squeeze(shifts_nrplot(:,1,:))';
+
+        patch_id = 1:size(shifts_x,2);
+        str = strtrim(cellstr(int2str(patch_id.')));
+        str = cellfun(@(x) ['patch # ',x],str,'un',0);
+
+        figure;
+        ax1 = subplot(311); plot(t,cY,t,cM1,t,cM2); legend('raw data','rigid','non-rigid'); title('correlation coefficients for filtered data','fontsize',14,'fontweight','bold')
+        set(gca,'Xtick',[],'XLim',[0,T-3])
+        ax2 = subplot(312); plot(shifts_x); hold on; plot(shifts_r(:,2),'--k','linewidth',2); title('displacements along x','fontsize',14,'fontweight','bold')
+        set(gca,'Xtick',[])
+        ax3 = subplot(313); plot(shifts_y); hold on; plot(shifts_r(:,1),'--k','linewidth',2); title('displacements along y','fontsize',14,'fontweight','bold')
+        xlabel('timestep','fontsize',14,'fontweight','bold')
+        linkaxes([ax1,ax2,ax3],'x')
+        saveas(gcf,fullfile(save_path,'nonrigidshifts.fig'))
+        saveas(gcf,fullfile(save_path,'nonrigidshifts.png'))
+    end
+end
+% --- 辅助子函数 ---
+function Y_hp = create_temp_highpass(movie)
+% 内存中快速创建高通滤波版本
+gSig = 7; gSiz = 17;
+psf = fspecial('gaussian', round(2*gSiz), gSig);
+ind = (psf >= max(psf(:,1)));
+psf = psf - mean(psf(ind)); psf(~ind) = 0;
+Y_hp = imfilter(movie, psf, 'symmetric');
+end
 %% Create a map (optional)
 t1 = tic; % Start a timer
 fprintf('Creating a map...\n')
@@ -568,7 +370,7 @@ switch methods
             rois = rois_data.rois;
             mask = rois.bwmask;
         catch ME
-           
+
             rois.bwmask = bwmask;
             mask = rois.bwmask;
         end
@@ -679,13 +481,13 @@ figure('Name', 'Background Correction Summary', 'Units', 'normalized', 'Position
 % 2. 绘制左图：原始图像 + ROI边界 + 背景掩码
 subplot(1, 2, 1);
 movie2D_mean = mean(reshape(movie, ncols, nrows, []), 3);
-imshow(movie2D_mean, [], 'InitialMagnification', 'fit'); 
+imshow(movie2D_mean, [], 'InitialMagnification', 'fit');
 hold on;
 
 for i = 1:num_rois
     % 获取当前 ROI 的颜色
     current_color = colors(i, :);
-    
+
     % 绘制原始 ROI 边界 (使用实线)
     roi_bw = (rois.bwmask == i);
     roi_boundaries = bwboundaries(roi_bw);
@@ -693,7 +495,7 @@ for i = 1:num_rois
         boundary = roi_boundaries{k};
         plot(boundary(:, 2), boundary(:, 1), 'Color', current_color, 'LineWidth', 1, 'DisplayName', ['ROI ', num2str(i)]);
     end
-    
+
     % 绘制背景掩码区域 (使用点状或半透明填充)
     bg_bw = (background_mask == i);
     bg_boundaries = bwboundaries(bg_bw);
@@ -701,7 +503,7 @@ for i = 1:num_rois
         boundary = bg_boundaries{k};
         plot(boundary(:, 2), boundary(:, 1), ':', 'Color', current_color, 'LineWidth', 1);
     end
-    
+
     % 在 ROI 中心标序号
     stats = regionprops(roi_bw, 'Centroid');
     if ~isempty(stats)
@@ -716,22 +518,22 @@ subplot(1, 2, 2);
 hold on;
 
 % 为了避免图例太乱，我们先定义几个占位符用于显示图例
-p1 = plot(nan, nan, 'Color', [0.7 0.7 0.7]); 
+p1 = plot(nan, nan, 'Color', [0.7 0.7 0.7]);
 p2 = plot(nan, nan, 'k--', 'LineWidth', 1);
 p3 = plot(nan, nan, 'k', 'LineWidth', 1);
 
 for i = 1:num_rois
     current_color = colors(i, :);
-    
+
     % 计算原始信号
     raw_signal = traces_bgfitcorr(:, i) + background_fitted(:, i);
-    
+
     % 绘制原始信号 (浅色背景线)
     plot(t, raw_signal, 'Color', [current_color, 0.3], 'LineWidth', 0.5);
-    
+
     % 绘制拟合背景 (虚线)
     plot(t, background_fitted(:, i), '--', 'Color', current_color, 'LineWidth', 1);
-    
+
     % 绘制校正后信号 (深色主线)
     plot(t, traces_bgfitcorr(:, i), 'Color', current_color, 'LineWidth', 1);
 end
@@ -749,20 +551,20 @@ saveas(gcf, fullfile(save_path, 'background_correction_summary.png'));
 fprintf('Summary plot saved to: %s\n', save_path);
 %% Bleaching Correction
 
-bleachmode = 'linear';% 'linear' 'highpass' 'exp2' 
+bleachmode = 'linear';% 'linear' 'highpass' 'exp2'
 
 fprintf('Correcting Bleaching (Mode: %s)...\n', bleachmode);
 
 switch bleachmode
     case 'highpass'
-        fc = 0.5/t(end); 
+        fc = 0.5/t(end);
         [traces_corrected, baseline] = highpass_bleach_remove(traces_bgfitcorr, freq, fc);
-        
+
     case 'linear'
         % 使用 detrend 并计算基线
         traces_corrected = detrend(traces_bgfitcorr, 1);
         baseline = traces_bgfitcorr - traces_corrected;
-        
+
     case 'exp2'
         % 双指数拟合提取基线
         [~, baseline] = fit_exp2(traces_bgfitcorr);
@@ -774,61 +576,61 @@ plot_corrected(traces_corrected, traces_bgfitcorr, baseline, t, save_path);
 
 fprintf('Finished Bleaching Correction.\n');
 function plot_corrected(traces_corrected, traces, baseline, t, save_path)
-    % 获取 ROI 数量
-    nrois = size(traces_corrected, 2);
-    
-    % 创建画布
-    fig = figure('Name', 'Bleaching Correction Overview', 'Color', 'w');
-    set(fig, 'Position', get(0, 'Screensize'));
-    
-    % --- 1. 左侧：原始数据 + 拟合基线 (Stacked) ---
-    ax_fit = subplot(1, 2, 1); hold on;
-    % 根据数据波动自动计算垂直间距
-    spacing_raw = mean(std(traces, 0, 1)) * 5; 
-    
-    for r = 1:nrois
-        offset = (nrois - r) * spacing_raw;
-        % 原始数据 (彩色/薄线)
-        plot(t, traces(:, r) + offset, 'LineWidth', 0.5, 'DisplayName', 'Original');
-        % 拟合基线 (红色/粗线)
-        plot(t, baseline(:, r) + offset, 'r', 'LineWidth', 1.2, 'DisplayName', 'Baseline');
-        
-        if mod(r, 5) == 0 || r == 1 || r == nrois
-            text(t(1), offset, [' ROI ', num2str(r)], 'FontSize', 8, 'FontWeight', 'bold');
-        end
-    end
-    title(['Original Traces & Fitted Baselines (N=', num2str(nrois), ')']);
-    xlabel('Time (s)'); ylabel('Stacked Magnitude');
-    grid on; axis tight;
+% 获取 ROI 数量
+nrois = size(traces_corrected, 2);
 
-    % --- 2. 右侧：校正后的信号 (Stacked) ---
-    ax_corr = subplot(1, 2, 2); hold on;
-    spacing_corr = mean(std(traces_corrected, 0, 1)) * 8;
-    
-    for r = 1:nrois
-        offset = (nrois - r) * spacing_corr;
-        % 校正后的信号 (黑色)
-        plot(t, traces_corrected(:, r) + offset, 'k', 'LineWidth', 0.5);
-        % 零位基准线 (浅蓝色)
-        line([t(1) t(end)], [offset offset], 'Color', [0.3 0.7 1, 0.5], 'LineStyle', '--');
-    end
-    title('Corrected Traces (Residuals)');
-    xlabel('Time (s)'); ylabel('Stacked Magnitude');
-    grid on; axis tight;
-    
-    % 联动 X 轴（缩放左侧时右侧同步）
-    linkaxes([ax_fit, ax_corr], 'x');
+% 创建画布
+fig = figure('Name', 'Bleaching Correction Overview', 'Color', 'w');
+set(fig, 'Position', get(0, 'Screensize'));
 
-    % 保存图片
-    fig_filename = fullfile(save_path, '2_bleach_correction_stacked.fig');
-    png_filename = fullfile(save_path, '2_bleach_correction_stacked.png');
-    saveas(gcf, fig_filename, 'fig');
-    saveas(gcf, png_filename, 'png');
+% --- 1. 左侧：原始数据 + 拟合基线 (Stacked) ---
+ax_fit = subplot(1, 2, 1); hold on;
+% 根据数据波动自动计算垂直间距
+spacing_raw = mean(std(traces, 0, 1)) * 5;
+
+for r = 1:nrois
+    offset = (nrois - r) * spacing_raw;
+    % 原始数据 (彩色/薄线)
+    plot(t, traces(:, r) + offset, 'LineWidth', 0.5, 'DisplayName', 'Original');
+    % 拟合基线 (红色/粗线)
+    plot(t, baseline(:, r) + offset, 'r', 'LineWidth', 1.2, 'DisplayName', 'Baseline');
+
+    if mod(r, 5) == 0 || r == 1 || r == nrois
+        text(t(1), offset, [' ROI ', num2str(r)], 'FontSize', 8, 'FontWeight', 'bold');
+    end
+end
+title(['Original Traces & Fitted Baselines (N=', num2str(nrois), ')']);
+xlabel('Time (s)'); ylabel('Stacked Magnitude');
+grid on; axis tight;
+
+% --- 2. 右侧：校正后的信号 (Stacked) ---
+ax_corr = subplot(1, 2, 2); hold on;
+spacing_corr = mean(std(traces_corrected, 0, 1)) * 8;
+
+for r = 1:nrois
+    offset = (nrois - r) * spacing_corr;
+    % 校正后的信号 (黑色)
+    plot(t, traces_corrected(:, r) + offset, 'k', 'LineWidth', 0.5);
+    % 零位基准线 (浅蓝色)
+    line([t(1) t(end)], [offset offset], 'Color', [0.3 0.7 1, 0.5], 'LineStyle', '--');
+end
+title('Corrected Traces (Residuals)');
+xlabel('Time (s)'); ylabel('Stacked Magnitude');
+grid on; axis tight;
+
+% 联动 X 轴（缩放左侧时右侧同步）
+linkaxes([ax_fit, ax_corr], 'x');
+
+% 保存图片
+fig_filename = fullfile(save_path, '2_bleach_correction_stacked.fig');
+png_filename = fullfile(save_path, '2_bleach_correction_stacked.png');
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
 end
 % %% Bleaching Correction
-% 
+%
 % bleachmode = 'linear';% 'linear' 'highpass' 'exp2'
-% 
+%
 %      plot_corrected1(traces_corrected, traces, baseline, save_path)
 %         % plot
 %         fig = figure();
@@ -836,37 +638,37 @@ end
 %         fit_axe = subplot(1,3,1);
 %         fited_axe = subplot(1,3,2);
 %         baseline_axe = subplot(1,3,3);
-% 
+%
 %         % plot
 %         for i = 1: size(traces_corrected,2)
 %             plot(traces(:,i),'Parent',fit_axe);
 %             hold(fit_axe, 'on');
 %             plot(traces_corrected(:,i),'Parent',fited_axe);
 %             hold(fited_axe, 'on');
-% 
+%
 %             plot( baseline(:,i),'LineWidth',1,'Parent',baseline_axe);
 %             hold(baseline_axe, 'on');
-% 
-% 
+%
+%
 %         end
 %         hold off;
-% 
+%
 %         % note
 %         title(fit_axe, 'Original and Fitted Curves');
 %         title(fited_axe, 'Corrected Traces');
 %         ylim(fited_axe,[-200,+200])
 %         title(baseline_axe, 'Baseline');
 %         legend(fit_axe, 'Original Trace', 'Fitted Curve');
-% 
+%
 %         fig_filename = fullfile(save_path, '2_fitted_trace.fig');
 %         png_filename = fullfile(save_path, '2_fitted_trace.png');
-% 
+%
 %         saveas(gcf, fig_filename, 'fig');
 %         saveas(gcf, png_filename, 'png');
 %     end
-% 
+%
 % fprintf('Correcting Bleaching...\n')
-% 
+%
 % %highpass bleach
 % switch bleachmode
 %     case 'highpass'
@@ -880,8 +682,8 @@ end
 %         [traces_corrected,fit_y_fit] = fit_bleach(traces_bgfitcorr,x);
 %         baseline = traces_bgfitcorr-traces_corrected;
 % end
-% 
-% 
+%
+%
 % plot_corrected(traces_corrected, traces, baseline, save_path);
 % fprintf('Finished\n');
 %% Wavelet process
