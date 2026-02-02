@@ -64,12 +64,13 @@ for i = 1:num_rois
     expandmask2 = imdilate(bwmask, se2);
     expandregion = expandmask2 & ~expandmask1;
    
-    % 去除运动矫正边缘
-    moviefilled = movie;
-    moviefilled(movie<(100*bin)) = 65535;
+    % % 去除运动矫正边缘
+    % moviefilled = movie;
+    % moviefilled(movie<(100*bin)) = 65535;
 
     % 根据掩码提取信号
-    [bg, bg_mask] = selectbg_by_mask(expandregion, moviefilled, bg_threshold);
+    % [bg, bg_mask] = selectbg_by_mask(expandregion, moviefilled, bg_threshold);
+    [bg, bg_mask] = selectbg_by_mask(expandregion, movie, bg_threshold);
 
     % 更新背景掩码
     background_mask(bg_mask) = i;

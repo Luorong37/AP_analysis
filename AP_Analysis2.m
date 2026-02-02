@@ -38,12 +38,13 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\Luorong\26.01.04 invivo dualcolor C122\Cam2_Rec3_5%Red_dg_2026-01-04 20-25-32';
-file = 'Cycle1';  % must add format.do not add '\' at last
-bin = 1;
+folder_path = 'V:\Luorong\Invivo\26.01.29_invivo dual color\Methods2\Rec4_2026-01-29 21-05-04\Cycle1';
+file = 'Cam2_Red5%simo';  % must add format.do not add '\' at last
+bin = 2;
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 gpu = true; % defined gpu open
+
 
 if exist('movie','var')
     matim =true;
@@ -148,12 +149,12 @@ apply_only = 0;      % 是否使用之前的运动校正shift参数
 loadMC     = 0;      % 是否读取之前的运动校正结果
 Norigid    = 0;      % 是否开启非刚性校正
 hp         = 1;      % 是否开启高通滤波（用于辅助估算位移）默认开启
-template   = mean(movie(:,:,6000:6200),3);     % 手动输入校正模板 mean(movie(:,:,6000:6200),3)
+template   = [];     % 手动输入校正模板 mean(movie(:,:,  ),3)
 plotmetric = 1;      % 是否作图
 dssave     = 0;      % 是否降采样保存
 
 % NoRMCorre 基础配置
-init_batch = 6000; % can be modified manually
+init_batch = 100; % can be modified manually
 
 options_r = NoRMCorreSetParms('d1',ncols,'d2',nrows,'bin_width',200,'max_shift',30,'us_fac',30,'iter',1,'correct_bidir',false);
 options_nr = NoRMCorreSetParms('d1',ncols,'d2',nrows,'bin_width',200,'max_shift',30,'us_fac',30, ...
@@ -339,7 +340,7 @@ fprintf('Creating a map...\n')
 % if the map cannot figure out active cells, please large the bin.
 mapbin = 4; % defined bin = 4
 
-[quick_map] = create_map(movie, ncols, nrows, mapbin);
+[quick_map] = create_map(movie, nrows, ncols, mapbin);
 map = quick_map;
 
 % Visualize correlation coefficients as heatmap
@@ -371,8 +372,21 @@ switch methods
             mask = rois.bwmask;
         catch ME
 
-            rois.bwmask = bwmask;
+            rois.bwmask = rois_data.bwmask;
             mask = rois.bwmask;
+            boundaries = bwboundaries(mask, 'noholes');
+    
+        % 取第一个检测到的连通域边界
+        % 注意：bwboundaries 返回的是 [row, col]，通常需要转为 [x, y]
+        current_boundary = boundaries{1};
+        rois.boundary = [current_boundary(:,2), current_boundary(:,1)]; % [X, Y]
+        
+        % 2. 计算位置 (Position)
+        % 使用 regionprops 提取边界框 (BoundingBox)
+        % BoundingBox 格式为 [x_left, y_top, width, height]
+        stats = regionprops(mask, 'BoundingBox');
+        rois.Position = stats(1).BoundingBox;
+
         end
     case 'cellpose'
         fprintf('cellpose running......\n');
@@ -400,28 +414,24 @@ end
 t1 = tic; % Start a timer
 figure()
 % with or without Mask and Map
-% if exist('methods','var')
-%     if any(strcmp(methods,{'No',''} ))
-%         [rois, traces] = select_ROI(movie, ncols, nrows, mask, map);
-%         nrois = max(rois.bwmask,[],'all');
-%     else
-%         [~, traces] = select_ROI(movie, ncols, nrows, mask, map);
-%         nois = max(mask(:));
-%         rois.bwmask = mask;
-%     end
-% else
-%     [rois, traces] = select_ROI(movie, ncols, nrows, mask, map);
-%     nrois = max(rois.bwmask,[],'all');
-% end
-
-[rois, traces] = select_ROI(movie, ncols, nrows, mask, map);
-nrois = max(rois.bwmask,[],'all');
-
-try
-    bwmask = rois.bwmask;
-catch ME
-
+if exist('methods','var')
+    if any(strcmp(methods,{'No',''} ))
+        [rois, traces] = select_ROI(movie, ncols, nrows, mask, map);
+        nrois = max(rois.bwmask,[],'all');
+    else
+        [~, traces] = select_ROI(movie, ncols, nrows, mask, map);
+        nois = max(mask(:));
+        rois.bwmask = mask;
+    end                               
+else
+    [rois, traces] = select_ROI(movie, ncols, nrows, mask, map);
+    nrois = max(rois.bwmask,[],'all');
 end
+% try
+%     bwmask = rois.bwmask;
+% catch ME
+% 
+% end
 traces_original = traces;
 
 % if do not need a map, run the following code:
@@ -688,7 +698,6 @@ end
 % fprintf('Finished\n');
 %% Wavelet process
 
-
 % wavelet降噪
 Dnmethods = 'FDR';
 Dnlevel = 8;
@@ -769,9 +778,9 @@ saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 %% AP Processing %%
 
-parts = 2;
-MinPeakProminence_factor = 0.4;
-MinPeakDistance_factor = 4;
+parts = 1;
+MinPeakProminence_factor = 0.6;
+MinPeakDistance_factor = 80;
 
 findmode = 'cr';% find via denoised traces
 %findmode = 'cr';% find via bleach corrected traces
@@ -788,7 +797,7 @@ end
 %% manually reselction
 MinPeakProminence_factor = 0.25;
 pr = 1;
-rr = n_traces;
+rr = nrois;
 allr = true; % manually select all trace
 if allr
     r0 = 1;
@@ -1883,30 +1892,151 @@ png_filename = fullfile(save_path, '6_average_AP_SNR_with_SD.png');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 
-%
-%% drafting (optional)
-% plot SNR
-figure;
-title('SNR');
-hold on;
-[~] = offset_plot(traces_SNR,t);
 
-cycle_gd = t(end)/32;
+% %% drafting (optional)
+% % plot SNR
+% figure;
+% title('SNR');
+% hold on;
+% [~] = offset_plot(traces_SNR,t);
+% 
+% cycle_gd = t(end)/32;
+% 
+% cycles = 32;
+% starts = 0;
+% for i = 1:cycles/2
+%     fill([starts,starts+cycle_gd,starts+cycle_gd,starts],[0,0,sum(max(traces_SNR))*3,sum(max(traces_SNR))*3],'k','FaceAlpha',0.2)
+%     starts = starts+cycle_gd*2 ;
+% end
+% 
+% fig_filename = fullfile(save_path, '4_grafting_SNR.fig');
+% png_filename = fullfile(save_path, '4_grafting_SNR.png');
+% trace_filename = fullfile(save_path, '4_grafting_SNR.mat');
+% 
+% saveas(gcf, fig_filename, 'fig');
+% saveas(gcf, png_filename, 'png');
 
-cycles = 32;
-starts = 0;
-for i = 1:cycles/2
-    fill([starts,starts+cycle_gd,starts+cycle_gd,starts],[0,0,sum(max(traces_SNR))*3,sum(max(traces_SNR))*3],'k','FaceAlpha',0.2)
-    starts = starts+cycle_gd*2 ;
+%% Firing rate
+% 找出有AP的ROI
+valid_rois = [];
+roi_ap_counts = [];
+
+for roi = 1:size(traces_SNR, 2)
+    if ~isempty(AP_data.index{roi}) && ~all(isnan(AP_data.index{roi}))
+        % 计算有效AP数量
+        ap_indices = AP_data.index{roi};
+        valid_ap_count = sum(~isnan(ap_indices));
+        
+        if valid_ap_count > 0
+            valid_rois = [valid_rois, roi];
+            roi_ap_counts = [roi_ap_counts, valid_ap_count];
+        end
+    end
 end
 
-fig_filename = fullfile(save_path, '4_grafting_SNR.fig');
-png_filename = fullfile(save_path, '4_grafting_SNR.png');
-trace_filename = fullfile(save_path, '4_grafting_SNR.mat');
+fprintf('AP序列图统计:\n');
+fprintf('总ROI数: %d\n', size(traces_SNR, 2));
+fprintf('有AP的ROI数: %d\n', length(valid_rois));
+fprintf('无AP的ROI数: %d\n', size(traces_SNR, 2) - length(valid_rois));
+fprintf('有AP的ROI编号: %s\n', mat2str(valid_rois));
 
+% 如果没有有效的ROI，显示提示并返回
+if isempty(valid_rois)
+    fprintf('没有找到任何有AP的ROI，跳过AP序列图绘制\n');
+    return;
+end
+
+% 创建图形
+figure('Position', [100, 100, 1400, 800]);
+
+% 创建peak_img矩阵
+peaks_img = zeros(size(traces_SNR, 1), length(valid_rois));
+
+% 绘制每个有AP的ROI
+hold on;
+for idx = 1:length(valid_rois)
+    roi = valid_rois(idx);
+    ap_indices = AP_data.index{roi};
+    
+    % 跳过NaN值
+    valid_ap_indices = ap_indices(~isnan(ap_indices));
+    
+    if ~isempty(valid_ap_indices)
+        % 绘制AP序列
+        h = plot(valid_ap_indices, idx, '|k', 'LineWidth', 1, 'MarkerSize', 8);
+        
+        % 添加工具提示
+        for i = 1:length(valid_ap_indices)
+            text(valid_ap_indices(i), idx, sprintf('ROI%d', roi), ...
+                'HorizontalAlignment', 'center', 'VerticalAlignment', 'bottom', ...
+                'FontSize', 8, 'Color', 'blue', 'Visible', 'off');
+        end
+        
+        % 填充peaks_img矩阵
+        for i = 1:length(valid_ap_indices)
+            index = valid_ap_indices(i);
+            if index >= 1 && index <= size(peaks_img, 1)
+                peaks_img(index, idx) = 1;
+            end
+        end
+    end
+end
+
+% 设置图形属性
+xlabel('帧', 'FontSize', 12);
+ylabel('ROI编号', 'FontSize', 12);
+title(sprintf('AP序列图 (共%d个有AP的ROI, 总AP数: %d)', length(valid_rois), sum(roi_ap_counts)), 'FontSize', 14);
+
+% 设置Y轴刻度，显示原始ROI编号
+set(gca, 'YTick', 1:length(valid_rois));
+set(gca, 'YTickLabel', arrayfun(@num2str, valid_rois, 'UniformOutput', false));
+grid on;
+box on;
+
+% 设置坐标轴范围
+xlim([1, size(traces_SNR, 1)]);
+ylim([0.5, length(valid_rois)+0.5]);
+
+
+% 保存图形
+fig_filename = fullfile(save_path, '8_AP_Sequence.fig');
+png_filename = fullfile(save_path, '8_AP_Sequence.png');
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
 
+% 保存高分辨率版本
+print(fullfile(save_path, '8_AP_Sequence_highres.png'), '-dpng', '-r300');
+
+% 保存数据
+peaks_img_valid = peaks_img;
+save(fullfile(save_path, 'ap_sequence_data.mat'), ...
+    'peaks_img_valid', 'valid_rois', 'roi_ap_counts');
+
+% 创建AP密度图
+figure('Position', [100, 100, 1400, 400]);
+ap_density = sum(peaks_img, 2);
+plot(1:length(ap_density), ap_density, 'b-', 'LineWidth', 1);
+xlabel('帧', 'FontSize', 12);
+ylabel('AP数量', 'FontSize', 12);
+title('AP密度随时间变化', 'FontSize', 14);
+grid on;
+box on;
+
+% 保存AP密度图
+fig_filename = fullfile(save_path, '9_AP_Density.fig');
+png_filename = fullfile(save_path, '9_AP_Density.png');
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+
+% 显示最终统计
+fprintf('\nAP序列图统计详情:\n');
+fprintf('图形中显示的ROI数: %d\n', length(valid_rois));
+fprintf('总AP数: %d\n', sum(roi_ap_counts));
+fprintf('平均每个有AP的ROI的AP数: %.2f\n', mean(roi_ap_counts));
+fprintf('AP密度(AP/帧): %.4f\n', sum(roi_ap_counts)/size(traces_SNR, 1));
+fprintf('图形已保存到:\n');
+fprintf('  - %s\n', fullfile(save_path, '8_AP_Sequence.png'));
+fprintf('  - %s\n', fullfile(save_path, '9_AP_Density.png'));
 
 %% Save parameter
 % 定义保存路径和文件名
