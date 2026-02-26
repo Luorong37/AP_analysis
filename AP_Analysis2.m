@@ -38,15 +38,15 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'V:\Luorong\Invivo\26.01.29_invivo dual color\Methods2\Rec4_2026-01-29 21-05-04\Cycle1';
-file = 'Cam2_Red5%simo';  % must add format.do not add '\' at last
-bin = 2;
+folder_path = 'V:\Luorong\Invivo\26.01.08 invivo dualcolor-121\Cam2_Rec4_5%red_stim_2026-01-08 22-19-33\';
+file = 'Cycle1';  % must add format.do not add '\' at last
+bin = 1;
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 gpu = true; % defined gpu open
 
 
-if exist('movie','var')
+if exist('v','var')
     matim =true;
     [folder_path,file,exten] = fileparts(save_file);
     file = [file,exten];
@@ -99,7 +99,6 @@ else
 end
 
 % Presetting
-function [dt, colors, t, map, mask, options] = presetting(freq, nframes, movie, ncols, nrows)
 
 % Define parameters
 dt = 1 / freq; % Calculate time axis
@@ -109,8 +108,7 @@ t = (1:nframes) * dt;
 options.colors = colors;
 map = [];
 mask = [];
-
-end
+x = (1:nframes)' * dt;
 
 try
     movie_vol_2D = reshape(mean(movie,2), ncols, nrows, []);
@@ -120,8 +118,8 @@ end
 
 avg_image  = (movie_vol_2D - min(movie_vol_2D(:))) / (max(movie_vol_2D(:)) - min(movie_vol_2D(:)));
 
-[dt, colors, t, map, mask, options]= presetting(freq, nframes, movie, ncols, nrows);
-x = (1:nframes)' * dt;
+
+
 
 % Save code
 code_path = fullfile(save_path,'Code');
@@ -143,7 +141,7 @@ fprintf('Initializing Motion Correction...\n');
 if ismatrix(movie)
     movie = reshape(movie, ncols, nrows, []);
 end
-
+ 
 % --- 1. 配置参数 ---
 apply_only = 0;      % 是否使用之前的运动校正shift参数
 loadMC     = 0;      % 是否读取之前的运动校正结果
@@ -151,7 +149,7 @@ Norigid    = 0;      % 是否开启非刚性校正
 hp         = 1;      % 是否开启高通滤波（用于辅助估算位移）默认开启
 template   = [];     % 手动输入校正模板 mean(movie(:,:,  ),3)
 plotmetric = 1;      % 是否作图
-dssave     = 0;      % 是否降采样保存
+dssave     = 1;      % 是否降采样保存
 
 % NoRMCorre 基础配置
 init_batch = 100; % can be modified manually
@@ -221,8 +219,7 @@ else
         save(params_save_path, 'options_r', 'options_nr', 'hp', 'Norigid');
     end
 
-
-
+    tsub = 40;
     % 保存校正后降采样的 TIFF
     fprintf(' -> Downsampling corrected movie (tsub = 40) for saving...\n');
 
@@ -264,15 +261,18 @@ else
 
 end
 
+
+
+
+
+
+
+
+
 % --- 3. 后处理和作图 ---
 avg_image = (movie_vol_2D - min(movie_vol_2D(:))) ./ (max(movie_vol_2D(:)) - min(movie_vol_2D(:)));
 
 
-if ~Norigid
-    movie = reshape(uint16(Mr), ncols*nrows, []);
-else
-    movie = reshape(uint16(Mpr), ncols*nrows, []);
-end
 
 if plotmetric
     fprintf(' -> Computing metrics. \n');
@@ -325,6 +325,13 @@ if plotmetric
         saveas(gcf,fullfile(save_path,'nonrigidshifts.png'))
     end
 end
+
+if ~Norigid
+    movie = reshape(uint16(Mr), ncols*nrows, []);
+else
+    movie = reshape(uint16(Mpr), ncols*nrows, []);
+end
+
 % --- 辅助子函数 ---
 function Y_hp = create_temp_highpass(movie)
 % 内存中快速创建高通滤波版本
