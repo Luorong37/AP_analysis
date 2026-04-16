@@ -112,7 +112,7 @@ for p = 1:parts
         % 寻找峰值
         MinPeakProminence = (max(current_trace)-min(current_trace)) * MinPeakProminence_factor;
         maxpeaksheight = (max(current_trace)-min(current_trace)) * MinPeakProminence_factor;
-        MinPeakProminence = max(maxpeaksheight,MinPeakHeight);
+        % MinPeakProminence = max(maxpeaksheight,MinPeakHeight);
         [peak_y, peak_x] = findpeaks(plot_trace, 'MinPeakProminence', ...
             MinPeakProminence,'MinPeakDistance',MinPeakDistance_factor,'MinPeakHeight',MinPeakHeight);
         

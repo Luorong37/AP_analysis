@@ -80,7 +80,8 @@ for i = 1:num_rois
     % padded_traces = [repmat(bg(1), padlength, 1)', bg, repmat(bg(end), padlength, 1)'];
     % filtered_traces = lowpass(padded_traces, 1/10, 400); % 低通滤波
     % bg_fitted = filtered_traces(padlength + 1:end - padlength);
-    bg_fitted = smooth(bg,freq,'rloess')';
+    % bg_fitted = smooth(bg,freq,'rloess')';
+    bg_fitted = smooth(bg,0.01,'rloess')';
 
     % 提取原始信号
     sg = select_by_mask(bwmask, movie);

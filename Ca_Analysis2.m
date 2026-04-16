@@ -39,8 +39,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'V:\Luorong\Invivo\26.01.08 invivo dualcolor-121\Cam1_Rec4_5%Cyan_stim_2026-01-08 22-19-33\';
-file = 'Cycle1';  % must add format.do not add '\' at last
+folder_path = 'E:\1_Data\Luorong\26.04.04 dual-colorC192\Methods8_default\Rec1_2026-04-04_22-38-58\Cycle3\\';
+file = '\Cam1_Cyan5%_dgod2+1';  % must add format.do not add '\' at last
 bin = 1;
 downsample = 40;% downsample ratio
 transpose = 1;
@@ -207,17 +207,27 @@ else
         [~, shifts_r, template1] = normcorre_batch(Y, options_r);
         Mr = apply_shifts(movie, shifts_r, options_r);
 
-        clear Y; % 估算完立即释放临时滤波数据
+                clear Y; % 估算完立即释放临时滤波数据
 
         % 2. 非刚体校正 (根据需要)
         shifts_nr = []; options_nr = [];
+                if hp
+            % 【高通滤波模式】
+            fprintf(' -> High-pass mode: Filtering for better estimation...\n');
+            % 内存优化：生成临时滤波数据用于“算位移”，不改变原始 movie
+            % 如果文件极大导致内存不足，建议在此处调用 create_highpass_h5
+            Y = create_temp_highpass(Mr);
+        else
+            Y = movie;
+                end
+
         if Norigid
             options_nr = NoRMCorreSetParms('d1',ncols,'d2',nrows,'bin_width',200,'grid_size',[128,128]);
             [~, shifts_nr, ~] = normcorre_batch(Y, options_nr, template1);
             Mr = apply_shifts(Mr, shifts_nr, options_nr);
 
         end
-
+        clear Y; % 估算完立即释放临时滤波数据
         % 保存
         fprintf(' -> Saving shifts and params...\n');
         save(shift_res_path, 'shifts_r', 'shifts_nr', 'template1', '-v7.3');
@@ -281,7 +291,7 @@ end
 movie = reshape(uint16(Mr), ncols*nrows, []);
 %%
 
-movie = movie-uint16(mean(movie,1));
+% movie = movie-uint16(mean(movie,1));
 %% Create a map (optional)
 t1 = tic; % Start a timer
 fprintf('Creating a map...\n')
@@ -359,7 +369,8 @@ switch methods
         avgdia = 25;
         % gamma_image = imadjust(map,[],[],1.2); % recommend raise the gamma factor from 1 to 4.
         gamma_image = imadjust(avg_image,[],[],1.2); % recommend raise the gamma factor from 1 to 4.
-        mask = segmentCells2D(cp, gamma_image , ImageCellDiameter = avgdia,FlowErrorThreshold = 3,CellThreshold = -6);% CellThreshold = -2, ,  FlowErrorThreshold = 2
+        % gamma_image = map;
+        mask = segmentCells2D(cp, gamma_image , ImageCellDiameter = avgdia,FlowErrorThreshold = 0.4,CellThreshold = 0);% CellThreshold = 0, ,  FlowErrorThreshold = 0.4
         fprintf('%d cells are found.\n',max(mask(:)));
         figure()
         % 使用labeloverlay函数显示图像
@@ -681,7 +692,7 @@ function plot_corrected(traces_corrected, traces, baseline, t, save_path)
 end
 %% Wavelet wavelet降噪
 Dnmethods = 'FDR';
-Dnlevel = 14;
+Dnlevel = 4;
 Wavename = 'bior6.8'; % 替代墨西哥帽的离散基
 fprintf('Wavelet Denoising...\n')
 traces_denoised = wdenoise(traces_corrected, Dnlevel ,DenoisingMethod=Dnmethods,Wavelet = Wavename);
@@ -1236,6 +1247,7 @@ save_filename = fullfile(save_path, '-1_workspace_variables.mat');
 
 % % 保存当前工作区中的所有变量到.mat文件
 clear movie;
+clear Mr;
 save(save_filename);
 
 
@@ -1337,3 +1349,727 @@ function plot_ROI_quad_signals(x, xV, calcium, integral_v, deconv_c, deconv_s, r
         end
     end
 end
+
+%% 在前面电钙raw trace基础上加上刺激时间窗口 by YHY
+% 读取刺激数据
+if ~exist('logs', 'var')
+    [logs_filename,logs_foldername] = uigetfile(save_path, '在Rec文件夹里选择日志文件 logs.mat');
+    load(fullfile(logs_foldername,logs_filename));
+end
+if ~exist('stimCfg', 'var')
+    [stimcfg_filename,stimcfg_foldername] = uigetfile(save_path, '在Method文件夹里选择刺激设定文件 stimcfg.mat');
+    load(fullfile(stimcfg_foldername,stimcfg_filename));
+end
+%% 
+
+% stim_frame = table2array(logs.sync(:,1));
+cam_frame = table2array(logs.sync(:,4));
+stim_framerate = round(1/stimCfg.ifi);
+stim_cycles = stimCfg.numorien;
+stim_duration_frame = stimCfg.duration * stim_framerate;
+stim_rest_frame = stimCfg.isi * stim_framerate;
+
+stim_range = zeros(stim_cycles,2);
+for i = 1:stim_cycles
+    stim_range(i,1) = cam_frame((i-1)*(stim_duration_frame + stim_rest_frame) + 1);
+    stim_range(i,2) = cam_frame((i-1)*(stim_duration_frame + stim_rest_frame) + stim_duration_frame);  % 得到每次刺激对应的起始/结束帧（每行一组）
+end
+
+x_stim = zeros(4,stim_cycles);
+y_stim = zeros(4,stim_cycles);
+for i = 1:stim_cycles
+    x_stim(1,i) = cam_frame((i-1)*(stim_duration_frame + stim_rest_frame) + 1);
+    x_stim(4,i) = x_stim(1,i);
+    x_stim(2,i) = cam_frame((i-1)*(stim_duration_frame + stim_rest_frame) + stim_duration_frame);
+    x_stim(3,i) = x_stim(2,i);
+end
+x_stim = x_stim/400;
+
+% 创建一个新图形窗口
+linemaxroi = 3; % 每行最多绘制3个ROI
+% 计算需要绘制的行数
+plotlines = floor(nrois/linemaxroi);
+if mod(nrois,linemaxroi) == 0 
+    plotlines = plotlines;
+else
+    plotlines = plotlines + 1;
+end
+
+xlimit = [0,max(max(x),max(x))+1];
+ylimitv = [min(SNR_traces,[],'all'),max(SNR_traces,[],'all')];
+ylimitca = [min(traces_ds_SNR,[],'all'),max(traces_ds_SNR,[],'all')];
+
+% 计算 Scale Bar 的长度 (根据数据量调整)
+% 假设 x 轴单位是秒，y 轴单位是 SNR 或 荧光强度
+x_bar_time = 2 ; %s
+x_bar_len = x_bar_time; % 10 
+y_bar_len_ca = 10; % 钙信号高度的 30%
+y_bar_len_v = 10;   % 电信号高度的 30%
+
+
+% 1. 预设图形属性提高渲染效率
+fig = figure('Color', 'w'); 
+
+% 预定义通用的坐标轴属性，避免在循环中重复设置字符串
+axisOpts = {'XTickLabel', [], 'YTickLabel', [], 'TickLength', [0 0], ...
+            'XColor', 'none', 'YColor', 'none', 'Box', 'off', 'Color', 'none'};
+
+for i = 0:nrois-1
+    % 计算当前 ROI 在网格中的位置
+    row = floor(i / linemaxroi);
+    col = mod(i, linemaxroi);
+    
+    % 计算电信号和钙信号的 subplot 索引
+    % 电信号在偶数行组，钙信号在奇数行组
+    ca_idx = row * 2 * linemaxroi + col + 1;
+    v_idx = ca_idx + linemaxroi;
+
+    % --- 绘制电信号 (Voltage SNR) ---
+    ax_v = subplot(plotlines * 2, linemaxroi, v_idx);
+    plot(xV, SNR_traces(:, i+1), 'r');
+    ylim(ylimitv);
+    xlim(xlimit);
+    hold on;
+    for j = 1:stim_cycles
+        y_stim(:,j) = [ylimitv(1) ylimitv(1) ylimitv(2) ylimitv(2)]';
+    end
+    fill(x_stim, y_stim, 'r', 'FaceColor', "#C0E6EB", 'EdgeColor', 'none', 'FaceAlpha', 0.3);
+    set(ax_v, 'YDir', 'reverse', axisOpts{:});
+
+    % --- 绘制钙信号 (Calcium SNR) ---
+    ax_ca = subplot(plotlines * 2, linemaxroi, ca_idx);
+    plot(x, traces_ds_SNR(:, i+1), 'g');
+    ylim(ylimitca);
+    xlim(xlimit);
+    hold on;
+    for j = 1:stim_cycles
+        y_stim(:,j) = [ylimitca(1) ylimitca(1) ylimitca(2) ylimitca(2)]';
+    end
+    fill(x_stim, y_stim, 'r', 'FaceColor', "#C0E6EB", 'EdgeColor', 'none', 'FaceAlpha', 0.3);
+    set(ax_ca, axisOpts{:});
+
+    % --- 绘制 Scale Bar (仅在特定位置绘制，例如第一个或最后一个) ---
+    % 建议：只在第一个 ROI 或者最后一个 ROI 绘制，避免遮挡数据
+    if i == nrois - 1
+        % 钙信号 Scale Bar
+        x_start = xlimit(2) - x_bar_len * 1.2;
+        y_start_ca = ylimitca(1) + (ylimitca(2) - ylimitca(1)) * 0.1;
+        
+        hold(ax_ca, 'on');
+        plot(ax_ca, [x_start, x_start + x_bar_len], [y_start_ca, y_start_ca], 'k', 'LineWidth', 1.5);
+        plot(ax_ca, [x_start + x_bar_len, x_start + x_bar_len], [y_start_ca, y_start_ca + y_bar_len_ca], 'k', 'LineWidth', 1.5);
+        text(ax_ca, x_start + x_bar_len/2, y_start_ca, [num2str(x_bar_time),' s'], 'VerticalAlignment','top','HorizontalAlignment','center', 'FontSize', 8);
+        text(ax_ca, x_start + x_bar_len, y_start_ca + y_bar_len_ca/2, [' SNR_{ca} = ' ,num2str(y_bar_len_ca) ], 'HorizontalAlignment','left', 'FontSize', 8);
+
+        % 电信号 Scale Bar
+        y_start_v = ylimitv(1) + (ylimitv(2) - ylimitv(1)) * 0.1;
+        hold(ax_v, 'on');
+        plot(ax_v, [x_start, x_start + x_bar_len], [y_start_v, y_start_v], 'k', 'LineWidth', 1.5);
+        plot(ax_v, [x_start + x_bar_len, x_start + x_bar_len], [y_start_v, y_start_v + y_bar_len_v], 'k', 'LineWidth', 1.5);
+        text(ax_v, x_start + x_bar_len, y_start_v + y_bar_len_v/2, [' SNR_{v} = ' ,num2str(y_bar_len_v) ], 'HorizontalAlignment','left', 'FontSize', 8);
+    end
+    
+    % 标注 ROI 编号 (可选：放在电信号上方)
+    title(ax_v, sprintf('ROI %d', i+1), 'FontSize', 7, 'FontWeight', 'normal');
+end
+
+
+
+fig_filename = fullfile(save_path, '2_stacked_trace_with_stim.fig');
+png_filename = fullfile(save_path, '2_stacked_trace_with_stim.png');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+%% --- 1. 数据准备 (确保已计算出 resp_ca, resp_v, dsi_ca, dsi_v) ---
+
+%% --- 1. 参数初始化与路径准备 ---
+% 假设 stim_cycles = stimCfg.numorien
+theta = stimCfg.orientations; 
+theta_rad = deg2rad(theta);
+p_theta = [theta_rad, theta_rad(1)]; % 用于极坐标闭合
+
+% 确保保存路径存在
+save_dir = fullfile(save_path, 'Comprehensive_Analysis');
+if ~exist(save_dir, 'dir'), mkdir(save_dir); end
+
+% 初始化用于显著性检验的绝对均值矩阵 [ROIs x Trials]
+all_stim_ca = zeros(nrois, stim_cycles);
+all_base_ca = zeros(nrois, stim_cycles);
+all_stim_v  = zeros(nrois, stim_cycles);
+all_base_v  = zeros(nrois, stim_cycles);
+
+resp_ca = zeros(nrois, stim_cycles);
+resp_v  = zeros(nrois, stim_cycles);
+
+% --- 2. 基于新逻辑确定帧范围 (Stim -> ISI) ---
+stim_range = zeros(stim_cycles, 2);
+rest_range = zeros(stim_cycles, 2); % 新增：存放刺激之后的 ISI 帧范围
+
+for i = 1:stim_cycles
+    % 1. 刺激帧索引 (直接使用您提供的逻辑)
+    idx_stim_start = (i-1)*(stim_duration_frame + stim_rest_frame) + 1;
+    idx_stim_end   = (i-1)*(stim_duration_frame + stim_rest_frame) + stim_duration_frame;
+    
+    stim_range(i,1) = cam_frame(idx_stim_start);
+    stim_range(i,2) = cam_frame(idx_stim_end);
+    
+    % 2. 静息(ISI)帧索引：紧接在刺激结束之后
+    idx_rest_start = idx_stim_end + 1;
+    idx_rest_end   = idx_rest_start + stim_rest_frame - 1;
+    
+    % 防止超出 cam_frame 总长度
+    idx_rest_end = min(idx_rest_end, length(cam_frame));
+    
+    rest_range(i,1) = cam_frame(idx_rest_start);
+    rest_range(i,2) = cam_frame(idx_rest_end);
+end
+
+% --- 3. 核心数据提取 ---
+fprintf('正在提取响应与静息数据 (ISI在刺激之后)...\n');
+for j = 1:stim_cycles
+    % 取出当前刺激和其后 ISI 的相机帧
+    start_f = stim_range(j, 1);
+    end_f   = stim_range(j, 2);
+    
+    base_start_f = rest_range(j, 1);
+    base_end_f   = rest_range(j, 2);
+    
+    for i = 1:nrois
+        % --- 钙信号提取 ---
+        ca_seg = traces_sensitivity(start_f:end_f, i);
+        ca_base_seg = traces_sensitivity(base_start_f:base_end_f, i);
+        
+        all_stim_ca(i, j) = mean(ca_seg);
+        all_base_ca(i, j) = mean(ca_base_seg);
+        resp_ca(i, j) = all_stim_ca(i, j) - all_base_ca(i, j); % 净响应
+        
+        % --- 电信号提取 (取反，使兴奋向上) ---
+        v_seg = -V_data.traces_sensitivity(start_f:end_f, i); 
+        v_base_seg = -V_data.traces_sensitivity(base_start_f:base_end_f, i);
+        
+        all_stim_v(i, j) = mean(v_seg);
+        all_base_v(i, j) = mean(v_base_seg);
+        resp_v(i, j) = all_stim_v(i, j) - all_base_v(i, j);    % 净响应
+    end
+end
+
+% 数据清洗：将负净响应归零（仅用于后续调谐计算）
+resp_ca(resp_ca < 0) = 0;
+resp_v(resp_v < 0) = 0;
+
+% --- 4. 计算 DSI & OSI (向量和法) ---
+fprintf('正在计算选择性指数...\n');
+dsi_ca = zeros(nrois, 1); osi_ca = zeros(nrois, 1);
+dsi_v  = zeros(nrois, 1); osi_v  = zeros(nrois, 1);
+
+for i = 1:nrois
+    % 钙信号
+    r_c = resp_ca(i,:);
+    if sum(r_c) > 0
+        dsi_ca(i) = abs(sum(r_c .* exp(1j * theta_rad)) / sum(r_c));
+        osi_ca(i) = abs(sum(r_c .* exp(1j * 2 * theta_rad)) / sum(r_c));
+    end
+    % 电信号
+    r_v = resp_v(i,:);
+    if sum(r_v) > 0
+        dsi_v(i) = abs(sum(r_v .* exp(1j * theta_rad)) / sum(r_v));
+        osi_v(i) = abs(sum(r_v .* exp(1j * 2 * theta_rad)) / sum(r_v));
+    end
+end
+
+% --- 5. 批量生成并保存综合图表 ---
+fprintf('正在生成 ROI 分析报告...\n');
+for i = 1:nrois
+    % 配对 T 检验 (比较刺激期与随后的 ISI 期)
+    [~, p_ca] = ttest(all_base_ca(i,:), all_stim_ca(i,:));
+    [~, p_v]  = ttest(all_base_v(i,:), all_stim_v(i,:));
+    
+    h_fig = figure('Color', 'w', 'Position', [100, 50, 1200, 900], 'Visible', 'off'); 
+    
+    % --- 子图 A: 原始轨迹图 ---
+    subplot(3, 2, [1, 2]); 
+    yyaxis left
+    plot(xV, -V_data.traces_sensitivity(:, i), 'r', 'LineWidth', 0.5); 
+    ylabel('Inverted Volt SNR'); set(gca, 'YColor', 'r');
+    hold on;
+    yyaxis right
+    plot(x, traces_sensitivity(:, i), 'g', 'LineWidth', 1.2); 
+    ylabel('Calcium SNR'); set(gca, 'YColor', 'g');
+    
+    % 绘制刺激阴影区 (根据 stim_range 精确绘制)
+    yl = ylim;
+    for j = 1:stim_cycles
+        % 将帧转换为时间作图 (假设 x 和 xV 对应)
+        t_start = x(stim_range(j, 1));
+        t_end   = x(stim_range(j, 2));
+        fill([t_start t_start t_end t_end], [yl(1) yl(2) yl(2) yl(1)], 'b', 'FaceAlpha', 0.1, 'EdgeColor', 'none');
+    end
+    title(['ROI ' num2str(i) ' Raw Traces (Blue shaded: Stimulus ON)']);
+    xlabel('Time (s)'); grid on;
+
+    % --- 子图 B: 极坐标调谐图 ---
+    subplot(3, 2, 3);
+    p_data_ca = [resp_ca(i,:), resp_ca(i,1)];
+    p_data_v  = [resp_v(i,:), resp_v(i,1)];
+    polarplot(p_theta, p_data_ca/max(p_data_ca+eps), 'g-o', 'LineWidth', 1.5, 'MarkerFaceColor', 'g'); hold on;
+    polarplot(p_theta, p_data_v/max(p_data_v+eps), 'r-o', 'LineWidth', 1.5, 'MarkerFaceColor', 'r');
+    title('Direction Preference (Norm.)');
+    legend({'Calcium', 'Voltage (Inv)'}, 'Location', 'northeastoutside', 'FontSize', 8);
+
+    % --- 子图 C: 调谐曲线与指数 ---
+    subplot(3, 2, 4);
+    plot(theta, resp_ca(i,:)/max(resp_ca(i,:)+eps), 'g-s', 'LineWidth', 1.2); hold on;
+    plot(theta, resp_v(i,:)/max(resp_v(i,:)+eps), 'r-s', 'LineWidth', 1.2);
+    
+    txt = {sprintf('DSI (Ca): %.2f', dsi_ca(i)), ...
+           sprintf('OSI (Ca): %.2f', osi_ca(i)), ...
+           sprintf('DSI (V):  %.2f', dsi_v(i)), ...
+           sprintf('OSI (V):  %.2f', osi_v(i))};
+    text(0.05, 0.95, txt, 'Units', 'normalized', 'VerticalAlignment', 'top', 'FontSize', 9, 'EdgeColor', 'k', 'BackgroundColor', 'w');
+    xlabel('Direction (deg)'); ylabel('Norm. Net Response');
+    title('Orientation Tuning Curve');
+    xticks(theta); xtickangle(45); grid on;
+    
+    % --- 子图 D & E: 显著性检验 (Rest vs Stim) ---
+    % 钙信号
+    subplot(3, 2, 5);
+    ca_comp_data = [all_base_ca(i,:)', all_stim_ca(i,:)'];
+    plot([1, 2], ca_comp_data', 'Color', [0.7 0.9 0.7], 'Marker', 'o', 'MarkerFaceColor', 'g'); hold on;
+    errorbar([1, 2], mean(ca_comp_data), std(ca_comp_data)/sqrt(stim_cycles), 'k', 'LineWidth', 2);
+    xlim([0.5 2.5]); xticks([1, 2]); xticklabels({'ISI (Post-Stim)', 'Stim'});
+    ylabel('Mean SNR'); 
+    sig_str = sprintf('P = %.3f', p_ca);
+    if p_ca < 0.05, sig_str = [sig_str ' *']; end; if p_ca < 0.01, sig_str = [sig_str '*']; end
+    title(['Calcium Responsiveness (', sig_str, ')']); grid on;
+
+    % 电信号
+    subplot(3, 2, 6);
+    v_comp_data = [all_base_v(i,:)', all_stim_v(i,:)'];
+    plot([1, 2], v_comp_data', 'Color', [0.9 0.7 0.7], 'Marker', 'o', 'MarkerFaceColor', 'r'); hold on;
+    errorbar([1, 2], mean(v_comp_data), std(v_comp_data)/sqrt(stim_cycles), 'k', 'LineWidth', 2);
+    xlim([0.5 2.5]); xticks([1, 2]); xticklabels({'ISI (Post-Stim)', 'Stim'});
+    ylabel('Mean Inverted SNR'); 
+    sig_str_v = sprintf('P = %.3f', p_v);
+    if p_v < 0.05, sig_str_v = [sig_str_v ' *']; end; if p_v < 0.01, sig_str_v = [sig_str_v '*']; end
+    title(['Voltage Responsiveness (', sig_str_v, ')']); grid on;
+    
+    % 保存并关闭
+    save_name = fullfile(save_dir, ['ROI_' num2str(i) '_Analysis.png']);
+    saveas(h_fig, save_name);
+    close(h_fig); 
+end
+
+fprintf('所有 %d 个 ROI 处理完毕！图片已保存至: %s\n', nrois, save_dir);
+%% 
+%% 高级调谐曲线分析 (基于 Li et al., 2008 & Niell & Stryker, 2008)
+
+%% --- 1. 参数与窗口定义 ---
+num_oris = stimCfg.numorien;
+theta = stimCfg.orientations; 
+theta_rad = deg2rad(theta);
+hanning_kernel = [0.5 1 0.5]; % 文献指定的平滑核
+
+% 定义响应计算的帧范围（第2到第8帧）
+frame_range = stim_rest_frame;
+
+% 初始化结果
+resp_df_f = zeros(nrois, num_oris); % 存储每个方向的平均 Delta F/F
+di_index = zeros(nrois, 1);        % 方向指数
+
+% --- 2. 按照文献算法提取响应 ---
+fprintf('正在执行 Delta F/F 向量化提取...\n');
+for j = 1:num_oris
+    % 获取刺激和参考期的帧索引
+    s_start = stim_range(j,1);
+    r_start = rest_range(j,1); % 假设 rest 在 stim 之后（按你之前的要求）
+    
+    for i = 1:nrois
+        % 提取第 2 到 8 帧
+        f_stim = mean(traces_sensitivity(s_start + frame_range - 1, i));
+        f_ref  = mean(traces_sensitivity(r_start + frame_range - 1, i));
+        
+        % 计算百分比增加量 (Equation 1)
+        resp_df_f(i, j) = ((f_stim - f_ref) / f_ref) * 100;
+    end
+end
+
+% --- 3. 平滑与方向指数计算 ---
+fprintf('正在进行 Hanning 平滑与 DI 计算...\n');
+smoothed_resp = zeros(size(resp_df_f));
+for i = 1:nrois
+    % 循环平滑 (考虑到 0-360 是周期的)
+    raw_curve = resp_df_f(i, :);
+    extended_curve = [raw_curve(end), raw_curve, raw_curve(1)];
+    temp_smooth = conv(extended_curve, hanning_kernel, 'valid') / sum(hanning_kernel);
+    smoothed_resp(i, :) = temp_smooth;
+    
+    % 寻找最优方向 (Preferred Direction)
+    [r_pref, pref_idx] = max(smoothed_resp(i, :));
+    theta_pref = theta(pref_idx);
+    
+    % 寻找相反方向 (Opposite Direction, +180度)
+    opp_angle = mod(theta_pref + 180, 360);
+    [~, opp_idx] = min(abs(theta - opp_angle));
+    r_opp = smoothed_resp(i, opp_idx);
+    
+    % 计算方向指数 (Direction Index, Eq. 5)
+    di_index(i) = (r_pref - r_opp) / (r_pref + r_opp + eps);
+end
+
+% --- 4. 向量空间计算 (DSI/OSI 矢量法) ---
+dsi_vect = zeros(nrois, 1);
+osi_vect = zeros(nrois, 1);
+for i = 1:nrois
+    r = resp_df_f(i, :);
+    % 方向向量 (Eq. 3)
+    dsi_vect(i) = abs(sum(r .* exp(1j * theta_rad)) / sum(r));
+    % 取向向量 (Eq. 2, 角度翻倍)
+    osi_vect(i) = abs(sum(r .* exp(1j * 2 * theta_rad)) / sum(r));
+end
+
+% --- 5. 综合绘图展示 ---
+for i = 1:nrois
+    h_fig = figure('Color', 'w', 'Position', [100, 100, 1000, 450], 'Visible', 'on');
+    
+    % 子图 1: 原始与平滑调谐曲线
+    subplot(1, 2, 1);
+    plot(theta, resp_df_f(i,:), 'ko--', 'MarkerFaceColor', 'w', 'DisplayName', 'Raw Delta F/F'); hold on;
+    plot(theta, smoothed_resp(i,:), 'r-', 'LineWidth', 2, 'DisplayName', 'Hanning Smoothed');
+    xlabel('Direction (deg)'); ylabel('\DeltaF/F (%)');
+    title(['ROI ' num2str(i) ' Tuning Curve']);
+    xticks(theta); xtickangle(45); grid on;
+    legend;
+
+    % 子图 2: 极坐标图与 DI/DSI 标注
+    subplot(1, 2, 2);
+    p_theta = [theta_rad, theta_rad(1)];
+    p_data = [smoothed_resp(i,:), smoothed_resp(i,1)];
+    polarplot(p_theta, p_data, 'r-', 'LineWidth', 2);
+    
+    % 标注算法结果
+    res_str = {sprintf('DSI (Vect): %.2f', dsi_vect(i)), ...
+               sprintf('OSI (Vect): %.2f', osi_vect(i)), ...
+               sprintf('DI (Pref/Opp): %.2f', di_index(i))};
+    text(1.2, 1, res_str, 'Units', 'normalized', 'FontSize', 10, 'FontWeight', 'bold');
+    title('Spatial Tuning (Smoothed)');
+    
+    % 自动保存
+    saveas(h_fig, fullfile(save_dir, ['ROI_' num2str(i) '_Advanced_Analysis.png']));
+end
+%% %% 高级调谐曲线分析 - 发放频率版 (Firing Rate Analysis)
+
+%% 高级调谐曲线分析 - 发放频率与显著性对比版
+
+%% --- 1. 参数与路径准备 ---
+if ~exist('fs_v', 'var'), fs_v = 400; end % 请根据实际采样率修改
+num_oris = stimCfg.numorien;
+theta = stimCfg.orientations; 
+theta_rad = deg2rad(theta);
+cam_frame = table2array(logs.sync(:,4));
+stim_framerate = round(1/stimCfg.ifi);
+stim_cycles = stimCfg.numorien;
+stim_duration_frame = stimCfg.duration * stim_framerate;
+stim_rest_frame = stimCfg.isi * stim_framerate;
+hanning_kernel = [0.5 1 0.5]; 
+stim_range = zeros(stim_cycles,2);
+for i = 1:stim_cycles
+    stim_range(i,1) = cam_frame((i-1)*(stim_duration_frame + stim_rest_frame) + 1);
+    stim_range(i,2) = cam_frame((i-1)*(stim_duration_frame + stim_rest_frame) + stim_duration_frame);  % 得到每次刺激对应的起始/结束帧（每行一组）
+end
+% 初始化结果矩阵
+all_fr_stim = zeros(nrois, num_oris); % 记录每个方向的刺激频率
+all_fr_rest = zeros(nrois, num_oris); % 记录每个方向的静息频率
+resp_rate   = zeros(nrois, num_oris); % 净增加频率 (Stim - Rest)
+
+% --- 2. 统计每个 Trial 的发放率 ---
+fprintf('正在统计峰值并发放频率...\n');
+for i = 1:nrois
+    roi_peaks = peaks_index{i}; % 当前 ROI 的峰值索引列表
+    
+    for j = 1:num_oris
+        % 获取帧范围
+        s_range = stim_range(j,1):stim_range(j,2);
+        r_range = rest_range(j,1):rest_range(j,2);
+        
+        % 计算时间长度 (s)
+        dur_s = length(s_range) / fs_v;
+        dur_r = length(r_range) / fs_v;
+        
+        % 统计落在区间内的峰值数
+        c_stim = sum(roi_peaks >= s_range(1) & roi_peaks <= s_range(end));
+        c_rest = sum(roi_peaks >= r_range(1) & roi_peaks <= r_range(end));
+        
+        % 计算频率 (Hz)
+        all_fr_stim(i, j) = c_stim / dur_s;
+        all_fr_rest(i, j) = c_rest / dur_r;
+        
+        % 净响应 (用于调谐曲线)
+        resp_rate(i, j) = max(0, all_fr_stim(i, j) - all_fr_rest(i, j));
+    end
+end
+
+% --- 3. 批量生成报告 (包含显著性检验) ---
+for i = 1:nrois
+    % 统计检验：对比该 ROI 在所有方向上的 Rest vs Stim 频率
+    % 使用配对 T 检验
+    [~, p_val] = ttest(all_fr_rest(i, :), all_fr_stim(i, :));
+    
+    % 计算 DSI/DI (基于之前平滑后的逻辑)
+    raw_r = resp_rate(i, :);
+    ext_r = [raw_r(end), raw_r, raw_r(1)];
+    sm_r  = conv(ext_r, hanning_kernel, 'valid') / sum(hanning_kernel);
+    
+    [r_pref, idx] = max(sm_r);
+    opp_idx = mod(idx + round(num_oris/2) - 1, num_oris) + 1;
+    di_v = (r_pref - sm_r(opp_idx)) / (r_pref + sm_r(opp_idx) + eps);
+    
+    % --- 绘图 ---
+    h_fig = figure('Color', 'w', 'Position', [100, 100, 1200, 500]);
+    
+    % 子图 1: 频率显著性对比图 (Slope Chart)
+    subplot(1, 3, 1);
+    plot([1, 2], [all_fr_rest(i,:); all_fr_stim(i,:)], 'Color', [0.8 0.8 0.8], 'Marker', 'o'); 
+    hold on;
+    % 画出均值线
+    errorbar([1, 2], [mean(all_fr_rest(i,:)), mean(all_fr_stim(i,:))], ...
+             [std(all_fr_rest(i,:))/sqrt(num_oris), std(all_fr_stim(i,:))/sqrt(num_oris)], ...
+             'k-s', 'LineWidth', 2, 'MarkerSize', 10, 'MarkerFaceColor', 'k');
+    xlim([0.5 2.5]); xticks([1, 2]); xticklabels({'ISI (Rest)', 'Stimulus'});
+    ylabel('Firing Rate (Hz)');
+    title(sprintf('Responsiveness (P = %.4f)', p_val));
+    grid on;
+
+    % 子图 2: 调谐曲线
+    subplot(1, 3, 2);
+    bar(theta, resp_rate(i,:), 'FaceColor', [0.9 0.9 0.9], 'EdgeColor', 'none'); hold on;
+    plot(theta, sm_r, 'r-o', 'LineWidth', 2);
+    xlabel('Direction (deg)'); ylabel('\Delta Firing Rate (Hz)');
+    title('Tuning Curve');
+    xticks(theta); xtickangle(45);
+
+    % 子图 3: 极坐标
+    subplot(1, 3, 3);
+    p_theta = [theta_rad, theta_rad(1)];
+    p_data  = [sm_r, sm_r(1)];
+    polarplot(p_theta, p_data, 'r-o', 'LineWidth', 2);
+    title(sprintf('DI: %.2f', di_v));
+    
+    % 保存
+    saveas(h_fig, fullfile(save_dir, ['ROI_' num2str(i) '_Spike_Significance.png']));
+end
+
+%% % 每行一个 ROI
+linemaxroi = 1;
+
+% 计算需要绘制的行数
+plotlines = nrois;
+
+% x 轴范围：兼容 x 和 xV
+xlimit = [0, max([max(x(:)), max(xV(:))]) + 1];
+
+% 电信号反转
+v_traces_flip = -SNR_traces;
+
+% 电钙共用 y 轴范围
+ylimit_all = [ ...
+    min([v_traces_flip(:); traces_ds_SNR(:)]), ...
+    max([v_traces_flip(:); traces_ds_SNR(:)]) ...
+];
+
+% Scale bar
+x_bar_time = 2;   % s
+x_bar_len = x_bar_time;
+y_bar_len_ca = 10;
+y_bar_len_v  = 10;
+
+% 创建图形
+fig = figure('Color', 'w', 'Position', [100, 100, 1200, 220*nrois]);
+
+% 通用坐标轴属性
+axisOpts = {'XTickLabel', [], 'YTickLabel', [], 'TickLength', [0 0], ...
+            'XColor', 'none', 'YColor', 'none', 'Box', 'off', 'Color', 'none'};
+
+for i = 0:nrois-1
+    ax = subplot(plotlines, 1, i+1);
+    hold(ax, 'on');
+
+    % --- 先画电信号 ---
+    plot(ax, xV, v_traces_flip(:, i+1), 'r', 'LineWidth', 1);
+
+    % --- 再画钙信号，让钙覆盖在电上面 ---
+    plot(ax, x, traces_ds_SNR(:, i+1), 'g', 'LineWidth', 1);
+
+    % 坐标轴设置
+    xlim(ax, xlimit);
+    ylim(ax, ylimit_all);
+    set(ax, axisOpts{:});
+
+    % 只在最后一个 ROI 画 scale bar
+    if i == nrois - 1
+        x_start = xlimit(2) - x_bar_len * 1.2;
+        y_start = ylimit_all(1) + (ylimit_all(2) - ylimit_all(1)) * 0.1;
+
+        % 时间标尺
+        plot(ax, [x_start, x_start + x_bar_len], [y_start, y_start], ...
+            'k', 'LineWidth', 1.5);
+
+        % 电信号标尺
+        plot(ax, [x_start, x_start], ...
+            [y_start, y_start + y_bar_len_v], ...
+            'r', 'LineWidth', 1.5);
+
+        % 钙信号标尺
+        plot(ax, [x_start + x_bar_len, x_start + x_bar_len], ...
+            [y_start, y_start + y_bar_len_ca], ...
+            'g', 'LineWidth', 1.5);
+
+        % 文字
+        text(ax, x_start + x_bar_len/2, y_start, ...
+            [num2str(x_bar_time), ' s'], ...
+            'VerticalAlignment', 'top', ...
+            'HorizontalAlignment', 'center', ...
+            'FontSize', 8);
+
+        text(ax, x_start + 0.2, y_start + y_bar_len_v/2, ...
+            ['SNR_{v} = ', num2str(y_bar_len_v)], ...
+            'Color', 'r', ...
+            'HorizontalAlignment', 'left', ...
+            'FontSize', 8);
+
+        text(ax, x_start + x_bar_len + 0.2, y_start + y_bar_len_ca/2, ...
+            ['SNR_{ca} = ', num2str(y_bar_len_ca)], ...
+            'Color', 'g', ...
+            'HorizontalAlignment', 'left', ...
+            'FontSize', 8);
+    end
+
+    % ROI 标题
+    title(ax, sprintf('ROI %d', i+1), 'FontSize', 8, 'FontWeight', 'normal');
+
+    hold(ax, 'off');
+end
+
+fig_filename = fullfile(save_path, '2_stacked_trace_overlap_ca_on_top.fig');
+png_filename = fullfile(save_path, '2_stacked_trace_overlap_ca_on_top.png');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');
+%% 刺激overlap
+% 每行一个 ROI
+linemaxroi = 1;
+
+% 计算需要绘制的行数
+plotlines = nrois;
+
+% x 轴范围：兼容 x 和 xV
+xlimit = [0, max([max(x(:)), max(xV(:))]) + 1];
+
+% 电信号反转
+v_traces_flip = -SNR_traces;
+
+% 电钙共用 y 轴范围
+ylimit_all = [ ...
+    min([v_traces_flip(:); traces_ds_SNR(:)]), ...
+    max([v_traces_flip(:); traces_ds_SNR(:)]) ...
+];
+
+% Scale bar
+x_bar_time = 2;   % s
+x_bar_len = x_bar_time;
+y_bar_len_ca = 10;
+y_bar_len_v  = 10;
+
+% ===== 刺激参数 =====
+rest_time = 2;      % 休息 2 s
+stim_time = 1;      % 刺激 1 s
+cycle_time = rest_time + stim_time;
+
+% 创建图形
+fig = figure('Color', 'w', 'Position', [100, 100, 1200, 220*nrois]);
+
+% 通用坐标轴属性
+axisOpts = {'XTickLabel', [], 'YTickLabel', [], 'TickLength', [0 0], ...
+            'XColor', 'none', 'YColor', 'none', 'Box', 'off', 'Color', 'none'};
+
+for i = 0:nrois-1
+    ax = subplot(plotlines, 1, i+1);
+    hold(ax, 'on');
+
+    % ===== 先画刺激背景 =====
+    % 每个周期: [0,2)休息, [2,3)刺激; [3,5)休息, [5,6)刺激 ...
+    stim_starts = rest_time:cycle_time:xlimit(2);
+    for k = 1:length(stim_starts)
+        stim_start = stim_starts(k);
+        stim_end = min(stim_start + stim_time, xlimit(2));
+
+        if stim_start < xlimit(2)
+            patch(ax, ...
+                [stim_start stim_end stim_end stim_start], ...
+                [ylimit_all(1) ylimit_all(1) ylimit_all(2) ylimit_all(2)], ...
+                [0 0 1], ...                      % 蓝色
+                'FaceAlpha', 0.12, ...           % 透明度
+                'EdgeColor', 'none');
+        end
+    end
+
+    % --- 先画电信号 ---
+    plot(ax, xV, v_traces_flip(:, i+1), 'r', 'LineWidth', 1);
+
+    % --- 再画钙信号，让钙覆盖在电上面 ---
+    plot(ax, x, traces_ds_SNR(:, i+1), 'g', 'LineWidth', 1);
+
+    % 坐标轴设置
+    xlim(ax, xlimit);
+    ylim(ax, ylimit_all);
+    set(ax, axisOpts{:});
+
+    % 只在最后一个 ROI 画 scale bar
+    if i == nrois - 1
+        x_start = xlimit(2) - x_bar_len * 1.2;
+        y_start = ylimit_all(1) + (ylimit_all(2) - ylimit_all(1)) * 0.1;
+
+        % 时间标尺
+        plot(ax, [x_start, x_start + x_bar_len], [y_start, y_start], ...
+            'k', 'LineWidth', 1.5);
+
+        % 电信号标尺
+        plot(ax, [x_start, x_start], ...
+            [y_start, y_start + y_bar_len_v], ...
+            'r', 'LineWidth', 1.5);
+
+        % 钙信号标尺
+        plot(ax, [x_start + x_bar_len, x_start + x_bar_len], ...
+            [y_start, y_start + y_bar_len_ca], ...
+            'g', 'LineWidth', 1.5);
+
+        % 文字
+        text(ax, x_start + x_bar_len/2, y_start, ...
+            [num2str(x_bar_time), ' s'], ...
+            'VerticalAlignment', 'top', ...
+            'HorizontalAlignment', 'center', ...
+            'FontSize', 8);
+
+        text(ax, x_start + 0.2, y_start + y_bar_len_v/2, ...
+            ['SNR_{v} = ', num2str(y_bar_len_v)], ...
+            'Color', 'r', ...
+            'HorizontalAlignment', 'left', ...
+            'FontSize', 8);
+
+        text(ax, x_start + x_bar_len + 0.2, y_start + y_bar_len_ca/2, ...
+            ['SNR_{ca} = ', num2str(y_bar_len_ca)], ...
+            'Color', 'g', ...
+            'HorizontalAlignment', 'left', ...
+            'FontSize', 8);
+    end
+
+    % ROI 标题
+    title(ax, sprintf('ROI %d', i+1), 'FontSize', 8, 'FontWeight', 'normal');
+
+    hold(ax, 'off');
+end
+
+fig_filename = fullfile(save_path, '2_stacked_trace_overlap_ca_on_top_withStim.fig');
+png_filename = fullfile(save_path, '2_stacked_trace_overlap_ca_on_top_withStim.png');
+
+saveas(gcf, fig_filename, 'fig');
+saveas(gcf, png_filename, 'png');

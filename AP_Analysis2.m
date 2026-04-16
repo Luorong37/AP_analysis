@@ -27,7 +27,7 @@
 % See also calculate_firing_rate, calculate_FWHM, create_map, calculate_SNR, fit_exp1, highpassfilter, select_ROI
 
 
-clear; clc;
+clear all; clc;
 %## 写一个画图的段落
 %% Loading raw data
 nowtime = string(datetime( 'now'));
@@ -38,8 +38,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'V:\Luorong\Invivo\26.01.08 invivo dualcolor-121\Cam2_Rec4_5%red_stim_2026-01-08 22-19-33\';
-file = 'Cycle1';  % must add format.do not add '\' at last
+folder_path = 'E:\1_Data\YHY\260406_WT-POA_NAVI3-ST_sCy3\Methods3_default\Rec8_2026-04-06_23-00-01\Cycle1';
+file = 'Cam1_Green25%_60s';  % must add format.do not add '\' at last
 bin = 1;
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
@@ -145,7 +145,7 @@ end
 % --- 1. 配置参数 ---
 apply_only = 0;      % 是否使用之前的运动校正shift参数
 loadMC     = 0;      % 是否读取之前的运动校正结果
-Norigid    = 0;      % 是否开启非刚性校正
+Norigid    = 1;      % 是否开启非刚性校正
 hp         = 1;      % 是否开启高通滤波（用于辅助估算位移）默认开启
 template   = [];     % 手动输入校正模板 mean(movie(:,:,  ),3)
 plotmetric = 1;      % 是否作图
@@ -154,7 +154,7 @@ dssave     = 1;      % 是否降采样保存
 % NoRMCorre 基础配置
 init_batch = 100; % can be modified manually
 
-options_r = NoRMCorreSetParms('d1',ncols,'d2',nrows,'bin_width',200,'max_shift',30,'us_fac',30,'iter',1,'correct_bidir',false);
+options_r = NoRMCorreSetParms('d1',ncols,'d2',nrows,'bin_width',200,'max_shift',50,'us_fac',30,'iter',1,'correct_bidir',false);
 options_nr = NoRMCorreSetParms('d1',ncols,'d2',nrows,'bin_width',200,'max_shift',30,'us_fac',30, ...
     'grid_size',[128,128],'overlap_pre',[32,32],'mot_uf',4,'max_dev', [5,5],'iter',1,'correct_bidir',false);
 
@@ -293,7 +293,9 @@ if plotmetric
     subplot(312); plot(t,cY,t,cM1);
     title('Correlation coefficients on filtered movie','fontsize',14,'fontweight','bold');
     legend('raw','rigid');
+     set(gca,'Xtick',[],'Ylim',[0.8,1])
     subplot(313); plot(t,cYf,t,cM1f);
+     set(gca,'Xtick',[],'Ylim',[0.8,1])
     title('Correlation coefficients on full movie','fontsize',14,'fontweight','bold');
     legend('raw','rigid');
     saveas(gcf,fullfile(save_path,'rigidshifts.fig'))
@@ -303,9 +305,8 @@ if plotmetric
 
         [cM2,mM2,vM2] = motion_metrics(M2,options_nr.max_shift);
         [cM2f,mM2f,vM2f] = motion_metrics(Mpr,options_nr.max_shift);
-
         shifts_nrplot = cat(ndims(shifts_nr(1).shifts)+1,shifts_nr(:).shifts);
-        shifts_nrplot = reshape(shifts_nrplot,[],ndims(Y)-1,T);
+        shifts_nrplot = reshape(shifts_nrplot,[],ndims(Y)-1,nframes);
         shifts_x = squeeze(shifts_nrplot(:,2,:))';
         shifts_y = squeeze(shifts_nrplot(:,1,:))';
 
@@ -315,10 +316,12 @@ if plotmetric
 
         figure;
         ax1 = subplot(311); plot(t,cY,t,cM1,t,cM2); legend('raw data','rigid','non-rigid'); title('correlation coefficients for filtered data','fontsize',14,'fontweight','bold')
-        set(gca,'Xtick',[],'XLim',[0,T-3])
-        ax2 = subplot(312); plot(shifts_x); hold on; plot(shifts_r(:,2),'--k','linewidth',2); title('displacements along x','fontsize',14,'fontweight','bold')
-        set(gca,'Xtick',[])
-        ax3 = subplot(313); plot(shifts_y); hold on; plot(shifts_r(:,1),'--k','linewidth',2); title('displacements along y','fontsize',14,'fontweight','bold')
+        set(gca,'Xtick',[],'XLim',[0,nframes-3])
+        ax2 = subplot(312); plot(shifts_x); hold on; plot( shifts_rplot(:,2),'--k','linewidth',2); title('displacements along x','fontsize',14,'fontweight','bold')
+        set(gca,'Xtick',[],'Ylim',[0,1])
+ 
+        ax3 = subplot(313); plot(shifts_y); hold on; plot( shifts_rplot(:,1),'--k','linewidth',2); title('displacements along y','fontsize',14,'fontweight','bold')
+        set(gca,'Xtick',[],'Ylim',[0,1])
         xlabel('timestep','fontsize',14,'fontweight','bold')
         linkaxes([ax1,ax2,ax3],'x')
         saveas(gcf,fullfile(save_path,'nonrigidshifts.fig'))
@@ -348,6 +351,13 @@ fprintf('Creating a map...\n')
 mapbin = 4; % defined bin = 4
 
 [quick_map] = create_map(movie, nrows, ncols, mapbin);
+
+% 暂且用这四行抵消一下相机第一帧第一行65535的bug
+quick_map(1,:) = quick_map(5,:);
+quick_map(2,:) = quick_map(5,:);
+quick_map(3,:) = quick_map(5,:);
+quick_map(4,:) = quick_map(5,:);
+
 map = quick_map;
 
 % Visualize correlation coefficients as heatmap
@@ -786,17 +796,18 @@ saveas(gcf, png_filename, 'png');
 %% AP Processing %%
 
 parts = 1;
-MinPeakProminence_factor = 0.6;
-MinPeakDistance_factor = 80;
+MinPeakProminence_factor = 0;
+MinPeakDistance_factor = 0;
+MinPeakHeight =40;
 
-findmode = 'cr';% find via denoised traces
-%findmode = 'cr';% find via bleach corrected traces
+findmode = 'cr';% find via bleach corrected traces
+%findmode = 'dn';% find via denoised traces
 
 % Peak finding
 switch findmode
     case 'cr'
         [peaks_index, peaks_amplitude, peaks_polarity, parts_results] = peak_finding_auto(traces_corrected , save_path,'parts',parts, ...
-            'MinPeakProminence_factor',MinPeakProminence_factor,'MinPeakHeight', 0, 'MinPeakDistance_factor' , MinPeakDistance_factor);
+            'MinPeakProminence_factor',MinPeakProminence_factor,'MinPeakHeight', MinPeakHeight, 'MinPeakDistance_factor' , MinPeakDistance_factor);
     case 'dn'
         [peaks_index, peaks_amplitude, peaks_polarity, parts_results] = peak_finding_auto(traces_denoised , save_path,'parts',parts, ...
             'MinPeakProminence_factor',MinPeakProminence_factor,'RawTraces',traces_corrected,'MinPeakHeight', 0, 'MinPeakDistance_factor' , MinPeakDistance_factor);

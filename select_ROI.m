@@ -269,6 +269,10 @@ for i = 1:num_rois
     trace = mean(movie(mask(:), :), 1);  % 计算平均强度
     boundary = cell2mat(bwboundaries(mask));  % 提取边界
     traces = [traces, trace'];  % 保存轨迹
+
+    % if isempty(boundary)
+    %     continue
+    % end
     
     % --- 在图像 (image_axe) 上绘制 ---
     plot(boundary(:, 2), boundary(:, 1), 'Color', color, 'LineWidth', 2, 'Parent', image_axe);

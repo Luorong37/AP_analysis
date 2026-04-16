@@ -469,7 +469,7 @@ fs = 10; % 采样频率 (Hz)
 fc = 1; % 截止频率 (Hz)
 [b, a] = butter(4, fc/(fs/2)); % 4阶Butterworth低通滤波器
 traces_smoothed_ca = zeros(size(traces_corrected_ca));  % 使用双向滤波器进行零相位滤波
-SNR_traces_ca = zeros(size(tr aces_corrected_ca));
+SNR_traces_ca = zeros(size(traces_corrected_ca));
 
 for i = 1 : nrois
     % Calculate SNR
