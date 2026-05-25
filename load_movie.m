@@ -289,6 +289,19 @@ function [movie, nframes] = readstacktifs(file_path, asVector)
 
     % 预分配
     movie = zeros(nrows, ncols, nframes, className);
+    pool = gcp('nocreate');
+    if isempty(pool) || ~contains(class(pool), 'ProcessPool')
+        fprintf('Reading multi-frame TIFF via serial read... %d frames\n', nframes);
+        t0 = tic;
+        for frame_idx = 1:nframes
+            movie(:,:,frame_idx) = imread(file_path, frame_idx, 'Info', info);
+        end
+        fprintf('Finished loading after %d s, ', round(toc(t0)));
+        if asVector
+            movie = reshape(movie, nrows*ncols, nframes);
+        end
+        return;
+    end
     
     
     % 直接读单个tiff
@@ -409,6 +422,17 @@ function [movie, nframes] = readsingletifs(file_sortedaddress, tifsize)
     nrows   = tifsize(2);
     ncols   = tifsize(1);
     movie   = zeros(nrows*ncols, nframes, 'uint16');
+    pool = gcp('nocreate');
+    if isempty(pool) || ~contains(class(pool), 'ProcessPool')
+        fprintf('Reading single TIFFs via serial read... %d frames\n', nframes);
+        t0 = tic;
+        for frame_idx = 1:nframes
+            current_image = imread(file_sortedaddress{frame_idx});
+            movie(:,frame_idx) = uint16(reshape(current_image, nrows*ncols, 1));
+        end
+        fprintf('Loaded %d frames in %.2f s\n', nframes, toc(t0));
+        return;
+    end
 
     fprintf('Reading single TIFF via read (parallel)… %d frames\n', nframes);
 

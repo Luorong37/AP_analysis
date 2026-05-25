@@ -14,9 +14,14 @@ AP_window_width = floor((numel(AP_amp)-1)/2);
 % baseline = baseline .* polarity +1 - polarity;
 minleft = min(AP_amp(1:AP_window_width));
 minright = min(AP_amp(AP_window_width+2:end));
-minleftindex = find(AP_amp(1:AP_window_width) == minleft);
-minrightindex = find(AP_amp(AP_window_width+2:end) == minright)+AP_window_width+1;
+minleftindex = find(AP_amp(1:AP_window_width) == minleft, 1, 'last');
+minrightindex = find(AP_amp(AP_window_width+2:end) == minright, 1, 'first')+AP_window_width+1;
 b = 0;
+
+if isempty(minleftindex) || isempty(minrightindex) || minrightindex == minleftindex
+    FWHM = NaN;
+    return;
+end
 
 k = (minright-minleft)/(minrightindex-minleftindex);
 

@@ -48,11 +48,21 @@ if ~isempty(save_path)
     save_list = dir(fullfile(save_path, '*.tif'));
     save_names = {save_list.name};
     frames = 0;
-    parfor i = 1: length(save_list)
-        t = Tiff(fullfile(save_path,save_names{i}));
-        tframes = numel(imfinfo(t.FileName));
-        frames = frames + tframes;
-        t.close;
+    [~, useParallelStack] = ensure_local_parallel_pool([], 'create_tiff_stack');
+    if useParallelStack
+        parfor i = 1: length(save_list)
+            t = Tiff(fullfile(save_path,save_names{i}));
+            tframes = numel(imfinfo(t.FileName));
+            frames = frames + tframes;
+            t.close;
+        end
+    else
+        for i = 1: length(save_list)
+            t = Tiff(fullfile(save_path,save_names{i}));
+            tframes = numel(imfinfo(t.FileName));
+            frames = frames + tframes;
+            t.close;
+        end
     end
     if frames == length(file_nums)
         copyed = 1;
@@ -226,9 +236,6 @@ im = imread(fullfile(file_path, file_names{1}));
 [nrows, ncols] = size(im);
 
 stack_num = ceil(num_files / stack_tiff_max_count);         % 计算所需的stack数目
-if stack_num > 0
-    gcp;
-end
 stack_nframes(1:stack_num) = zeros(1, stack_num);           % 用stack_nframes(i)表示第i个stack包含的tiff页数
 stack_nframes(1:(stack_num-1)) = stack_tiff_max_count;
 stack_nframes(stack_num) = num_files - (stack_tiff_max_count * (stack_num-1));
@@ -240,6 +247,9 @@ print_text = 0;
 prevPcnt = 0;    % 上一次已打印的百分比
 afterEach(q, @updateProgress);  % 嵌套函数，能直接用 nframes/t0/nDone/prevPcnt
 
+pool = gcp('nocreate');
+useParallelStack = ~isempty(pool) && contains(class(pool), 'ProcessPool');
+if useParallelStack
 parfor i = 1:stack_num
     
     tiff_file_name = fullfile(save_path, sprintf('%s%02d.tif', stack_base, i));
@@ -269,6 +279,38 @@ parfor i = 1:stack_num
 
     end
     t.close();
+end
+else
+for i = 1:stack_num
+    
+    tiff_file_name = fullfile(save_path, sprintf('%s%02d.tif', stack_base, i));
+    fprintf('Creating new stack file: %s\n', tiff_file_name);
+    t = Tiff(tiff_file_name, 'w');
+    batch_start = 1 + (i - 1) * stack_tiff_max_count;
+    batch_end = batch_start + stack_nframes(i) - 1;
+    for j = batch_start:batch_end
+        current_image = uint16(imread(fullfile(file_path, file_names{j})));         % 读取当前图片
+
+        t.setTag('ImageLength', nrows);
+        t.setTag('ImageWidth', ncols);
+        t.setTag('Photometric', Tiff.Photometric.MinIsBlack);
+        t.setTag('BitsPerSample', 16);
+        t.setTag('SamplesPerPixel', 1);
+        t.setTag('RowsPerStrip', 16);
+        t.setTag('PlanarConfiguration', Tiff.PlanarConfiguration.Chunky);
+        t.setTag('Compression', Tiff.Compression.None);
+        t.setTag('Software', 'MATLAB');
+        t.write(current_image);
+
+        if j < batch_end
+            t.writeDirectory();
+        end
+
+        send(q, 1);  % 每完成一个发一个通知（内容可忽略）
+
+    end
+    t.close();
+end
 end
 
 % -------- 嵌套回调：只在百分比增加时打印 --------

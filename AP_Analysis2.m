@@ -38,9 +38,9 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\YHY\260406_WT-POA_NAVI3-ST_sCy3\Methods3_default\Rec8_2026-04-06_23-00-01\Cycle1';
-file = 'Cam1_Green25%_60s';  % must add format.do not add '\' at last
-bin = 1;
+folder_path = 'E:\1_Data\CC\20260523_CC_slice_AcemNeon2_9\slice7\Methods2_default\Rec2_2026-05-23_20-57-26\Cycle1\';
+file = 'Cam1_Cyan5%';  % must add format.do not add '\' at last
+bin = 4;
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
 gpu = true; % defined gpu open
@@ -77,9 +77,9 @@ save_path = fullfile(folder_path, strcat(file_name, '_Analysis'), nowtime);
 mkdir(save_path);
 
 % Load image file
-if gpu
-    gcp;
-end
+% if gpu
+%     gcp;
+% end
 
 if ~matim
     fprintf("Start loading movie, please wait...\n");
@@ -260,14 +260,6 @@ else
     end
 
 end
-
-
-
-
-
-
-
-
 
 % --- 3. 后处理和作图 ---
 avg_image = (movie_vol_2D - min(movie_vol_2D(:))) ./ (max(movie_vol_2D(:)) - min(movie_vol_2D(:)));
@@ -578,7 +570,7 @@ saveas(gcf, fullfile(save_path, 'background_correction_summary.png'));
 fprintf('Summary plot saved to: %s\n', save_path);
 %% Bleaching Correction
 
-bleachmode = 'linear';% 'linear' 'highpass' 'exp2'
+bleachmode = 'exp2';% 'linear' 'highpass' 'exp2'
 
 fprintf('Correcting Bleaching (Mode: %s)...\n', bleachmode);
 
@@ -798,7 +790,7 @@ saveas(gcf, png_filename, 'png');
 parts = 1;
 MinPeakProminence_factor = 0;
 MinPeakDistance_factor = 0;
-MinPeakHeight =40;
+MinPeakHeight = 300;
 
 findmode = 'cr';% find via bleach corrected traces
 %findmode = 'dn';% find via denoised traces

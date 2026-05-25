@@ -4,6 +4,11 @@
 %     rebuilt Hamamatsu workflow under Rec*/Cycle*/Cam*_label paths.
 %   - It prefers cycle_manifest.mat / record_manifest.mat when available,
 %     then falls back to Cam1_* / Cam2_* folders inside the selected cycle.
+%   - It can also pair two raw channel folders directly, for example:
+%       ...\20240905-153142POA
+%       ...\20240905-153142POA_Green
+%     In that case point cycle_path to either folder and keep
+%     raw_dual_green_suffix = '_Green'.
 %   - Each camera has its own explicit transpose flag. There is no shared
 %     transpose variable, so the two camera orientations cannot be mixed
 %     up silently across sections.
@@ -29,11 +34,23 @@
 % driven by an outer batch script via:
 %   cycle_path = ...;
 %   reuse_roi_file = ...;
-%   correct_offset = false;
+%   correct_offset_mode = 'none';
 %   run('Dual_analysis3.m')
 %
 % Important:
-%   this script no longer clears the workspace automatically.
+%   this script no longe
+% r clears the workspace 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% 
+% automatically.
 %   - If you run it directly by itself, CLEAR old variables manually first.
 %   - If you run it from an outer batch script, do not clear the workspace,
 %     because the outer script may be intentionally passing config values in.
@@ -77,25 +94,114 @@ clc;
 % Outer-script override examples:
 %   cycle_path = '...\Rec1_...\Cycle3';
 %   reuse_roi_file = '...\Cycle1\Dual_analysis3\...\1_dual_roi_results.mat';
-%   correct_offset = false;
+%   correct_offset_mode = 'none';
 %   run('Dual_analysis3.m');
+%
+% Quick-start for two-folder raw dual-channel input:
+%   cycle_path = 'I:\1_Data\...\20240905-153142POA';
+%   raw_dual_green_suffix = '_Green';
+%   voltage_transpose_movie = false;
+%   calcium_transpose_movie = false;
+%   run_motion_correction = false;
+%   run('Dual_analysis3.m');
+%
+% Additional override hooks for legacy datasets:
+%   camera_source_override -> explicit movie paths for the two cameras
+%   stim_context_override  -> prebuilt stimulus metadata/logs struct
 
 %% Input Setup
-% This block collects the main user-tunable analysis settings in one place
-% so most reruns only require edits here.
+% This block collects the main user-tunable analysis settings in one place.
+% Most day-to-day reruns should only require edits in this section.
 nowtime = string(datetime('now'));
 nowtime = strrep(nowtime, ':', '-');
 fprintf('Initializing dual analysis...\n');
 
+% -------------------------------------------------------------------------
+% A. Main input / output paths
+% -------------------------------------------------------------------------
 if ~exist('cycle_path', 'var') || isempty(cycle_path)
-    cycle_path = 'V:\Luorong\Invivo\26.04.15_dual-color_P195\Methods5_default\Rec1_2026-04-15_20-58-57\Cycle1';
+    cycle_path = 'E:\1_Data\YHY\260520_VIP-POA_NAVI2ST-PG8_sCy5\Methods1_S1R1_1min-test\Rec1_2026-05-20_23-22-53\Cycle1';
 end
 [record_path_for_name, cycle_name_for_name] = fileparts(cycle_path);
 [~, record_name_for_name] = fileparts(record_path_for_name);
 if ~exist('analysis_run_name', 'var') || isempty(analysis_run_name)
     analysis_run_name = sprintf('%s_%s_%s', record_name_for_name, cycle_name_for_name, char(nowtime));
 end
+if ~exist('analysis_mode', 'var') || isempty(analysis_mode)
+    analysis_mode = 'full';          % 'full' | 'analysis_only'
+end
+if ~exist('analysis_backend', 'var') || isempty(analysis_backend)
+    analysis_backend = 'default';    % 'default' | 'volpy_voltage_reanalysis'
+end
+if ~exist('reuse_results_path', 'var') || isempty(reuse_results_path)
+    reuse_results_path = '';         % existing Dual_analysis3 output folder for ROI-after analysis reruns
+end
+if ~exist('volpy_source_results_path', 'var') || isempty(volpy_source_results_path)
+    volpy_source_results_path = '';  % existing standard Dual_analysis3 result folder used as calcium/stim/ROI source
+end
+if ~exist('volpy_auto_run', 'var') || isempty(volpy_auto_run)
+    volpy_auto_run = false;
+end
+if ~exist('volpy_force_rerun', 'var') || isempty(volpy_force_rerun)
+    volpy_force_rerun = false;
+end
+if ~exist('volpy_use_existing', 'var') || isempty(volpy_use_existing)
+    volpy_use_existing = false;
+end
+if ~exist('volpy_flip_signal', 'var') || isempty(volpy_flip_signal)
+    volpy_flip_signal = false;
+end
 
+% -------------------------------------------------------------------------
+% B. Common manual channel settings
+% Edit these first when the two movies need different transpose choices,
+% frame rates, or when motion correction should be skipped deliberately.
+% -------------------------------------------------------------------------
+if ~exist('voltage_frame_rate', 'var') || isempty(voltage_frame_rate)
+    voltage_frame_rate = 400;
+end
+if ~exist('calcium_frame_rate', 'var') || isempty(calcium_frame_rate)
+    calcium_frame_rate = 400;
+end
+if ~exist('voltage_transpose_movie', 'var') || isempty(voltage_transpose_movie)
+    voltage_transpose_movie = false;
+end
+if ~exist('calcium_transpose_movie', 'var') || isempty(calcium_transpose_movie)
+    calcium_transpose_movie = true;
+end
+if ~exist('run_motion_correction', 'var') || isempty(run_motion_correction)
+    run_motion_correction = true;
+end
+
+% -------------------------------------------------------------------------
+% C. Raw two-folder dual-channel compatibility
+% When cycle_path is not a Rec*/Cycle* folder, the script can auto-pair one
+% "primary" folder with its sibling "..._Green" folder.
+% Default meaning:
+%   primary folder -> voltage
+%   *_Green folder -> calcium
+% Change these only if your acquisition naming means something else.
+% -------------------------------------------------------------------------
+if ~exist('raw_dual_green_suffix', 'var') || isempty(raw_dual_green_suffix)
+    raw_dual_green_suffix = '_Green';
+end
+if ~exist('raw_dual_primary_role', 'var') || isempty(raw_dual_primary_role)
+    raw_dual_primary_role = "voltage";
+end
+if ~exist('raw_dual_green_role', 'var') || isempty(raw_dual_green_role)
+    raw_dual_green_role = "calcium";
+end
+raw_dual_input_cfg = struct( ...
+    'green_suffix', string(raw_dual_green_suffix), ...
+    'primary_role', string(raw_dual_primary_role), ...
+    'green_role', string(raw_dual_green_role));
+
+% -------------------------------------------------------------------------
+% D. Advanced per-camera config
+% Keep camera_cfg as the single source of truth used downstream, but map
+% the simpler role-level settings above onto it so users do not have to
+% edit the struct for routine transpose / fps changes.
+% -------------------------------------------------------------------------
 if ~exist('camera_cfg', 'var') || isempty(camera_cfg)
     camera_cfg(1) = struct( ...
         'camera_index', 1, ...
@@ -108,15 +214,25 @@ if ~exist('camera_cfg', 'var') || isempty(camera_cfg)
         'transpose_before_analysis', false, ...
         'frame_rate', 400);
 end
+for camera_idx = 1:numel(camera_cfg)
+    current_role = string(camera_cfg(camera_idx).role);
+    if strcmpi(current_role, "voltage")
+        camera_cfg(camera_idx).transpose_before_analysis = logical(voltage_transpose_movie);
+        camera_cfg(camera_idx).frame_rate = double(voltage_frame_rate);
+    elseif strcmpi(current_role, "calcium")
+        camera_cfg(camera_idx).transpose_before_analysis = logical(calcium_transpose_movie);
+        camera_cfg(camera_idx).frame_rate = double(calcium_frame_rate);
+    end
+end
 
+% -------------------------------------------------------------------------
+% E. Trace-processing parameters
+% -------------------------------------------------------------------------
 if ~exist('map_bin', 'var') || isempty(map_bin)
     map_bin = 4;
 end
 if ~exist('calcium_smoothing_window', 'var') || isempty(calcium_smoothing_window)
     calcium_smoothing_window = 40;
-end
-if ~exist('downsample_window', 'var') || isempty(downsample_window)
-    downsample_window = calcium_smoothing_window; % legacy label used by dual comparison outputs
 end
 if ~exist('bleach_mode_voltage', 'var') || isempty(bleach_mode_voltage)
     bleach_mode_voltage = 'linear';   % 'linear' | 'highpass' | 'exp2'
@@ -124,17 +240,45 @@ end
 if ~exist('bleach_mode_calcium', 'var') || isempty(bleach_mode_calcium)
     bleach_mode_calcium = 'exp2';     % 'linear' | 'highpass' | 'exp2'
 end
+if ~exist('run_background_removal', 'var') || isempty(run_background_removal)
+    run_background_removal = false;
+end
 if ~exist('voltage_polarity', 'var') || isempty(voltage_polarity)
     voltage_polarity = -1;            % default display/analysis polarity for voltage traces
 end
 if ~exist('calcium_polarity', 'var') || isempty(calcium_polarity)
     calcium_polarity = 1;             % default display/analysis polarity for calcium traces
 end
-if ~exist('correct_offset', 'var') || isempty(correct_offset)
-    correct_offset = false;           % true when manually estimating inter-camera ROI offset
+% Inter-camera ROI offset mode:
+%   'none'            -> do not estimate a new offset; use reuse_offset or [0 0]
+%   'manual_points'   -> manually click one matching point on the voltage
+%                        and calcium average images
+%   'matlab_register' -> use MATLAB built-in translation registration on
+%                        the two channel average images
+%
+% Offset convention used everywhere below:
+%   voltage_position = calcium_position + offset
+% So both manual_points and matlab_register estimate the shift that moves
+% the calcium channel into the voltage channel coordinate system.
+%
+% Backward compatibility:
+%   correct_offset = true  -> 'manual_points'
+%   correct_offset = false -> 'none'
+if ~exist('correct_offset_mode', 'var') || isempty(correct_offset_mode)
+    if exist('correct_offset', 'var') && ~isempty(correct_offset)
+        correct_offset_mode = correct_offset;
+    else
+        correct_offset_mode = 'manual_points';
+    end
 end
+correct_offset_mode = normalize_correct_offset_mode_dual(correct_offset_mode);
 if ~exist('reuse_roi_file', 'var') || isempty(reuse_roi_file)
     reuse_roi_file = '';              % e.g. fullfile(save_path, '1_dual_roi_results.mat')
+end
+reuse_roi_resolution = resolve_dual_reuse_roi_source(reuse_results_path, reuse_roi_file);
+reuse_roi_file = char(reuse_roi_resolution.effective_roi_file);
+if strlength(reuse_roi_resolution.message) > 0
+    fprintf('%s\n', reuse_roi_resolution.message);
 end
 if ~exist('reuse_offset', 'var') || isempty(reuse_offset)
     reuse_offset = [];
@@ -148,7 +292,17 @@ if ~exist('motion_cfg', 'var') || isempty(motion_cfg)
         'enabled', true, ...
         'use_saved_shift', false, ...
         'saved_shift_file', '', ...
-        'highpass', true);
+        'highpass', true, ...
+        'auto_reuse_previous_shift', true);
+elseif ~isfield(motion_cfg, 'auto_reuse_previous_shift') || isempty(motion_cfg.auto_reuse_previous_shift)
+    motion_cfg.auto_reuse_previous_shift = true;
+end
+motion_cfg.enabled = logical(run_motion_correction);
+if ~exist('camera_source_override', 'var') || isempty(camera_source_override)
+    camera_source_override = [];
+end
+if ~exist('stim_context_override', 'var') || isempty(stim_context_override)
+    stim_context_override = [];
 end
 
 if numel(camera_cfg) ~= 2
@@ -156,19 +310,85 @@ if numel(camera_cfg) ~= 2
 end
 
 if ~exist('save_path', 'var') || isempty(save_path)
-    save_path = fullfile(cycle_path, 'Dual_analysis3', analysis_run_name);
+    if strcmpi(string(analysis_mode), "analysis_only") && strlength(string(reuse_results_path)) > 0
+        save_path = reuse_results_path;
+    else
+        if strcmpi(string(analysis_backend), "volpy_voltage_reanalysis")
+            save_root_dir = 'Dual_analysis3_volpy_voltage';
+        else
+            save_root_dir = 'Dual_analysis3';
+        end
+        save_base_dir = resolve_dual_analysis_save_base_dir(cycle_path, camera_cfg, raw_dual_input_cfg);
+        save_path = fullfile(save_base_dir, save_root_dir, analysis_run_name);
+    end
 end
 mkdir(save_path);
-
-if gpu && isempty(gcp('nocreate'))
-    gcp;
+analysis_only_mode = strcmpi(string(analysis_mode), "analysis_only");
+volpy_reanalysis_mode = strcmpi(string(analysis_backend), "volpy_voltage_reanalysis");
+if volpy_reanalysis_mode
+    bootstrap_volpy_voltage_reanalysis( ...
+        cycle_path, save_path, volpy_source_results_path, ...
+        logical(volpy_auto_run), logical(volpy_force_rerun), logical(volpy_use_existing), ...
+        logical(volpy_flip_signal), ...
+        voltage_polarity, calcium_polarity, calcium_smoothing_window);
+end
+if analysis_only_mode
+    % This rerun mode reuses everything up through ROI selection and then
+    % resumes the analysis sections that operate on saved ROI traces.
+    [dual_info, voltage_results, calcium_results, dual_results, stim_results, stim_context, stim_windows] = ...
+        load_saved_analysis_only_context(reuse_results_path);
 end
 
+% Parallel pool is only needed for the full movie-loading / motion stage.
+% In analysis_only mode we are resuming from saved traces, so attempting
+% to launch parpool here only adds a fragile dependency and can fail on
+% machines where the interactive pool is unavailable.
+if gpu && ~volpy_reanalysis_mode && ~analysis_only_mode && isempty(gcp('nocreate'))
+    try
+        gcp;
+    catch ME
+        warning('Dual_analysis3:ParpoolUnavailable', ...
+            ['Parallel pool could not be started (%s). ' ...
+            'Continuing without explicitly opening parpool.'], ME.message);
+    end
+end
+
+if volpy_reanalysis_mode
+    [dual_info, voltage_results, calcium_results, dual_results, stim_results, stim_context, stim_windows] = ...
+        load_saved_analysis_only_context(save_path);
+    t_voltage = build_time_axis_from_movie_info(voltage_results.movie_info);
+    t_calcium = build_time_axis_from_movie_info(calcium_results.movie_info);
+    freq_voltage = double(voltage_results.movie_info.frame_rate);
+    freq_calcium = double(calcium_results.movie_info.frame_rate);
+    nframes_voltage = infer_frame_count_from_channel_results(voltage_results);
+    nframes_calcium = infer_frame_count_from_channel_results(calcium_results);
+    dual_info_path = fullfile(save_path, 'dual_info.mat');
+    voltage_results_path = fullfile(save_path, 'voltage_results.mat');
+    calcium_results_path = fullfile(save_path, 'calcium_results.mat');
+    dual_results_path = fullfile(save_path, 'dual_results.mat');
+    stim_results_path = fullfile(save_path, 'stim_results.mat');
+    run_dual_post_trace_sections( ...
+        save_path, ...
+        dual_info, dual_info_path, ...
+        voltage_results, voltage_results_path, ...
+        calcium_results, calcium_results_path, ...
+        dual_results, dual_results_path, ...
+        stim_results, stim_results_path, ...
+        stim_context, stim_windows, ...
+        t_voltage, t_calcium, ...
+        freq_voltage, freq_calcium, ...
+        nframes_voltage, nframes_calcium, ...
+        voltage_polarity, calcium_polarity, calcium_smoothing_window, true);
+    return;
+end
+
+if ~analysis_only_mode
 %% Resolve Rebuilt Inputs
 % Prefer rebuilt manifests so the analysis follows the acquisition layout
 % recorded during acquisition instead of guessing from folder names alone.
 print_section('Resolve Rebuilt Inputs');
-[cycle_manifest, record_manifest, camera_source] = resolve_dual_camera_sources(cycle_path, camera_cfg);
+[cycle_manifest, record_manifest, camera_source, input_layout_info] = resolve_dual_camera_sources( ...
+    cycle_path, camera_cfg, camera_source_override, raw_dual_input_cfg);
 
 voltage_idx = find(strcmpi(string({camera_cfg.role}), "voltage"), 1, 'first');
 calcium_idx = find(strcmpi(string({camera_cfg.role}), "calcium"), 1, 'first');
@@ -178,7 +398,8 @@ end
 
 stim_context = resolve_stim_context( ...
     cycle_path, cycle_manifest, record_manifest, ...
-    camera_cfg(voltage_idx).camera_index, camera_cfg(calcium_idx).camera_index);
+    camera_cfg(voltage_idx).camera_index, camera_cfg(calcium_idx).camera_index, ...
+    stim_context_override, input_layout_info);
 
 dual_info = struct();
 dual_info.analysis_name = 'Dual_analysis3';
@@ -186,7 +407,6 @@ dual_info.cycle_path = cycle_path;
 dual_info.save_path = save_path;
 dual_info.created_at = datetime("now");
 dual_info.map_bin = map_bin;
-dual_info.downsample_window = downsample_window;
 dual_info.calcium_smoothing_window = calcium_smoothing_window;
 dual_info.bleach_mode = struct( ...
     'voltage', bleach_mode_voltage, ...
@@ -194,12 +414,25 @@ dual_info.bleach_mode = struct( ...
 dual_info.polarity = struct( ...
     'voltage', voltage_polarity, ...
     'calcium', calcium_polarity);
-dual_info.correct_offset = correct_offset;
+dual_info.correct_offset = ~strcmpi(string(correct_offset_mode), "none");
+dual_info.correct_offset_mode = string(correct_offset_mode);
+dual_info.run_background_removal = run_background_removal;
 dual_info.camera_cfg = camera_cfg;
 dual_info.camera_source = camera_source;
+dual_info.input_layout = input_layout_info;
+dual_info.input_override_used = ~isempty(camera_source_override) || ~isempty(stim_context_override);
 dual_info.role_order = struct( ...
     'voltage_camera_index', camera_cfg(voltage_idx).camera_index, ...
     'calcium_camera_index', camera_cfg(calcium_idx).camera_index);
+dual_info.manual_options = struct( ...
+    'voltage_frame_rate', voltage_frame_rate, ...
+    'calcium_frame_rate', calcium_frame_rate, ...
+    'voltage_transpose_movie', logical(voltage_transpose_movie), ...
+    'calcium_transpose_movie', logical(calcium_transpose_movie), ...
+    'run_motion_correction', logical(run_motion_correction), ...
+    'correct_offset_mode', string(correct_offset_mode), ...
+    'raw_dual_input_cfg', raw_dual_input_cfg, ...
+    'reuse_roi_resolution', reuse_roi_resolution);
 dual_info.stim_context = rmfield_if_exists(stim_context, {'logs', 'method_manifest'});
 dual_info.cycle_manifest_found = ~isempty(cycle_manifest);
 dual_info.record_manifest_found = ~isempty(record_manifest);
@@ -307,10 +540,16 @@ copy_analysis_code(currentScript, code_path);
 % two channels were corrected independently, one biological ROI could end
 % up drifting to different places in voltage and calcium.
 print_section('Motion Correction');
-fprintf('Applying shared motion correction from voltage to calcium...\n');
-fprintf('Motion model: rigid NoRMCorre estimated on voltage, then apply_shifts to calcium.\n');
+fprintf('Motion correction enabled: %d\n', logical(run_motion_correction));
+if run_motion_correction
+    fprintf('Applying shared motion correction from voltage to calcium...\n');
+    fprintf('Motion model: rigid NoRMCorre estimated on voltage, then apply_shifts to calcium.\n');
+    fprintf('Motion QC outputs: save downsampled corrected TIFFs for both channels and save shared motion metrics on the voltage reference movie.\n');
+else
+    fprintf('Shared motion correction skipped. Downstream ROI and trace analysis will use the geometry-matched but otherwise raw movies.\n');
+end
 [movie_voltage_3d, movie_calcium_3d, voltage_motion_info, calcium_motion_info] = run_shared_motion_correction( ...
-    movie_voltage_3d, movie_calcium_3d, save_path, motion_cfg);
+    movie_voltage_3d, movie_calcium_3d, cycle_path, save_path, motion_cfg);
 
 [ncols_v, nrows_v, nframes_voltage] = size(movie_voltage_3d);
 [ncols_c, nrows_c, nframes_calcium] = size(movie_calcium_3d);
@@ -340,7 +579,38 @@ calcium_results.movie_info.updated_at = datetime("now");
 
 save(voltage_results_path, 'voltage_results', '-v7.3');
 save(calcium_results_path, 'calcium_results', '-v7.3');
-fprintf('Motion complete | shared shift file: %s\n', voltage_motion_info.shift_file);
+if voltage_motion_info.applied
+    fprintf('Motion complete | shared shift file: %s\n', voltage_motion_info.shift_file);
+else
+    fprintf('Motion correction result: skipped by run_motion_correction=false.\n');
+end
+if isfield(voltage_motion_info, 'downsampled_tif_file') && strlength(string(voltage_motion_info.downsampled_tif_file)) > 0
+    fprintf('Saved voltage downsampled corrected TIFF: %s\n', string(voltage_motion_info.downsampled_tif_file));
+end
+if isfield(calcium_motion_info, 'downsampled_tif_file') && strlength(string(calcium_motion_info.downsampled_tif_file)) > 0
+    fprintf('Saved calcium downsampled corrected TIFF: %s\n', string(calcium_motion_info.downsampled_tif_file));
+end
+if isfield(voltage_motion_info, 'metrics_png') && strlength(string(voltage_motion_info.metrics_png)) > 0
+    fprintf('Saved shared motion metrics plot: %s\n', string(voltage_motion_info.metrics_png));
+end
+
+%% Channel Registration
+% In matlab_register mode, estimate the calcium-to-voltage translation
+% offset, but do not directly move the movie data here. The returned
+% offset is used later to map voltage ROI masks into calcium coordinates.
+print_section('Channel Registration');
+[channel_registration_info, roi_offset_mode_for_selection] = ...
+    estimate_dual_channel_registration_offset( ...
+        movie_voltage, movie_calcium, nrows, ncols, correct_offset_mode, save_path);
+voltage_results.movie_info.channel_registration = channel_registration_info;
+calcium_results.movie_info.channel_registration = channel_registration_info;
+save(voltage_results_path, 'voltage_results', '-v7.3');
+save(calcium_results_path, 'calcium_results', '-v7.3');
+fprintf('ROI offset mode used after channel registration: %s\n', string(roi_offset_mode_for_selection));
+if isempty(reuse_offset) && isfield(channel_registration_info, 'offset_xy') ...
+        && numel(channel_registration_info.offset_xy) == 2
+    reuse_offset = double(channel_registration_info.offset_xy);
+end
 
 %% Create Sensitivity Maps
 % These maps are quick summary images used mainly to guide ROI selection.
@@ -351,7 +621,15 @@ fprintf('Map method: create_map(movie, nrows, ncols, map_bin), map_bin=%d\n', ma
 map_voltage = create_map(movie_voltage, nrows, ncols, map_bin);
 map_calcium = create_map(movie_calcium, nrows, ncols, map_bin, 'calcium');
 
-figure('Color', 'w');
+% 暂且用这几行抵消一下相机第一帧第一行65535的bug
+if exist('VolMap_Cut', 'var') 
+    map_voltage(1,:) = map_voltage(5,:);
+    map_voltage(2,:) = map_voltage(5,:);
+    map_voltage(3,:) = map_voltage(5,:);
+    map_voltage(4,:) = map_voltage(5,:);
+end
+
+map_fig = figure('Color', 'w');
 subplot(1, 2, 1);
 imagesc(map_voltage);
 axis image;
@@ -364,8 +642,8 @@ title('Calcium Sensitivity Map');
 colorbar;
 
 save(map_results_file, 'map_voltage', 'map_calcium', 'map_bin');
-saveas(gcf, fullfile(save_path, '0_dual_sensitivity_map.fig'), 'fig');
-saveas(gcf, fullfile(save_path, '0_dual_sensitivity_map.png'), 'png');
+save_figure_bundle(map_fig, fullfile(save_path, '0_dual_sensitivity_map.fig'), fullfile(save_path, '0_dual_sensitivity_map.png'));
+close(map_fig);
 
 dual_results.maps = struct( ...
     'data', struct('map_voltage', map_voltage, 'map_calcium', map_calcium), ...
@@ -434,9 +712,14 @@ if ~isempty(reuse_roi_file) && isfile(reuse_roi_file)
     % ROI reuse is mainly for iteration: it lets later sections be rerun
     % without forcing the user to redraw the same biological regions.
     roi_cache = load(reuse_roi_file);
-    if isfield(roi_cache, 'rois')
-        mask_voltage = roi_cache.rois.bwmask;
-        mask_calcium = roi_cache.rois.bwmask_ca;
+    offset_for_reuse_mask = offset;
+    if isempty(offset_for_reuse_mask) && isfield(roi_cache, 'offset')
+        offset_for_reuse_mask = roi_cache.offset;
+    end
+    [mask_voltage, mask_calcium, reuse_roi_note] = resolve_reuse_dual_masks( ...
+        roi_cache, offset_for_reuse_mask, roi_offset_mode_for_selection);
+    if strlength(reuse_roi_note) > 0
+        fprintf('%s\n', reuse_roi_note);
     end
     if isempty(offset) && isfield(roi_cache, 'offset')
         offset = roi_cache.offset;
@@ -451,12 +734,30 @@ else
     offset = reshape(double(offset), 1, 2);
 end
 
+% Interactive ROI drawing cannot succeed in a headless MATLAB session.
+% Offset picking for manual_points is handled earlier in Channel
+% Registration, so the ROI section only needs to guard the polygon-drawing
+% path here.
+requires_interactive_roi_session = isempty(mask_voltage) && isempty(mask_calcium);
+if ~usejava('desktop') && requires_interactive_roi_session
+    error(['Interactive ROI selection requires a MATLAB Desktop session. ' ...
+        'Please rerun Dual_analysis3 or Dual_analysis3_rec inside an existing MATLAB GUI window, ' ...
+        'or set reuse_roi_file to an already saved ROI result file.']);
+end
+
+roi_figures_before = findall(groot, 'Type', 'figure');
 [rois, traces_voltage_raw, traces_calcium_raw, offset] = select_ROI_dual( ...
-    movie_voltage, movie_calcium, nrows, ncols, correct_offset, ...
+    movie_voltage, movie_calcium, nrows, ncols, roi_offset_mode_for_selection, ...
     map_voltage, map_calcium, mask_voltage, mask_calcium, offset);
 % This is the main transition from movie space to trace space. After this
 % point, most analysis steps work on ROI-by-time matrices rather than raw
 % image stacks.
+roi_figures_after = findall(groot, 'Type', 'figure');
+for fig_idx = 1:numel(roi_figures_after)
+    if ~any(roi_figures_after(fig_idx) == roi_figures_before) && isgraphics(roi_figures_after(fig_idx), 'figure')
+        close(roi_figures_after(fig_idx));
+    end
+end
 
 if isempty(offset)
     offset = [0, 0];
@@ -488,7 +789,7 @@ roi_record = build_section_record( ...
     struct( ...
         'nrows', nrows, ...
         'ncols', ncols, ...
-        'correct_offset', correct_offset, ...
+        'correct_offset_mode', string(correct_offset_mode), ...
         'reuse_roi_file', string(reuse_roi_file), ...
         'initial_offset_xy', offset, ...
         'roi_map_source', string(roi_map_source)), ...
@@ -522,7 +823,7 @@ dual_results.registration = struct( ...
         'reference_role', 'voltage', ...
         'moving_role', 'calcium', ...
         'map_source', roi_map_source, ...
-        'offset_mode', ternary(correct_offset, "manual", "reused_or_zero"), ...
+        'offset_mode', string(correct_offset_mode), ...
         'created_at', datetime("now")));
 save(dual_results_path, 'dual_results', '-v7.3');
 
@@ -536,21 +837,69 @@ save(voltage_results_path, 'voltage_results', '-v7.3');
 save(calcium_results_path, 'calcium_results', '-v7.3');
 raw_trace_fig = fullfile(save_path, '1_dual_raw_trace.fig');
 raw_trace_png = fullfile(save_path, '1_dual_raw_trace.png');
+map_roi_fig = fullfile(save_path, '0_dual_sensitivity_map_with_roi.fig');
+map_roi_png = fullfile(save_path, '0_dual_sensitivity_map_with_roi.png');
+merged_average_tif = fullfile(save_path, '0_dual_average_color_merge.tif');
+merged_average_png = fullfile(save_path, '0_dual_average_color_merge.png');
+merged_average_roi_tif = fullfile(save_path, '0_dual_average_color_merge_with_roi.tif');
+merged_average_roi_png = fullfile(save_path, '0_dual_average_color_merge_with_roi.png');
 plot_dual_raw_traces( ...
     traces_voltage_raw, traces_calcium_raw, ...
     t_voltage, t_calcium);
-saveas(gcf, raw_trace_fig, 'fig');
-saveas(gcf, raw_trace_png, 'png');
+raw_trace_handle = gcf;
+save_figure_bundle(raw_trace_handle, raw_trace_fig, raw_trace_png);
+close(raw_trace_handle);
+[map_roi_saved, map_roi_info] = save_dual_map_with_roi( ...
+    map_voltage, map_calcium, rois, map_roi_fig, map_roi_png);
+[~, merged_average_info] = save_dual_average_color_merge( ...
+    movie_voltage, movie_calcium, nrows, ncols, offset, ...
+    merged_average_tif, merged_average_png, ...
+    merged_average_roi_tif, merged_average_roi_png, rois);
 dual_results.visualizations.raw = struct( ...
     'data', struct(), ...
     'info', struct( ...
         'fig_file', raw_trace_fig, ...
         'png_file', raw_trace_png, ...
         'created_at', datetime("now")));
+dual_results.visualizations.average_color_merge = struct( ...
+    'data', struct(), ...
+    'info', merged_average_info);
+if map_roi_saved
+    dual_results.visualizations.map_with_roi = struct( ...
+        'data', struct(), ...
+        'info', map_roi_info);
+end
 save(dual_results_path, 'dual_results', '-v7.3');
 fprintf('Raw trace overview saved to: %s\n', raw_trace_png);
+if map_roi_saved
+    fprintf('Dual sensitivity map with ROI saved to: %s\n', map_roi_png);
+end
+fprintf('Dual average color merge saved to: %s\n', merged_average_tif);
+fprintf('Dual average color merge with ROI saved to: %s\n', merged_average_roi_tif);
 fprintf('ROI complete | nrois=%d | offset=[%.3f %.3f] | map source=%s | roi file=%s\n', ...
     nrois, offset(1), offset(2), roi_map_source, roi_results_file);
+else
+    dual_info_path = fullfile(save_path, 'dual_info.mat');
+    voltage_results_path = fullfile(save_path, 'voltage_results.mat');
+    calcium_results_path = fullfile(save_path, 'calcium_results.mat');
+    dual_results_path = fullfile(save_path, 'dual_results.mat');
+    stim_results_path = fullfile(save_path, 'stim_results.mat');
+    map_results_file = fullfile(save_path, '0_dual_sensitivity_map.mat');
+
+    cycle_path = char(string(dual_info.cycle_path));
+    freq_voltage = resolve_saved_channel_frame_rate(dual_info, "voltage");
+    freq_calcium = resolve_saved_channel_frame_rate(dual_info, "calcium");
+    nframes_voltage = resolve_saved_channel_frame_count(voltage_results.movie_info);
+    nframes_calcium = resolve_saved_channel_frame_count(calcium_results.movie_info);
+    [ncols, nrows] = resolve_saved_analysis_frame_size(voltage_results.movie_info, calcium_results.movie_info);
+    t_voltage = build_time_axis_from_movie_info(voltage_results.movie_info);
+    t_calcium = build_time_axis_from_movie_info(calcium_results.movie_info);
+
+    fprintf('Analysis-only mode: reusing saved ROI/channel results from %s\n', save_path);
+    fprintf('Skipped sections: Resolve Inputs, Load Movies, Copy Analysis Code, Motion Correction, Create Sensitivity Maps, Load Or Create Dual ROI\n');
+    fprintf(['Analysis-only parameter source: downstream background/bleach/metric/stim/time-frequency settings ' ...
+        'still come from the current script variables, while saved ROI/channel/stim files are reused as inputs.\n']);
+end
 
 %% Background Removal
 % Background removal is optional at the workflow level. If it is skipped,
@@ -571,7 +920,7 @@ fprintf('ROI complete | nrois=%d | offset=[%.3f %.3f] | map source=%s | roi file
 %   explicitly so old results remain understandable without duplicating the
 %   movie on disk.
 print_section('Background Removal');
-fprintf('Removing background for both channels...\n');
+fprintf('Background removal enabled: %d\n', run_background_removal);
 [voltage_results, calcium_results] = load_channel_results( ...
     voltage_results_path, calcium_results_path, voltage_results, calcium_results);
 [dual_results, rois, traces_voltage_raw, traces_calcium_raw, roi_results_file, nrois] = ...
@@ -579,75 +928,77 @@ fprintf('Removing background for both channels...\n');
 
 rois_voltage = struct('bwmask', rois.bwmask, 'boundary', {rois.boundary}, 'position', {rois.position});
 rois_calcium = struct('bwmask', rois.bwmask_ca, 'boundary', {rois.boundary_ca}, 'position', {rois.position_ca});
+background_results_file = fullfile(save_path, '1_dual_background_results.mat');
 
-if ~exist('movie_voltage', 'var') || ~exist('movie_calcium', 'var')
-    if has_trace_stage(voltage_results, 'bg_removed') && has_trace_stage(calcium_results, 'bg_removed')
-        fprintf('Background stage already exists. Reusing saved bg_removed traces without recomputation.\n');
-        fprintf('Current bg_removed parent stage: voltage=%s | calcium=%s\n', ...
-            strjoin(string(voltage_results.trace_results.bg_removed.info.parent_results), ','), ...
-            strjoin(string(calcium_results.trace_results.bg_removed.info.parent_results), ','));
+if run_background_removal
+    if ~exist('movie_voltage', 'var') || ~exist('movie_calcium', 'var')
+        if has_trace_stage(voltage_results, 'bg_removed') && has_trace_stage(calcium_results, 'bg_removed')
+            fprintf('Background stage already exists. Reusing saved bg_removed traces without recomputation.\n');
+            fprintf('Current bg_removed parent stage: voltage=%s | calcium=%s\n', ...
+                strjoin(string(voltage_results.trace_results.bg_removed.info.parent_results), ','), ...
+                strjoin(string(calcium_results.trace_results.bg_removed.info.parent_results), ','));
+        else
+            fprintf('Background removal skipped because movie data are not in memory. Downstream sections will use raw traces.\n');
+        end
     else
-        error(['Background removal needs movie data in memory to recompute. ' ...
-            'Run the loading/motion/ROI sections first, or skip this section and let downstream sections use raw traces.']);
+        [background_voltage, background_fit_voltage, ~, traces_voltage_bg, background_mask_voltage] = ...
+            remove_background(movie_voltage, ncols, nrows, rois_voltage, freq_voltage, 1);
+        [background_calcium, background_fit_calcium, ~, traces_calcium_bg, background_mask_calcium] = ...
+            remove_background(movie_calcium, ncols, nrows, rois_calcium, freq_calcium, 1);
+
+        % Save enough non-movie inputs to explain and reproduce the background
+        % calculation later. This is especially useful when reopening only the
+        % section result file instead of the whole workspace.
+        background_record = build_section_record( ...
+            'Background Removal', ...
+            'Estimate and subtract ROI-matched background signals for both channels.', ...
+            struct( ...
+                'voltage_parent_stage', "raw", ...
+                'calcium_parent_stage', "raw", ...
+                'traces_voltage_raw', traces_voltage_raw, ...
+                'traces_calcium_raw', traces_calcium_raw, ...
+                'rois_voltage', rois_voltage, ...
+                'rois_calcium', rois_calcium, ...
+                'nrows', nrows, ...
+                'ncols', ncols), ...
+            struct( ...
+                'voltage', struct('freq', freq_voltage, 'bin', 1), ...
+                'calcium', struct('freq', freq_calcium, 'bin', 1), ...
+                'function_name', 'remove_background'), ...
+            struct( ...
+                'background_voltage', background_voltage, ...
+                'background_fit_voltage', background_fit_voltage, ...
+                'background_mask_voltage', background_mask_voltage, ...
+                'traces_voltage_bg', traces_voltage_bg, ...
+                'background_calcium', background_calcium, ...
+                'background_fit_calcium', background_fit_calcium, ...
+                'background_mask_calcium', background_mask_calcium, ...
+                'traces_calcium_bg', traces_calcium_bg), ...
+            struct( ...
+                'movie_voltage', 'not saved', ...
+                'movie_calcium', 'not saved'), ...
+            'To rerun this section, reload the movies externally and call remove_background with the saved ROI definitions and parameters in this record.');
+        save(background_results_file, ...
+            'background_voltage', 'background_fit_voltage', 'background_mask_voltage', 'traces_voltage_bg', ...
+            'background_calcium', 'background_fit_calcium', 'background_mask_calcium', 'traces_calcium_bg', ...
+            'background_record');
+
+        voltage_results = store_trace_stage( ...
+            voltage_results, 'bg_removed', traces_voltage_bg, {'raw'}, roi_results_file, ...
+            voltage_results.movie_info, 'remove_background', struct('freq', freq_voltage, 'bin', 1));
+        calcium_results = store_trace_stage( ...
+            calcium_results, 'bg_removed', traces_calcium_bg, {'raw'}, roi_results_file, ...
+            calcium_results.movie_info, 'remove_background', struct('freq', freq_calcium, 'bin', 1));
+        save(voltage_results_path, 'voltage_results', '-v7.3');
+        save(calcium_results_path, 'calcium_results', '-v7.3');
+        fprintf('Background removal formula: bg_removed = remove_background(movie, roi)\n');
+        fprintf('Background parameters | voltage freq=%g, calcium freq=%g, bin=1\n', freq_voltage, freq_calcium);
     end
 else
-    [background_voltage, background_fit_voltage, ~, traces_voltage_bg, background_mask_voltage] = ...
-        remove_background(movie_voltage, ncols, nrows, rois_voltage, freq_voltage, 1);
-    [background_calcium, background_fit_calcium, ~, traces_calcium_bg, background_mask_calcium] = ...
-        remove_background(movie_calcium, ncols, nrows, rois_calcium, freq_calcium, 1);
-
-    background_results_file = fullfile(save_path, '1_dual_background_results.mat');
-    % Save enough non-movie inputs to explain and reproduce the background
-    % calculation later. This is especially useful when reopening only the
-    % section result file instead of the whole workspace.
-    background_record = build_section_record( ...
-        'Background Removal', ...
-        'Estimate and subtract ROI-matched background signals for both channels.', ...
-        struct( ...
-            'voltage_parent_stage', "raw", ...
-            'calcium_parent_stage', "raw", ...
-            'traces_voltage_raw', traces_voltage_raw, ...
-            'traces_calcium_raw', traces_calcium_raw, ...
-            'rois_voltage', rois_voltage, ...
-            'rois_calcium', rois_calcium, ...
-            'nrows', nrows, ...
-            'ncols', ncols), ...
-        struct( ...
-            'voltage', struct('freq', freq_voltage, 'bin', 1), ...
-            'calcium', struct('freq', freq_calcium, 'bin', 1), ...
-            'function_name', 'remove_background'), ...
-        struct( ...
-            'background_voltage', background_voltage, ...
-            'background_fit_voltage', background_fit_voltage, ...
-            'background_mask_voltage', background_mask_voltage, ...
-            'traces_voltage_bg', traces_voltage_bg, ...
-            'background_calcium', background_calcium, ...
-            'background_fit_calcium', background_fit_calcium, ...
-            'background_mask_calcium', background_mask_calcium, ...
-            'traces_calcium_bg', traces_calcium_bg), ...
-        struct( ...
-            'movie_voltage', 'not saved', ...
-            'movie_calcium', 'not saved'), ...
-        'To rerun this section, reload the movies externally and call remove_background with the saved ROI definitions and parameters in this record.');
-    save(background_results_file, ...
-        'background_voltage', 'background_fit_voltage', 'background_mask_voltage', 'traces_voltage_bg', ...
-        'background_calcium', 'background_fit_calcium', 'background_mask_calcium', 'traces_calcium_bg', ...
-        'background_record');
-
-    voltage_results = store_trace_stage( ...
-        voltage_results, 'bg_removed', traces_voltage_bg, {'raw'}, roi_results_file, ...
-        voltage_results.movie_info, 'remove_background', struct('freq', freq_voltage, 'bin', 1));
-    calcium_results = store_trace_stage( ...
-        calcium_results, 'bg_removed', traces_calcium_bg, {'raw'}, roi_results_file, ...
-        calcium_results.movie_info, 'remove_background', struct('freq', freq_calcium, 'bin', 1));
-    save(voltage_results_path, 'voltage_results', '-v7.3');
-    save(calcium_results_path, 'calcium_results', '-v7.3');
-    fprintf('Background removal formula: bg_removed = remove_background(movie, roi)\n');
-    fprintf('Background parameters | voltage freq=%g, calcium freq=%g, bin=1\n', freq_voltage, freq_calcium);
+    fprintf('Background removal skipped. Downstream sections will use raw traces as bleach input.\n');
 end
 
-background_results_file = fullfile(save_path, '1_dual_background_results.mat');
-if isfile(background_results_file)
+if run_background_removal && isfile(background_results_file)
     % The background summary is a diagnostic check: it helps verify that
     % the chosen background region and fitted background trace look
     % sensible before trusting downstream bg_removed traces.
@@ -677,7 +1028,7 @@ if isfile(background_results_file)
     save(dual_results_path, 'dual_results', '-v7.3');
     fprintf('Background summary saved to: %s\n', bg_png);
 else
-    fprintf('Background summary plot skipped because background result file is missing.\n');
+    fprintf('Background summary plot skipped.\n');
 end
 
 %% Bleaching Removal
@@ -971,15 +1322,15 @@ else
     calcium_snr = [];
     calcium_snr_stage = '';
 end
-figure('Color', 'w');
+summary_fig = figure('Color', 'w');
 subplot(2, 3, 1); hold on; title('Voltage Raw'); plot_offset_stage(traces_voltage_raw, t_voltage);
 subplot(2, 3, 2); hold on; title('Voltage Sensitivity'); plot_optional_stage(voltage_polarity * voltage_sensitivity, t_voltage, has_voltage_sensitivity, 'Sensitivity stage unavailable');
 subplot(2, 3, 3); hold on; title('Voltage SNR'); plot_optional_stage(voltage_polarity * voltage_snr, t_voltage, has_voltage_snr, 'SNR stage unavailable');
 subplot(2, 3, 4); hold on; title(sprintf('Calcium Raw (%s, window=%d)', strrep(char(calcium_raw_stage), '_', '\_'), calcium_smoothing_window)); plot_optional_stage(traces_calcium_raw, t_calcium, has_calcium_raw, 'Raw stage unavailable');
 subplot(2, 3, 5); hold on; title(sprintf('Calcium Sensitivity (%s, window=%d)', strrep(char(calcium_sensitivity_stage), '_', '\_'), calcium_smoothing_window)); plot_optional_stage(calcium_polarity * calcium_sensitivity, t_calcium, has_calcium_sensitivity, 'Sensitivity stage unavailable');
 subplot(2, 3, 6); hold on; title(sprintf('Calcium SNR (%s, window=%d)', strrep(char(calcium_snr_stage), '_', '\_'), calcium_smoothing_window)); plot_optional_stage(calcium_polarity * calcium_snr, t_calcium, has_calcium_snr, 'SNR stage unavailable');
-saveas(gcf, fullfile(save_path, '4_dual_trace_summary.fig'), 'fig');
-saveas(gcf, fullfile(save_path, '4_dual_trace_summary.png'), 'png');
+save_figure_bundle(summary_fig, fullfile(save_path, '4_dual_trace_summary.fig'), fullfile(save_path, '4_dual_trace_summary.png'));
+close(summary_fig);
 fprintf('Summary plot stage availability | voltage sensitivity=%d snr=%d | calcium sensitivity=%d snr=%d\n', ...
     has_voltage_sensitivity, has_voltage_snr, has_calcium_sensitivity, has_calcium_snr);
 fprintf('Channel summary polarity | voltage=%d | calcium=%d\n', voltage_polarity, calcium_polarity);
@@ -995,7 +1346,24 @@ print_section('Dual Comparison');
 fprintf('Building dual-channel comparison results...\n');
 stim_windows = struct();
 if stim_context.supported
-    stim_windows = build_visual_stim_windows(stim_context, freq_voltage, freq_calcium, nframes_voltage, nframes_calcium);
+    if analysis_only_mode && isstruct(stim_results) && isfield(stim_results, 'windows') && ~isempty(stim_results.windows)
+        stim_windows = stim_results.windows;
+        fprintf('Analysis-only mode: reusing saved stim windows instead of rebuilding them from logs.\n');
+    elseif analysis_only_mode && ~(isfield(stim_context, 'logs') && isstruct(stim_context.logs))
+        fprintf(['Analysis-only mode: saved stim windows are unavailable and saved stim_context has no logs. ' ...
+            'Rebuilding stim metadata from the current cycle manifests/logs.\n']);
+        voltage_idx_local = find(strcmpi(string({camera_cfg.role}), "voltage"), 1, 'first');
+        calcium_idx_local = find(strcmpi(string({camera_cfg.role}), "calcium"), 1, 'first');
+        [cycle_manifest_reload, record_manifest_reload, ~, input_layout_reload] = resolve_dual_camera_sources( ...
+            cycle_path, camera_cfg, camera_source_override, raw_dual_input_cfg);
+        stim_context = resolve_stim_context( ...
+            cycle_path, cycle_manifest_reload, record_manifest_reload, ...
+            camera_cfg(voltage_idx_local).camera_index, camera_cfg(calcium_idx_local).camera_index, ...
+            stim_context_override, input_layout_reload);
+        stim_windows = build_visual_stim_windows(stim_context, freq_voltage, freq_calcium, nframes_voltage, nframes_calcium);
+    else
+        stim_windows = build_visual_stim_windows(stim_context, freq_voltage, freq_calcium, nframes_voltage, nframes_calcium);
+    end
     print_stim_context_summary(stim_context, stim_windows, 'Dual Comparison');
 else
     print_stim_context_summary(stim_context, struct(), 'Dual Comparison');
@@ -1046,7 +1414,7 @@ if has_sensitivity_pair
     % and SNR can be inspected independently.
     comparison_sensitivity = build_dual_metric_comparison( ...
     'sensitivity', voltage_sensitivity, calcium_sensitivity, ...
-    t_voltage, t_calcium, downsample_window, save_path, stim_windows, voltage_polarity, calcium_polarity);
+    t_voltage, t_calcium, calcium_smoothing_window, save_path, stim_windows, voltage_polarity, calcium_polarity);
     comparison_data.sensitivity = comparison_sensitivity.data;
     comparison_info.sensitivity = comparison_sensitivity.info;
 else
@@ -1056,7 +1424,7 @@ end
 if has_snr_pair
     comparison_snr = build_dual_metric_comparison( ...
         'snr', voltage_snr, calcium_snr, ...
-        t_voltage, t_calcium, downsample_window, save_path, stim_windows, voltage_polarity, calcium_polarity);
+        t_voltage, t_calcium, calcium_smoothing_window, save_path, stim_windows, voltage_polarity, calcium_polarity);
     comparison_data.snr = comparison_snr.data;
     comparison_info.snr = comparison_snr.info;
 else
@@ -1071,7 +1439,7 @@ dual_results.comparison = struct( ...
     'data', comparison_data, ...
     'info', struct( ...
         'method', 'dual_metric_comparison_with_quad_and_overlap_plots', ...
-        'parameters', struct('downsample_window', downsample_window, 'calcium_smoothing_window', calcium_smoothing_window), ...
+        'parameters', struct('calcium_smoothing_window', calcium_smoothing_window), ...
         'input_stages', struct( ...
             'voltage_sensitivity', 'sensitivity', ...
             'voltage_snr', 'snr', ...
@@ -1141,14 +1509,18 @@ if stim_context.supported
         fprintf('  formulas: delta_mean, delta_peak, delta_auc = stim - baseline\n');
         fprintf('  calcium final smoothing window: %d\n', calcium_smoothing_window);
         fprintf('  plotted stages: sensitivity and snr only\n');
+        if strcmpi(string(stim_context.stim_type), "visualstim_flash")
+            fprintf('  flash window rule: baseline = gray 2 s before flash onset | response = 2 s from flash onset\n');
+            fprintf('  flash shading rule: actual flash pulse only\n');
+        end
 
-        figure('Color', 'w');
+        stim_trace_fig = figure('Color', 'w');
         subplot(2, 2, 1); hold on; title('Voltage Sensitivity'); plot_optional_stage(voltage_polarity * voltage_sensitivity, t_voltage, has_voltage_sensitivity, 'Sensitivity stage unavailable'); add_stim_shading(gca, stim_windows.voltage, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
         subplot(2, 2, 2); hold on; title('Voltage SNR'); plot_optional_stage(voltage_polarity * voltage_snr, t_voltage, has_voltage_snr, 'SNR stage unavailable'); add_stim_shading(gca, stim_windows.voltage, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
         subplot(2, 2, 3); hold on; title(sprintf('Calcium Sensitivity (%s)', strrep(char(calcium_sensitivity_stage), '_', '\_'))); plot_optional_stage(calcium_polarity * calcium_sensitivity, t_calcium, has_calcium_sensitivity, 'Sensitivity stage unavailable'); add_stim_shading(gca, stim_windows.calcium, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
         subplot(2, 2, 4); hold on; title(sprintf('Calcium SNR (%s)', strrep(char(calcium_snr_stage), '_', '\_'))); plot_optional_stage(calcium_polarity * calcium_snr, t_calcium, has_calcium_snr, 'SNR stage unavailable'); add_stim_shading(gca, stim_windows.calcium, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
-        saveas(gcf, fullfile(save_path, '4_dual_trace_summary_with_stim.fig'), 'fig');
-        saveas(gcf, fullfile(save_path, '4_dual_trace_summary_with_stim.png'), 'png');
+        save_figure_bundle(stim_trace_fig, fullfile(save_path, '4_dual_trace_summary_with_stim.fig'), fullfile(save_path, '4_dual_trace_summary_with_stim.png'));
+        close(stim_trace_fig);
 
         voltage_stim_metrics_snr = compute_stim_trial_metrics(voltage_snr, stim_windows.voltage, voltage_polarity, freq_voltage);
         calcium_stim_metrics_snr = compute_stim_trial_metrics(calcium_snr, stim_windows.calcium, calcium_polarity, freq_calcium);
@@ -1190,7 +1562,7 @@ if stim_context.supported
 
             save(fullfile(save_path, '7_stim_tuning_summary.mat'), 'voltage_tuning', 'calcium_tuning');
 
-            figure('Color', 'w');
+            stim_tuning_fig = figure('Color', 'w');
             subplot(2, 2, 1);
             plot_tuning_population(voltage_tuning.unique_orientations, voltage_tuning.response_by_condition, 'r', 'Voltage');
             subplot(2, 2, 2);
@@ -1204,12 +1576,16 @@ if stim_context.supported
             xlim([0 360]); ylim([0 360]);
             xlabel('Voltage Pref. Dir (deg)'); ylabel('Calcium Pref. Dir (deg)');
             title('Preferred Direction'); grid on;
-            saveas(gcf, fullfile(save_path, '7_stim_tuning_summary.fig'), 'fig');
-            saveas(gcf, fullfile(save_path, '7_stim_tuning_summary.png'), 'png');
+            save_figure_bundle(stim_tuning_fig, fullfile(save_path, '7_stim_tuning_summary.fig'), fullfile(save_path, '7_stim_tuning_summary.png'));
+            close(stim_tuning_fig);
         else
             fprintf('Stim analysis branch: condition response\n');
             fprintf('  OSI/DSI: skipped\n');
             fprintf('  reason: non-grating stimulus type = %s\n', stim_context.stim_type);
+            if strcmpi(string(stim_context.stim_type), "visualstim_flash")
+                fprintf('  flash condition summary uses post-flash 2 s response windows\n');
+                fprintf('  flash delta summary compares response 2 s against the preceding gray 2 s baseline\n');
+            end
             voltage_block_summary_snr = summarize_block_by_condition( ...
                 voltage_snr, stim_windows.voltage, stim_windows.block_labels, voltage_polarity, stim_windows.trial_labels);
             calcium_block_summary_snr = summarize_block_by_condition( ...
@@ -1265,29 +1641,105 @@ else
 end
 save(stim_results_path, 'stim_results', '-v7.3');
 
+%% Population Time-Frequency Analysis
+% Replace the previous "oscillation event" summary with a more direct
+% frequency-domain view:
+%   1. Direct FFT amplitude spectra for dominant frequency content across ROIs
+%   2. Wavelet scalograms for how that content evolves over time
+% Important:
+%   use unsmoothed channel stages for spectral estimation here. The
+%   calcium movmean stage is still useful for time-domain display in other
+%   sections, but it can imprint comb-like ripple structure onto the PSD.
+print_section('Population Time-Frequency Analysis');
+fprintf('Running Fourier and wavelet analysis after dual/stim summaries...\n');
+[voltage_results, calcium_results] = load_channel_results( ...
+    voltage_results_path, calcium_results_path, voltage_results, calcium_results);
+
+time_frequency_results = run_dual_time_frequency_section( ...
+    voltage_results, calcium_results, ...
+    t_voltage, t_calcium, ...
+    freq_voltage, freq_calcium, ...
+    stim_windows, ...
+    save_path, ...
+    voltage_polarity, calcium_polarity);
+
+time_frequency_record = build_section_record( ...
+    'Population Time-Frequency Analysis', ...
+    'Summarize processed dual-channel traces with direct FFT spectra and wavelet time-frequency maps, while reusing the saved processed trace stages as section inputs.', ...
+    struct( ...
+        'voltage_results_file', string(voltage_results_path), ...
+        'calcium_results_file', string(calcium_results_path), ...
+        'stim_results_file', string(stim_results_path), ...
+        'voltage_stage', string(time_frequency_results.parameters.voltage_stage), ...
+        'calcium_stage', string(time_frequency_results.parameters.calcium_stage)), ...
+    time_frequency_results.parameters, ...
+    struct( ...
+        'fourier_summary_png', string(time_frequency_results.visualizations.fourier_summary.png_file), ...
+        'wavelet_summary_png', string(time_frequency_results.visualizations.wavelet_summary.png_file)), ...
+    struct(), ...
+    "To rerun the ROI-after analysis pipeline, set analysis_mode = 'analysis_only', point reuse_results_path to an existing Dual_analysis3 output folder, and run Dual_analysis3 again.");
+
+time_frequency_results.record = time_frequency_record;
+
+time_frequency_results_path = fullfile(save_path, '8_time_frequency_results.mat');
+save(time_frequency_results_path, 'time_frequency_results', '-v7.3');
+fprintf('Fourier summary saved to: %s\n', time_frequency_results.visualizations.fourier_summary.png_file);
+fprintf('Wavelet summary saved to: %s\n', time_frequency_results.visualizations.wavelet_summary.png_file);
+fprintf('Time-frequency result bundle saved to: %s\n', time_frequency_results_path);
+
 %% Save Explicit Results
 % Save one bundled snapshot for manual inspection. The modular section
 % files remain the main working outputs, while this file is a convenient
 % "open everything at once" archive.
 print_section('Save Explicit Results');
-explicit_dual_results = struct( ...
-    'dual_info', dual_info, ...
-    'voltage_results', voltage_results, ...
-    'calcium_results', calcium_results, ...
-    'dual_results', dual_results, ...
-    'stim_results', stim_results);
-save(fullfile(save_path, '-1_explicit_dual_results.mat'), 'explicit_dual_results', '-v7.3');
+save_explicit_dual_results_summary( ...
+    save_path, ...
+    dual_info, dual_info_path, ...
+    voltage_results, voltage_results_path, ...
+    calcium_results, calcium_results_path, ...
+    dual_results, dual_results_path, ...
+    stim_results, stim_results_path, ...
+    time_frequency_results, time_frequency_results_path);
 
 fprintf('Dual_analysis3 finished.\n');
 fprintf('Results saved to: %s\n', save_path);
 
-function [cycle_manifest, record_manifest, camera_source] = resolve_dual_camera_sources(cycle_path, camera_cfg)
+function [cycle_manifest, record_manifest, camera_source, input_layout_info] = resolve_dual_camera_sources(cycle_path, camera_cfg, camera_source_override, raw_dual_input_cfg)
 % Resolve where each camera movie came from and which label belongs to it.
 % The intent is to keep analysis inputs tied to acquisition metadata when
 % available, while still supporting older folder-only datasets.
 cycle_manifest = [];
 record_manifest = [];
 camera_source = repmat(struct('path', '', 'label', "", 'original_frame_size', [NaN, NaN]), 1, numel(camera_cfg));
+input_layout_info = struct( ...
+    'mode', "rebuild_or_legacy_cycle_folder", ...
+    'description', "Resolve from manifests first, then Cam*_ folders.", ...
+    'primary_path', "", ...
+    'green_path', "", ...
+    'green_suffix', "");
+
+if nargin < 4 || isempty(raw_dual_input_cfg)
+    raw_dual_input_cfg = struct();
+end
+raw_dual_input_cfg = normalize_raw_dual_input_cfg(raw_dual_input_cfg);
+
+if nargin >= 3 && ~isempty(camera_source_override)
+    camera_source = normalize_camera_source_override(camera_source_override, camera_cfg);
+    input_layout_info.mode = "explicit_camera_source_override";
+    input_layout_info.description = "Caller provided camera_source_override directly.";
+    return;
+end
+
+[raw_pair_source, raw_pair_found] = try_resolve_raw_dual_pair_sources(cycle_path, camera_cfg, raw_dual_input_cfg);
+if raw_pair_found
+    camera_source = raw_pair_source;
+    input_layout_info.mode = "paired_raw_channel_folders";
+    input_layout_info.description = "Resolved from one primary raw folder plus one sibling green raw folder.";
+    input_layout_info.primary_path = string(camera_source(find(strcmpi(string({camera_cfg.role}), string(raw_dual_input_cfg.primary_role)), 1, 'first')).path);
+    input_layout_info.green_path = string(camera_source(find(strcmpi(string({camera_cfg.role}), string(raw_dual_input_cfg.green_role)), 1, 'first')).path);
+    input_layout_info.green_suffix = string(raw_dual_input_cfg.green_suffix);
+    return;
+end
 
 cycle_manifest_file = fullfile(cycle_path, 'cycle_manifest.mat');
 record_manifest_file = fullfile(fileparts(cycle_path), 'record_manifest.mat');
@@ -1359,6 +1811,135 @@ for i = 1:numel(camera_cfg)
 end
 end
 
+function raw_dual_input_cfg = normalize_raw_dual_input_cfg(raw_dual_input_cfg)
+if ~isstruct(raw_dual_input_cfg)
+    error('raw_dual_input_cfg must be a struct when provided.');
+end
+if ~isfield(raw_dual_input_cfg, 'green_suffix') || strlength(string(raw_dual_input_cfg.green_suffix)) == 0
+    raw_dual_input_cfg.green_suffix = "_Green";
+end
+if ~isfield(raw_dual_input_cfg, 'primary_role') || strlength(string(raw_dual_input_cfg.primary_role)) == 0
+    raw_dual_input_cfg.primary_role = "voltage";
+end
+if ~isfield(raw_dual_input_cfg, 'green_role') || strlength(string(raw_dual_input_cfg.green_role)) == 0
+    raw_dual_input_cfg.green_role = "calcium";
+end
+end
+
+function [camera_source, found_pair] = try_resolve_raw_dual_pair_sources(cycle_path, camera_cfg, raw_dual_input_cfg)
+camera_source = repmat(struct('path', '', 'label', "", 'original_frame_size', [NaN, NaN]), 1, numel(camera_cfg));
+found_pair = false;
+
+if ~isfolder(cycle_path)
+    return;
+end
+
+folder_name = string(get_last_path_part(cycle_path));
+parent_dir = fileparts(cycle_path);
+green_suffix = string(raw_dual_input_cfg.green_suffix);
+primary_path = "";
+green_path = "";
+
+if strlength(folder_name) == 0 || strlength(green_suffix) == 0
+    return;
+end
+
+if endsWith(folder_name, green_suffix, 'IgnoreCase', true)
+    green_path = string(cycle_path);
+    primary_name = extractBefore(folder_name, strlength(folder_name) - strlength(green_suffix) + 1);
+    primary_candidate = fullfile(parent_dir, char(primary_name));
+    if isfolder(primary_candidate)
+        primary_path = string(primary_candidate);
+    else
+        return;
+    end
+else
+    green_candidate = fullfile(parent_dir, char(folder_name + green_suffix));
+    if isfolder(green_candidate)
+        primary_path = string(cycle_path);
+        green_path = string(green_candidate);
+    else
+        return;
+    end
+end
+
+role_names = string({camera_cfg.role});
+primary_role_idx = find(strcmpi(role_names, string(raw_dual_input_cfg.primary_role)), 1, 'first');
+green_role_idx = find(strcmpi(role_names, string(raw_dual_input_cfg.green_role)), 1, 'first');
+if isempty(primary_role_idx) || isempty(green_role_idx)
+    error(['Raw dual-folder pairing requires camera_cfg to contain roles matching ' ...
+        'raw_dual_input_cfg.primary_role and raw_dual_input_cfg.green_role.']);
+end
+
+camera_source(primary_role_idx).path = char(primary_path);
+camera_source(primary_role_idx).label = get_last_path_part(char(primary_path));
+camera_source(primary_role_idx).original_frame_size = [NaN, NaN];
+
+camera_source(green_role_idx).path = char(green_path);
+camera_source(green_role_idx).label = get_last_path_part(char(green_path));
+camera_source(green_role_idx).original_frame_size = [NaN, NaN];
+
+for idx = 1:numel(camera_source)
+    if strlength(string(camera_source(idx).path)) == 0
+        error('Raw dual-folder pairing did not assign a source path for camera_cfg entry %d.', idx);
+    end
+end
+
+found_pair = true;
+end
+
+function part_name = get_last_path_part(input_path)
+[~, part_name, ext_name] = fileparts(char(string(input_path)));
+part_name = [part_name, ext_name];
+end
+
+function camera_source = normalize_camera_source_override(camera_source_override, camera_cfg)
+% Normalize explicit camera-path overrides into the same struct layout used
+% by rebuilt inputs. This keeps the rest of the analysis blind to where
+% the movies originally came from.
+camera_source = repmat(struct('path', '', 'label', "", 'original_frame_size', [NaN, NaN]), 1, numel(camera_cfg));
+
+if ~isstruct(camera_source_override) || isempty(camera_source_override)
+    error('camera_source_override must be a non-empty struct array.');
+end
+
+for i = 1:numel(camera_cfg)
+    cam_idx = camera_cfg(i).camera_index;
+    match_idx = [];
+
+    if isfield(camera_source_override, 'camera_index')
+        match_idx = find([camera_source_override.camera_index] == cam_idx, 1, 'first');
+    end
+    if isempty(match_idx) && numel(camera_source_override) >= i
+        match_idx = i;
+    end
+    if isempty(match_idx)
+        error('camera_source_override is missing camera %d.', cam_idx);
+    end
+
+    source_i = camera_source_override(match_idx);
+    if ~isfield(source_i, 'path') || strlength(string(source_i.path)) == 0
+        error('camera_source_override for camera %d is missing a movie path.', cam_idx);
+    end
+
+    camera_source(i).path = char(string(source_i.path));
+    if ~exist(camera_source(i).path, 'file')
+        error('Explicit movie path does not exist for camera %d: %s', cam_idx, camera_source(i).path);
+    end
+
+    if isfield(source_i, 'label') && strlength(string(source_i.label)) > 0
+        camera_source(i).label = string(source_i.label);
+    else
+        [~, fallback_name, fallback_ext] = fileparts(camera_source(i).path);
+        camera_source(i).label = string([fallback_name, fallback_ext]);
+    end
+
+    if isfield(source_i, 'original_frame_size') && numel(source_i.original_frame_size) == 2
+        camera_source(i).original_frame_size = double(source_i.original_frame_size);
+    end
+end
+end
+
 function [movie_3d, ncols, nrows, nframes, original_ncols, original_nrows] = load_camera_movie(movie_path, do_transpose)
 % Load one camera movie and apply only the orientation normalization needed
 % for consistent later ROI analysis. No biological processing happens yet.
@@ -1379,6 +1960,485 @@ if do_transpose
 end
 
 [ncols, nrows, nframes] = size(movie_3d);
+end
+
+function save_base_dir = resolve_dual_analysis_save_base_dir(cycle_path, camera_cfg, raw_dual_input_cfg)
+save_base_dir = cycle_path;
+try
+    [~, raw_pair_found] = try_resolve_raw_dual_pair_sources(cycle_path, camera_cfg, raw_dual_input_cfg);
+    if raw_pair_found
+        parent_dir = fileparts(cycle_path);
+        if strlength(string(parent_dir)) > 0
+            save_base_dir = parent_dir;
+        end
+    end
+catch
+    % Save-path selection should stay conservative. If raw-pair detection
+    % fails here, fall back to the historical cycle_path-local save root
+    % and let the later input-resolution stage raise the real error.
+end
+end
+
+function [mask_voltage, mask_calcium, note_text] = resolve_reuse_dual_masks(roi_cache, offset_xy, correct_offset_mode)
+mask_voltage = [];
+mask_calcium = [];
+note_text = "";
+
+if isfield(roi_cache, 'rois') && isstruct(roi_cache.rois)
+    rois_cache = roi_cache.rois;
+else
+    rois_cache = struct();
+end
+
+if isfield(rois_cache, 'bwmask') && ~isempty(rois_cache.bwmask)
+    mask_voltage = rois_cache.bwmask;
+elseif isfield(roi_cache, 'bwmask') && ~isempty(roi_cache.bwmask)
+    mask_voltage = roi_cache.bwmask;
+end
+
+if isfield(rois_cache, 'bwmask_ca') && ~isempty(rois_cache.bwmask_ca)
+    mask_calcium = rois_cache.bwmask_ca;
+elseif isfield(roi_cache, 'bwmask_ca') && ~isempty(roi_cache.bwmask_ca)
+    mask_calcium = roi_cache.bwmask_ca;
+end
+
+if isempty(mask_voltage) && isempty(mask_calcium)
+    return;
+end
+
+if isempty(mask_voltage) && ~isempty(mask_calcium)
+    if has_valid_dual_offset(offset_xy)
+        mask_voltage = translate_label_mask_by_offset(mask_calcium, offset_xy(1), offset_xy(2));
+        note_text = "Reuse ROI fallback: only calcium mask was found, so voltage mask was reconstructed from offset.";
+    else
+        mask_voltage = mask_calcium;
+        note_text = "Reuse ROI fallback: only calcium mask was found, so it was copied to voltage.";
+    end
+    return;
+end
+
+if ~isempty(mask_voltage) && isempty(mask_calcium)
+    if has_valid_dual_offset(offset_xy)
+        mask_calcium = translate_label_mask_by_offset(mask_voltage, -offset_xy(1), -offset_xy(2));
+        if strcmpi(string(correct_offset_mode), "matlab_register")
+            note_text = ['Reuse ROI fallback: old ROI file only contains one bwmask. ' ...
+                'bwmask_ca was reconstructed from the matlab_register offset without moving the movie data.'];
+        elseif strcmpi(string(correct_offset_mode), "manual_points")
+            note_text = ['Reuse ROI fallback: old ROI file only contains one bwmask. ' ...
+                'bwmask_ca was reconstructed from the manually selected offset without moving the movie data.'];
+        else
+            note_text = ['Reuse ROI fallback: old ROI file only contains one bwmask. ' ...
+                'bwmask_ca was reconstructed from the available offset.'];
+        end
+    elseif strcmpi(string(correct_offset_mode), "manual_points")
+        note_text = ['Reuse ROI fallback: old ROI file only contains one bwmask. ' ...
+            'manual_points mode will estimate a fresh offset first, then rebuild bwmask_ca from the saved voltage ROI mask.'];
+    else
+        error(['The provided reuse_roi_file only contains one mask (bwmask) and no bwmask_ca. ' ...
+            'Provide a valid offset or a dual ROI file that contains both masks.']);
+    end
+end
+end
+
+function tf = has_valid_dual_offset(offset_xy)
+tf = ~isempty(offset_xy) && isnumeric(offset_xy) && numel(offset_xy) == 2 && all(isfinite(offset_xy));
+end
+
+function translated_mask = translate_label_mask_by_offset(mask_in, dx, dy)
+mask_in = double(mask_in);
+if exist('imtranslate', 'file') == 2
+    translated_mask = imtranslate(mask_in, [dx, dy], 'nearest', 'FillValues', 0);
+else
+    translated_mask = shift_label_mask_integer(mask_in, dx, dy);
+end
+translated_mask = round(translated_mask);
+translated_mask(translated_mask < 0) = 0;
+end
+
+function shifted_mask = shift_label_mask_integer(mask_in, dx, dy)
+shift_x = round(dx);
+shift_y = round(dy);
+shifted_mask = zeros(size(mask_in));
+[nrows_mask, ncols_mask] = size(mask_in);
+
+src_rows = max(1, 1 - shift_y):min(nrows_mask, nrows_mask - shift_y);
+src_cols = max(1, 1 - shift_x):min(ncols_mask, ncols_mask - shift_x);
+dst_rows = src_rows + shift_y;
+dst_cols = src_cols + shift_x;
+if isempty(src_rows) || isempty(src_cols)
+    return;
+end
+shifted_mask(dst_rows, dst_cols) = mask_in(src_rows, src_cols);
+end
+
+function [registration_info, roi_offset_mode_for_selection] = estimate_dual_channel_registration_offset( ...
+    movie_voltage, movie_calcium, nrows, ncols, correct_offset_mode, save_path)
+registration_info = struct( ...
+    'mode', string(correct_offset_mode), ...
+    'applied', false, ...
+    'offset_xy', [], ...
+    'preview_fig', '', ...
+    'preview_png', '', ...
+    'note', '');
+roi_offset_mode_for_selection = string(correct_offset_mode);
+
+if strcmpi(string(correct_offset_mode), "none")
+    registration_info.note = 'No automatic registration offset estimated in this mode.';
+    return;
+end
+
+mean_voltage = reshape(mean(double(movie_voltage), 2), ncols, nrows);
+mean_calcium = reshape(mean(double(movie_calcium), 2), ncols, nrows);
+
+switch lower(string(correct_offset_mode))
+    case "manual_points"
+        [offset_xy, preview_fig, preview_png] = estimate_dual_offset_from_manual_points_main( ...
+            mean_voltage, mean_calcium, save_path);
+        registration_info.applied = true;
+        registration_info.offset_xy = offset_xy;
+        registration_info.preview_fig = preview_fig;
+        registration_info.preview_png = preview_png;
+        registration_info.note = ['Offset was picked manually from the two average images before ROI selection. ' ...
+            'Movie data are not moved here.'];
+    case "matlab_register"
+        [offset_xy, preview_fig, preview_png] = estimate_dual_offset_with_matlab_register_main(mean_voltage, mean_calcium, save_path);
+        registration_info.applied = true;
+        registration_info.offset_xy = offset_xy;
+        registration_info.preview_fig = preview_fig;
+        registration_info.preview_png = preview_png;
+        registration_info.note = 'Offset maps calcium coordinates into voltage coordinates. Movie data are not moved here.';
+    otherwise
+        error('Unsupported correct_offset_mode during channel registration: %s', char(string(correct_offset_mode)));
+end
+
+% Offset estimation is handled at the script level so ROI selection can
+% stay focused on ROI replay/drawing instead of opening a second point-pick
+% path inside select_ROI_dual.
+roi_offset_mode_for_selection = "none";
+end
+
+function [offset_xy, fig_file, png_file] = estimate_dual_offset_from_manual_points_main(mean_voltage, mean_calcium, save_path)
+if ~usejava('desktop')
+    error(['manual_points requires a MATLAB Desktop session because the offset is picked ' ...
+        'directly on the voltage and calcium average images.']);
+end
+
+display_voltage = normalize_dual_registration_image_main(mean_voltage);
+display_calcium = normalize_dual_registration_image_main(mean_calcium);
+
+fig = figure('Color', 'w', 'Name', 'Dual Manual Offset Selection', ...
+    'Position', [100, 100, 1200, 520]);
+ax_voltage = subplot(1, 2, 1, 'Parent', fig);
+imshow(display_voltage, 'Parent', ax_voltage);
+title(ax_voltage, 'Voltage Average: click reference point');
+ax_calcium = subplot(1, 2, 2, 'Parent', fig);
+imshow(display_calcium, 'Parent', ax_calcium);
+title(ax_calcium, 'Calcium Average: click matching point');
+
+disp(['Manual dual offset estimation: first click one point on the Voltage Average image, ' ...
+    'then click the matching point on the Calcium Average image.']);
+
+axes(ax_voltage); %#ok<LAXES>
+[x_voltage, y_voltage] = ginput(1);
+hold(ax_voltage, 'on');
+plot(ax_voltage, x_voltage, y_voltage, 'ro', 'MarkerSize', 10, 'LineWidth', 1.5);
+text(ax_voltage, x_voltage, y_voltage, ' Voltage point', 'Color', [0.8 0.1 0.1], ...
+    'FontWeight', 'bold', 'Interpreter', 'none');
+
+axes(ax_calcium); %#ok<LAXES>
+[x_calcium, y_calcium] = ginput(1);
+hold(ax_calcium, 'on');
+plot(ax_calcium, x_calcium, y_calcium, 'go', 'MarkerSize', 10, 'LineWidth', 1.5);
+text(ax_calcium, x_calcium, y_calcium, ' Calcium point', 'Color', [0.1 0.6 0.1], ...
+    'FontWeight', 'bold', 'Interpreter', 'none');
+
+offset_xy = [x_voltage - x_calcium, y_voltage - y_calcium];
+sgtitle(fig, sprintf('Manual offset [x y] = [%.3f %.3f]', offset_xy(1), offset_xy(2)));
+
+fig_file = fullfile(save_path, '0_dual_manual_points_preview.fig');
+png_file = fullfile(save_path, '0_dual_manual_points_preview.png');
+save_figure_bundle_preserve_layout(fig, fig_file, png_file);
+close(fig);
+end
+
+function [offset_xy, fig_file, png_file] = estimate_dual_offset_with_matlab_register_main(mean_voltage, mean_calcium, save_path)
+if exist('imregconfig', 'file') ~= 2 || exist('imregtform', 'file') ~= 2
+    error(['MATLAB built-in registration requires imregconfig and imregtform ' ...
+        '(Image Processing Toolbox).']);
+end
+
+fixed_image = normalize_dual_registration_image_main(mean_voltage);
+moving_image = normalize_dual_registration_image_main(mean_calcium);
+[optimizer, metric] = imregconfig('multimodal');
+tform = imregtform(moving_image, fixed_image, 'translation', optimizer, metric);
+offset_xy = [double(tform.T(3, 1)), double(tform.T(3, 2))];
+
+registered_moving = apply_xy_shift_to_image(moving_image, offset_xy);
+fig = figure('Color', 'w', 'Name', 'Dual MATLAB Register Preview');
+subplot(1, 3, 1); imshowpair(fixed_image, moving_image); title('Voltage vs Raw Calcium');
+subplot(1, 3, 2); imshowpair(fixed_image, registered_moving); title(sprintf('Voltage vs Registered Calcium [%.2f %.2f]', offset_xy(1), offset_xy(2)));
+subplot(1, 3, 3); imagesc(cat(3, fixed_image, registered_moving, zeros(size(fixed_image)))); axis image off; title('Color Merge Preview');
+fig_file = fullfile(save_path, '0_dual_matlab_register_preview.fig');
+png_file = fullfile(save_path, '0_dual_matlab_register_preview.png');
+save_figure_bundle_preserve_layout(fig, fig_file, png_file);
+close(fig);
+end
+
+function image_out = normalize_dual_registration_image_main(image_in)
+image_out = double(image_in);
+image_out(~isfinite(image_out)) = 0;
+if exist('mat2gray', 'file') == 2
+    image_out = mat2gray(image_out);
+else
+    finite_values = image_out(isfinite(image_out));
+    if isempty(finite_values)
+        image_out = zeros(size(image_out));
+    else
+        min_value = min(finite_values);
+        max_value = max(finite_values);
+        if max_value > min_value
+            image_out = (image_out - min_value) ./ (max_value - min_value);
+        else
+            image_out = zeros(size(image_out));
+        end
+    end
+end
+end
+
+function shifted_image = apply_xy_shift_to_image(image_in, offset_xy)
+if exist('imtranslate', 'file') == 2
+    shifted_image = imtranslate(double(image_in), offset_xy, 'FillValues', 0);
+else
+    shifted_image = shift_label_mask_integer(double(image_in), offset_xy(1), offset_xy(2));
+end
+end
+
+function [rgb_preview, info] = save_dual_average_color_merge( ...
+    movie_voltage, movie_calcium, nrows, ncols, offset_xy, ...
+    tif_path, png_path, tif_roi_path, png_roi_path, rois)
+mean_voltage = reshape(mean(double(movie_voltage), 2), ncols, nrows);
+mean_calcium = reshape(mean(double(movie_calcium), 2), ncols, nrows);
+mean_calcium_aligned = mean_calcium;
+if has_valid_dual_offset(offset_xy)
+    mean_calcium_aligned = apply_xy_shift_to_image(mean_calcium, offset_xy);
+end
+
+voltage_uint16 = scale_image_to_uint16_display(mean_voltage);
+calcium_uint16 = scale_image_to_uint16_display(mean_calcium_aligned);
+rgb_preview = cat(3, voltage_uint16, calcium_uint16, zeros(size(voltage_uint16), 'uint16'));
+imwrite(rgb_preview, tif_path, 'tif', 'Compression', 'none');
+imwrite(rgb_preview, png_path, 'png');
+
+rgb_with_roi = rgb_preview;
+if nargin >= 10 && isstruct(rois) && isfield(rois, 'boundary') && ~isempty(rois.boundary)
+    rgb_with_roi = draw_roi_boundaries_on_rgb_merge(rgb_with_roi, rois.boundary);
+    imwrite(rgb_with_roi, tif_roi_path, 'tif', 'Compression', 'none');
+    imwrite(rgb_with_roi, png_roi_path, 'png');
+end
+
+info = struct( ...
+    'tif_file', tif_path, ...
+    'png_file', png_path, ...
+    'tif_roi_file', tif_roi_path, ...
+    'png_roi_file', png_roi_path, ...
+    'offset_xy_used_for_alignment', offset_xy, ...
+    'alignment_rule', 'calcium average image shifted by offset into voltage coordinates before RGB merge', ...
+    'roi_overlay_rule', 'Voltage ROI boundaries are overlaid on the aligned RGB merge image', ...
+    'created_at', datetime("now"));
+end
+
+function rgb_out = draw_roi_boundaries_on_rgb_merge(rgb_in, boundary_cells)
+rgb_out = rgb_in;
+if isempty(boundary_cells)
+    return;
+end
+
+[image_height, image_width, ~] = size(rgb_out);
+overlay_color = uint16(65535);
+for roi_idx = 1:numel(boundary_cells)
+    boundary = boundary_cells{roi_idx};
+    if isempty(boundary) || size(boundary, 2) < 2
+        continue;
+    end
+    row_idx = round(boundary(:, 1));
+    col_idx = round(boundary(:, 2));
+    valid = row_idx >= 1 & row_idx <= image_height & col_idx >= 1 & col_idx <= image_width;
+    row_idx = row_idx(valid);
+    col_idx = col_idx(valid);
+    if isempty(row_idx)
+        continue;
+    end
+    linear_idx = sub2ind([image_height, image_width], row_idx, col_idx);
+    for channel_idx = 1:3
+        channel_plane = rgb_out(:, :, channel_idx);
+        channel_plane(linear_idx) = overlay_color;
+        rgb_out(:, :, channel_idx) = channel_plane;
+    end
+end
+end
+
+function [saved_ok, info] = save_dual_map_with_roi(map_voltage, map_calcium, rois, fig_path, png_path)
+saved_ok = false;
+info = struct();
+if isempty(map_voltage) || isempty(map_calcium) || ~isstruct(rois) ...
+        || ~isfield(rois, 'boundary') || ~isfield(rois, 'boundary_ca')
+    return;
+end
+
+fig = figure('Color', 'w');
+ax1 = subplot(1, 2, 1, 'Parent', fig);
+imagesc(ax1, map_voltage);
+axis(ax1, 'image');
+title(ax1, 'Voltage Sensitivity Map With ROI');
+colorbar(ax1);
+hold(ax1, 'on');
+overlay_roi_boundaries(ax1, rois.boundary, 'w');
+
+ax2 = subplot(1, 2, 2, 'Parent', fig);
+imagesc(ax2, map_calcium);
+axis(ax2, 'image');
+title(ax2, 'Calcium Sensitivity Map With ROI');
+colorbar(ax2);
+hold(ax2, 'on');
+overlay_roi_boundaries(ax2, rois.boundary_ca, 'w');
+
+save_figure_bundle_preserve_layout(fig, fig_path, png_path);
+close(fig);
+saved_ok = true;
+info = struct( ...
+    'fig_file', fig_path, ...
+    'png_file', png_path, ...
+    'overlay_rule', 'Voltage ROI boundaries on voltage map and calcium ROI boundaries on calcium map', ...
+    'created_at', datetime("now"));
+end
+
+function overlay_roi_boundaries(ax, boundary_cells, edge_color)
+if isempty(boundary_cells)
+    return;
+end
+for roi_idx = 1:numel(boundary_cells)
+    boundary = boundary_cells{roi_idx};
+    if isempty(boundary) || size(boundary, 2) < 2
+        continue;
+    end
+    plot(ax, boundary(:, 2), boundary(:, 1), 'Color', edge_color, 'LineWidth', 0.8);
+end
+end
+
+function image_uint16 = scale_image_to_uint16_display(image_in)
+image_in = double(image_in);
+image_in(~isfinite(image_in)) = 0;
+low_q = quantile(image_in(:), 0.0005);
+high_q = quantile(image_in(:), 0.9995);
+if ~isfinite(low_q) || ~isfinite(high_q) || high_q <= low_q
+    image_uint16 = zeros(size(image_in), 'uint16');
+    return;
+end
+image_scaled = (image_in - low_q) ./ (high_q - low_q);
+image_scaled(image_scaled < 0) = 0;
+image_scaled(image_scaled > 1) = 1;
+image_uint16 = uint16(round(image_scaled * 65535));
+end
+
+function correct_offset_mode = normalize_correct_offset_mode_dual(correct_offset_mode)
+if islogical(correct_offset_mode) || (isnumeric(correct_offset_mode) && isscalar(correct_offset_mode))
+    if logical(correct_offset_mode)
+        correct_offset_mode = "manual_points";
+    else
+        correct_offset_mode = "none";
+    end
+    return;
+end
+
+correct_offset_mode = lower(strtrim(string(correct_offset_mode)));
+if numel(correct_offset_mode) ~= 1
+    error('correct_offset_mode must resolve to one scalar mode.');
+end
+
+switch correct_offset_mode
+    case {"none", "off", "false", "0", "reuse_or_zero"}
+        correct_offset_mode = "none";
+    case {"manual", "manual_point", "manual_points", "points", "point"}
+        correct_offset_mode = "manual_points";
+    case {"matlab_register", "register", "imreg", "imregtform"}
+        correct_offset_mode = "matlab_register";
+    otherwise
+        error(['Unsupported correct_offset_mode: %s. Use ''none'', ' ...
+            '''manual_points'', or ''matlab_register''.'], char(correct_offset_mode));
+end
+end
+
+function resolution = resolve_dual_reuse_roi_source(reuse_results_path, reuse_roi_file)
+resolution = struct( ...
+    'effective_roi_file', "", ...
+    'source', "none", ...
+    'results_candidate', "", ...
+    'message', "");
+
+results_path_text = strtrim(string(reuse_results_path));
+roi_file_text = strtrim(string(reuse_roi_file));
+
+results_candidate = "";
+if strlength(results_path_text) > 0
+    if isfolder(char(results_path_text))
+        results_candidate = fullfile(char(results_path_text), '1_dual_roi_results.mat');
+    elseif isfile(char(results_path_text))
+        [~, results_name, results_ext] = fileparts(char(results_path_text));
+        if strcmpi([results_name results_ext], '1_dual_roi_results.mat')
+            results_candidate = results_path_text;
+        end
+    end
+end
+resolution.results_candidate = string(results_candidate);
+
+results_candidate_exists = strlength(string(results_candidate)) > 0 && isfile(char(results_candidate));
+roi_file_exists = strlength(roi_file_text) > 0 && isfile(char(roi_file_text));
+has_conflict = results_candidate_exists && roi_file_exists ...
+    && ~strcmpi(char(string(results_candidate)), char(roi_file_text));
+
+if results_candidate_exists
+    resolution.effective_roi_file = string(results_candidate);
+    resolution.source = "reuse_results_path";
+    if has_conflict
+        resolution.message = sprintf(['ROI reuse conflict: reuse_results_path has higher priority, so this run will use\n' ...
+            '  %s\ninstead of\n  %s'], char(string(results_candidate)), char(roi_file_text));
+    elseif roi_file_exists
+        resolution.message = sprintf('ROI reuse: both reuse_results_path and reuse_roi_file resolve to the same file: %s', ...
+            char(string(results_candidate)));
+    elseif strlength(results_path_text) > 0
+        resolution.message = sprintf('ROI reuse: using 1_dual_roi_results.mat from reuse_results_path: %s', ...
+            char(string(results_candidate)));
+    end
+    return;
+end
+
+if strlength(results_path_text) > 0 && strlength(string(results_candidate)) > 0 && ~results_candidate_exists
+    if roi_file_exists
+        resolution.effective_roi_file = roi_file_text;
+        resolution.source = "reuse_roi_file_fallback";
+        resolution.message = sprintf(['ROI reuse warning: reuse_results_path was given higher priority, but its expected ROI file was not found:\n' ...
+            '  %s\nFalling back to reuse_roi_file:\n  %s'], ...
+            char(string(results_candidate)), char(roi_file_text));
+        return;
+    else
+        resolution.message = sprintf(['ROI reuse warning: reuse_results_path was provided, but its expected ROI file was not found:\n' ...
+            '  %s'], char(string(results_candidate)));
+        return;
+    end
+end
+
+if roi_file_exists
+    resolution.effective_roi_file = roi_file_text;
+    resolution.source = "reuse_roi_file";
+    resolution.message = sprintf('ROI reuse: using explicit reuse_roi_file: %s', char(roi_file_text));
+    return;
+end
+
+if strlength(roi_file_text) > 0
+    resolution.effective_roi_file = roi_file_text;
+    resolution.source = "reuse_roi_file_missing";
+    resolution.message = sprintf('ROI reuse warning: explicit reuse_roi_file was provided but not found: %s', char(roi_file_text));
+end
 end
 
 function [voltage_data, calcium_data, geometry_info] = match_camera_geometry(voltage_data, calcium_data)
@@ -1491,7 +2551,7 @@ end
 fprintf('All required code files were copied to %s\n', code_path);
 end
 
-function [voltage_corrected, calcium_corrected, voltage_motion_info, calcium_motion_info] = run_shared_motion_correction(voltage_movie, calcium_movie, save_path, cfg)
+function [voltage_corrected, calcium_corrected, voltage_motion_info, calcium_motion_info] = run_shared_motion_correction(voltage_movie, calcium_movie, cycle_path, save_path, cfg)
 % Estimate one shared motion model on voltage, then apply the same shifts
 % to calcium so both channels remain spatially coupled after correction.
 voltage_corrected = voltage_movie;
@@ -1501,17 +2561,28 @@ voltage_motion_info = struct( ...
     'applied', false, ...
     'method', '', ...
     'shift_file', '', ...
+    'source_shift_file', '', ...
     'parameter_file', '', ...
+    'downsample_factor', NaN, ...
+    'downsampled_tif_file', '', ...
+    'metrics_file', '', ...
+    'metrics_fig', '', ...
+    'metrics_png', '', ...
     'highpass', cfg.highpass, ...
     'use_saved_shift', cfg.use_saved_shift, ...
+    'auto_reused_previous_shift', false, ...
     'shared_with_role', 'calcium');
 calcium_motion_info = struct( ...
     'applied', false, ...
     'method', '', ...
     'shift_file', '', ...
+    'source_shift_file', '', ...
     'parameter_file', '', ...
+    'downsample_factor', NaN, ...
+    'downsampled_tif_file', '', ...
     'highpass', cfg.highpass, ...
     'use_saved_shift', cfg.use_saved_shift, ...
+    'auto_reused_previous_shift', false, ...
     'source_role', 'voltage');
 
 if ~cfg.enabled
@@ -1534,24 +2605,38 @@ shift_res_path = fullfile(save_path, 'shared_motion_shifts_result.mat');
 params_save_path = fullfile(save_path, 'shared_motion_correction_para.mat');
 voltage_single = single(voltage_movie);
 calcium_single = single(calcium_movie);
+if cfg.highpass
+    % Use the same high-pass-preprocessed voltage movie for motion-quality
+    % metrics so the raw-vs-corrected comparison matches the shift
+    % estimation target used by NoRMCorre.
+    movie_for_estimation = create_temp_highpass(voltage_single);
+else
+    movie_for_estimation = voltage_single;
+end
 
-if cfg.use_saved_shift && ~isempty(cfg.saved_shift_file)
+shift_source_file = string(cfg.saved_shift_file);
+auto_reused_previous_shift = false;
+if strlength(shift_source_file) == 0 && cfg.auto_reuse_previous_shift
+    shift_source_file = find_latest_previous_motion_shift(cycle_path, save_path);
+    auto_reused_previous_shift = strlength(shift_source_file) > 0;
+end
+
+if (cfg.use_saved_shift && strlength(shift_source_file) > 0) || auto_reused_previous_shift
     % Reusing a previously estimated shift field is useful when iterating
     % on later sections without recomputing motion every time.
-    shift_data = load(cfg.saved_shift_file);
+    fprintf('Reusing existing motion shift file:\n  %s\n', shift_source_file);
+    shift_data = load(char(shift_source_file));
     if isfield(shift_data, 'options_r')
         options_r = shift_data.options_r;
     end
-    shifts_r = shift_data.shifts_r;
-    copyfile(cfg.saved_shift_file, shift_res_path);
-else
-    if cfg.highpass
-        % High-pass preprocessing helps the registration focus more on
-        % structure than on slow brightness drift.
-        movie_for_estimation = create_temp_highpass(voltage_single);
-    else
-        movie_for_estimation = voltage_single;
+    if ~isfield(shift_data, 'shifts_r')
+        error('Saved motion shift file does not contain shifts_r: %s', shift_source_file);
     end
+    shifts_r = shift_data.shifts_r;
+    if ~strcmpi(char(shift_source_file), shift_res_path)
+        copyfile(char(shift_source_file), shift_res_path);
+    end
+else
     [~, shifts_r, ~] = normcorre_batch(movie_for_estimation, options_r);
     save(shift_res_path, 'shifts_r', 'options_r', '-v7.3');
 end
@@ -1560,15 +2645,131 @@ voltage_corrected = apply_shifts(voltage_single, shifts_r, options_r);
 calcium_corrected = apply_shifts(calcium_single, shifts_r, options_r);
 save(params_save_path, 'options_r', 'cfg');
 
+% Save the same tsub=40 motion-corrected QC TIFF that AP_analysis2 /
+% AP_analysis3 produce, but do it for both channels in the shared-motion
+% dual workflow.
+downsample_factor = 40;
+voltage_ds_path = fullfile(save_path, sprintf('voltage_motion_corrected_ds%d.tif', downsample_factor));
+calcium_ds_path = fullfile(save_path, sprintf('calcium_motion_corrected_ds%d.tif', downsample_factor));
+save_downsampled_motion_tif(voltage_corrected, downsample_factor, voltage_ds_path);
+save_downsampled_motion_tif(calcium_corrected, downsample_factor, calcium_ds_path);
+
+% Quantify motion-correction quality on the voltage reference movie,
+% because the shared shift field is estimated from voltage and then reused
+% by calcium.
+voltage_corrected_for_estimation = apply_shifts(movie_for_estimation, shifts_r, options_r);
+motion_metrics_file = fullfile(save_path, 'shared_motion_metrics.mat');
+motion_metrics_fig = fullfile(save_path, 'shared_motion_metrics.fig');
+motion_metrics_png = fullfile(save_path, 'shared_motion_metrics.png');
+save_shared_motion_metrics( ...
+    movie_for_estimation, voltage_corrected_for_estimation, ...
+    voltage_single, voltage_corrected, ...
+    shifts_r, options_r.max_shift, ...
+    motion_metrics_file, motion_metrics_fig, motion_metrics_png);
+
 voltage_motion_info.applied = true;
 voltage_motion_info.method = 'NoRMCorre_rigid_shared_voltage_reference';
 voltage_motion_info.shift_file = shift_res_path;
+voltage_motion_info.source_shift_file = char(shift_source_file);
 voltage_motion_info.parameter_file = params_save_path;
+voltage_motion_info.downsample_factor = downsample_factor;
+voltage_motion_info.downsampled_tif_file = voltage_ds_path;
+voltage_motion_info.metrics_file = motion_metrics_file;
+voltage_motion_info.metrics_fig = motion_metrics_fig;
+voltage_motion_info.metrics_png = motion_metrics_png;
+voltage_motion_info.use_saved_shift = cfg.use_saved_shift || auto_reused_previous_shift;
+voltage_motion_info.auto_reused_previous_shift = auto_reused_previous_shift;
 
 calcium_motion_info.applied = true;
 calcium_motion_info.method = 'reuse_voltage_motion_shifts';
 calcium_motion_info.shift_file = shift_res_path;
+calcium_motion_info.source_shift_file = char(shift_source_file);
 calcium_motion_info.parameter_file = params_save_path;
+calcium_motion_info.downsample_factor = downsample_factor;
+calcium_motion_info.downsampled_tif_file = calcium_ds_path;
+calcium_motion_info.use_saved_shift = cfg.use_saved_shift || auto_reused_previous_shift;
+calcium_motion_info.auto_reused_previous_shift = auto_reused_previous_shift;
+end
+
+function save_downsampled_motion_tif(movie_3d, downsample_factor, save_path_tif)
+if exist('downsample_data', 'file') ~= 2
+    error('NoRMCorre helper downsample_data is required to save downsampled motion-corrected TIFFs.');
+end
+if exist('array2tif', 'file') ~= 2
+    error('array2tif helper is required to save downsampled motion-corrected TIFFs.');
+end
+movie_ds = downsample_data(movie_3d, 'time', downsample_factor);
+movie_ds = scale_movie_to_uint16_display(movie_ds);
+array2tif(uint16(movie_ds), save_path_tif);
+end
+
+function movie_scaled = scale_movie_to_uint16_display(movie_3d)
+nn = quantile(movie_3d(:), 0.0005);
+mm = quantile(movie_3d(:), 0.99995);
+if ~isfinite(nn) || ~isfinite(mm) || mm <= nn
+    movie_scaled = zeros(size(movie_3d), 'single');
+    return;
+end
+movie_scaled = (single(movie_3d) - nn) / (mm - nn) * 65535;
+movie_scaled(movie_scaled < 0) = 0;
+movie_scaled(movie_scaled > 65535) = 65535;
+end
+
+function save_shared_motion_metrics(filtered_raw, filtered_corrected, full_raw, full_corrected, shifts_r, max_shift, mat_file, fig_file, png_file)
+if exist('motion_metrics', 'file') ~= 2
+    error('NoRMCorre helper motion_metrics is required for motion-correction QC metrics.');
+end
+[c_filtered_raw, m_filtered_raw, v_filtered_raw] = motion_metrics(filtered_raw, max_shift);
+[c_filtered_corrected, m_filtered_corrected, v_filtered_corrected] = motion_metrics(filtered_corrected, max_shift);
+[c_full_raw, m_full_raw, v_full_raw] = motion_metrics(full_raw, max_shift);
+[c_full_corrected, m_full_corrected, v_full_corrected] = motion_metrics(full_corrected, max_shift);
+shifts_plot = squeeze(cat(3, shifts_r(:).shifts));
+metrics_data = struct( ...
+    'rigid_shifts', shifts_plot, ...
+    'filtered', struct( ...
+        'correlation_raw', c_filtered_raw, ...
+        'correlation_corrected', c_filtered_corrected, ...
+        'mean_raw', m_filtered_raw, ...
+        'mean_corrected', m_filtered_corrected, ...
+        'variance_raw', v_filtered_raw, ...
+        'variance_corrected', v_filtered_corrected), ...
+    'full', struct( ...
+        'correlation_raw', c_full_raw, ...
+        'correlation_corrected', c_full_corrected, ...
+        'mean_raw', m_full_raw, ...
+        'mean_corrected', m_full_corrected, ...
+        'variance_raw', v_full_raw, ...
+        'variance_corrected', v_full_corrected));
+save(mat_file, 'metrics_data', '-v7.3');
+
+fig = figure('Color', 'w', 'Name', 'Shared Motion Metrics');
+subplot(3, 1, 1);
+plot(shifts_plot, 'LineWidth', 1);
+title('Shared Rigid Shifts');
+legend('y-shifts', 'x-shifts');
+grid on;
+
+subplot(3, 1, 2);
+plot(c_filtered_raw, 'Color', [0.45 0.45 0.45], 'LineWidth', 1);
+hold on;
+plot(c_filtered_corrected, 'r', 'LineWidth', 1.2);
+title('Correlation Coefficients On Filtered Voltage Movie');
+legend('raw', 'corrected');
+ylim([0.8, 1]);
+grid on;
+
+subplot(3, 1, 3);
+plot(c_full_raw, 'Color', [0.45 0.45 0.45], 'LineWidth', 1);
+hold on;
+plot(c_full_corrected, 'r', 'LineWidth', 1.2);
+title('Correlation Coefficients On Full Voltage Movie');
+legend('raw', 'corrected');
+ylim([0.8, 1]);
+grid on;
+xlabel('Frame');
+
+save_figure_bundle(fig, fig_file, png_file);
+close(fig);
 end
 
 function [traces_bleach_removed, baseline, parameters] = run_bleach_removal(traces_bg_removed, freq, t_axis, bleach_mode)
@@ -1591,6 +2792,38 @@ switch lower(bleach_mode)
     otherwise
         error('Unsupported bleach_mode: %s', bleach_mode);
 end
+end
+
+function shift_file = find_latest_previous_motion_shift(cycle_path, current_save_path)
+shift_file = "";
+dual_root = fullfile(cycle_path, 'Dual_analysis3');
+if ~isfolder(dual_root)
+    return;
+end
+
+listing = dir(fullfile(dual_root, '**', 'shared_motion_shifts_result.mat'));
+if isempty(listing)
+    return;
+end
+
+current_save_path = string(current_save_path);
+candidate_paths = strings(0, 1);
+candidate_times = zeros(0, 1);
+for idx = 1:numel(listing)
+    candidate = string(fullfile(listing(idx).folder, listing(idx).name));
+    if strncmpi(char(candidate), char(current_save_path), strlength(current_save_path))
+        continue;
+    end
+    candidate_paths(end+1, 1) = candidate; %#ok<AGROW>
+    candidate_times(end+1, 1) = listing(idx).datenum; %#ok<AGROW>
+end
+
+if isempty(candidate_paths)
+    return;
+end
+
+[~, newest_idx] = max(candidate_times);
+shift_file = candidate_paths(newest_idx);
 end
 
 function [noise_reference, noise, sensitivity, snr_value, info] = compute_voltage_metrics(traces_bleach_removed, baseline)
@@ -1659,7 +2892,7 @@ info = struct( ...
     'snr_parameters', struct('signal_stage', 'bleach_removed', 'noise_stage', 'noise'));
 end
 
-function stim_context = resolve_stim_context(cycle_path, cycle_manifest, record_manifest, voltage_camera_index, calcium_camera_index)
+function stim_context = resolve_stim_context(cycle_path, cycle_manifest, record_manifest, voltage_camera_index, calcium_camera_index, stim_context_override, input_layout_info)
 % Gather all stimulus-related metadata into one struct so later sections
 % can reason about stimulation using one consistent source of truth.
 stim_context = struct( ...
@@ -1681,6 +2914,29 @@ stim_context = struct( ...
     'stimSpec', struct(), ...
     'stimRuntime', struct(), ...
     'method_manifest', struct());
+
+if nargin < 7 || isempty(input_layout_info)
+    input_layout_info = struct();
+end
+
+if isstruct(input_layout_info) && isfield(input_layout_info, 'mode') ...
+        && strcmpi(string(input_layout_info.mode), "paired_raw_channel_folders")
+    stim_context.recordmode = "raw_dual_pair";
+    stim_context.supported = false;
+    stim_context.stim_type = "none";
+    return;
+end
+
+if nargin >= 6 && ~isempty(stim_context_override)
+    stim_context = apply_stim_context_override(stim_context, stim_context_override);
+    if stim_context.has_stimSpec && isfield(stim_context.stimSpec, 'orientations')
+        stim_context.orientation_count = numel(stim_context.stimSpec.orientations);
+    end
+    if stim_context.supported && (strlength(string(stim_context.stim_type)) == 0 || strcmpi(string(stim_context.stim_type), "none"))
+        stim_context.stim_type = classify_visual_stim_type(stim_context.stimSpec);
+    end
+    return;
+end
 
 record_path = fileparts(cycle_path);
 method_path = fileparts(record_path);
@@ -1785,6 +3041,32 @@ if stim_context.supported
 end
 end
 
+function stim_context = apply_stim_context_override(stim_context, stim_context_override)
+% Merge a caller-provided stimulus description into the standard
+% stim_context layout expected by later dual-analysis sections.
+override_fields = fieldnames(stim_context_override);
+for i = 1:numel(override_fields)
+    field_name = override_fields{i};
+    stim_context.(field_name) = stim_context_override.(field_name);
+end
+
+if isfield(stim_context_override, 'logs') && isfield(stim_context.logs, 'sync') && istable(stim_context.logs.sync)
+    stim_context.has_logs = true;
+end
+if isfield(stim_context_override, 'stimSpec') && isstruct(stim_context.stimSpec)
+    stim_context.has_stimSpec = ~isempty(fieldnames(stim_context.stimSpec));
+end
+if ~isfield(stim_context_override, 'supported')
+    stim_context.supported = strcmpi(string(stim_context.recordmode), "visualstim") ...
+        && stim_context.has_logs ...
+        && stim_context.has_stimSpec ...
+        && isfield(stim_context.logs, 'sync') ...
+        && istable(stim_context.logs.sync) ...
+        && strlength(string(stim_context.voltage_sync_var)) > 0 ...
+        && strlength(string(stim_context.calcium_sync_var)) > 0;
+end
+end
+
 function sync_var = find_camera_sync_variable(sync_table, camera_index)
 sync_var = "";
 var_names = string(sync_table.Properties.VariableNames);
@@ -1826,6 +3108,8 @@ end
 switch char(stim_context.stim_type)
     case 'visualstim_grating'
         stim_windows = build_grating_stim_windows(stim_context, freq_voltage, freq_calcium, nframes_voltage, nframes_calcium);
+    case 'visualstim_flash'
+        stim_windows = build_flash_stim_windows(stim_context, freq_voltage, freq_calcium, nframes_voltage, nframes_calcium);
     case {'visualstim_blue', 'visualstim_luminance'}
         stim_windows = build_block_sequence_stim_windows(stim_context, freq_voltage, freq_calcium, nframes_voltage, nframes_calcium);
     case 'visualstim_flicker'
@@ -1839,6 +3123,115 @@ switch char(stim_context.stim_type)
             stim_windows = build_grating_stim_windows(stim_context, freq_voltage, freq_calcium, nframes_voltage, nframes_calcium);
         end
 end
+end
+
+function stim_windows = build_flash_stim_windows(stim_context, freq_voltage, freq_calcium, nframes_voltage, nframes_calcium)
+% Flash analysis uses equal-length comparison windows rather than the very
+% short flash pulse itself:
+%   baseline -> 2 s gray immediately before flash onset
+%   response -> 2 s starting at flash onset
+% The actual flash pulse is still saved separately for trace shading.
+stim_windows = initialize_stim_windows(stim_context);
+sync_table = stim_context.logs.sync;
+ifi = resolve_stim_ifi(stim_context, sync_table);
+
+if ~isfield(stim_context.stimSpec, 'blockSequence')
+    return;
+end
+
+block_sequence = stim_context.stimSpec.blockSequence;
+durations = double(block_sequence.durations(:));
+labels = derive_block_labels(block_sequence);
+if isempty(durations)
+    return;
+end
+if numel(labels) ~= numel(durations)
+    labels = repmat("block", numel(durations), 1);
+end
+
+repeat_count = 1;
+if isfield(block_sequence, 'repeatCount') && ~isempty(block_sequence.repeatCount)
+    repeat_count = max(1, round(double(block_sequence.repeatCount)));
+end
+
+[block_rows, block_labels] = build_repeated_block_rows(sync_table, durations, labels, repeat_count, ifi);
+if isempty(block_rows)
+    return;
+end
+
+baseline_window_sec = 2.0;
+response_window_sec = 2.0;
+baseline_window_frames = max(1, round(baseline_window_sec / ifi));
+response_window_frames = max(1, round(response_window_sec / ifi));
+
+flash_mask = ~arrayfun(@is_baseline_like_label, block_labels);
+flash_indices = find(flash_mask);
+if isempty(flash_indices)
+    return;
+end
+
+baseline_rows = NaN(numel(flash_indices), 2);
+stim_rows = NaN(numel(flash_indices), 2);
+event_labels = strings(numel(flash_indices), 1);
+shading_rows = NaN(numel(flash_indices), 2);
+shading_labels = strings(numel(flash_indices), 1);
+
+for i = 1:numel(flash_indices)
+    flash_idx = flash_indices(i);
+    flash_row_start = block_rows(flash_idx, 1);
+    flash_row_end = block_rows(flash_idx, 2);
+
+    base_row_end = flash_row_start - 1;
+    base_row_start = max(2, base_row_end - baseline_window_frames + 1);
+    stim_row_start = flash_row_start;
+    stim_row_end = min(height(sync_table), stim_row_start + response_window_frames - 1);
+
+    if base_row_end < base_row_start || stim_row_end < stim_row_start
+        continue;
+    end
+
+    current_label = make_flash_condition_label(block_labels(flash_idx));
+    baseline_rows(i, :) = [base_row_start, base_row_end];
+    stim_rows(i, :) = [stim_row_start, stim_row_end];
+    event_labels(i) = current_label;
+    shading_rows(i, :) = [flash_row_start, flash_row_end];
+    shading_labels(i) = current_label;
+end
+
+valid_trials = all(isfinite(baseline_rows), 2) & all(isfinite(stim_rows), 2);
+baseline_rows = baseline_rows(valid_trials, :);
+stim_rows = stim_rows(valid_trials, :);
+event_labels = event_labels(valid_trials);
+shading_rows = shading_rows(valid_trials, :);
+shading_labels = shading_labels(valid_trials);
+if isempty(event_labels)
+    return;
+end
+
+[condition_index, condition_labels] = encode_condition_labels(event_labels);
+stim_windows = finalize_stim_windows_from_rows( ...
+    stim_windows, stim_context, sync_table, baseline_rows, stim_rows, ...
+    condition_index, condition_labels, event_labels, ...
+    [], [], freq_voltage, freq_calcium, nframes_voltage, nframes_calcium, ...
+    lines(max(1, numel(condition_labels))));
+
+[voltage_shading_frames, calcium_shading_frames, valid_shading_mask] = convert_block_rows_to_channel_frames( ...
+    sync_table, stim_context.voltage_sync_var, stim_context.calcium_sync_var, shading_rows, nframes_voltage, nframes_calcium);
+stim_windows.shading_labels = shading_labels(valid_shading_mask);
+stim_windows.voltage.shading_labels = stim_windows.shading_labels;
+stim_windows.calcium.shading_labels = stim_windows.shading_labels;
+stim_windows.voltage.shading_time_ranges = voltage_shading_frames / freq_voltage;
+stim_windows.calcium.shading_time_ranges = calcium_shading_frames / freq_calcium;
+stim_windows.voltage.shading_frames = voltage_shading_frames;
+stim_windows.calcium.shading_frames = calcium_shading_frames;
+stim_windows.block_labels = strings(0, 1);
+stim_windows.voltage.block_frames = [];
+stim_windows.voltage.block_time_ranges = [];
+stim_windows.calcium.block_frames = [];
+stim_windows.calcium.block_time_ranges = [];
+stim_windows.flash_windows = struct( ...
+    'baseline_window_sec', baseline_window_sec, ...
+    'response_window_sec', response_window_sec);
 end
 
 function stim_windows = build_grating_stim_windows(stim_context, freq_voltage, freq_calcium, nframes_voltage, nframes_calcium)
@@ -1995,7 +3388,8 @@ stim_windows = struct( ...
     'condition_colors', [], ...
     'voltage', struct(), ...
     'calcium', struct(), ...
-    'block_labels', strings(0, 1));
+    'block_labels', strings(0, 1), ...
+    'shading_labels', strings(0, 1));
 end
 
 function ifi = resolve_stim_ifi(stim_context, sync_table)
@@ -2197,11 +3591,7 @@ function labels = derive_block_labels(block_sequence)
 labels = strings(0, 1);
 if isfield(block_sequence, 'labels') && ~isempty(block_sequence.labels)
     raw_labels = block_sequence.labels;
-    if iscell(raw_labels)
-        labels = string(raw_labels(:));
-    else
-        labels = string(raw_labels(:));
-    end
+    labels = string(raw_labels(:));
 end
 
 if ~isempty(labels) && all(strlength(labels) > 0)
@@ -2217,6 +3607,19 @@ if isfield(block_sequence, 'colors') && ~isempty(block_sequence.colors)
     for i = 1:size(colors, 1)
         labels(i) = classify_color_block(colors(i, :));
     end
+end
+end
+
+function label = make_flash_condition_label(raw_label)
+raw_label = lower(char(string(raw_label)));
+if contains(raw_label, 'white')
+    label = "white_flash";
+elseif contains(raw_label, 'black')
+    label = "black_flash";
+elseif contains(raw_label, 'blue')
+    label = "blue_flash";
+else
+    label = "flash";
 end
 end
 
@@ -2264,7 +3667,9 @@ function stim_type = classify_visual_stim_type(stimSpec)
 selected_program = lower(char(get_struct_string(stimSpec, 'selectedProgram', "unknown")));
 selected_label = lower(char(get_struct_string(stimSpec, 'selectedLabel', "unknown")));
 
-if strcmp(selected_program, 'gray_blue_gray') || contains(selected_program, 'blue') || contains(selected_label, 'blue')
+if strcmp(selected_program, 'flash') || contains(selected_program, 'flash') || contains(selected_label, 'flash')
+    stim_type = "visualstim_flash";
+elseif strcmp(selected_program, 'gray_blue_gray') || contains(selected_program, 'blue') || contains(selected_label, 'blue')
     stim_type = "visualstim_blue";
 elseif strcmp(selected_program, 'gray_white_gray_black') ...
         || contains(selected_program, 'white') || contains(selected_program, 'black') ...
@@ -2290,14 +3695,19 @@ end
 end
 
 function print_stim_context_summary(stim_context, stim_windows, caller_name)
+sync_available = false;
+if isfield(stim_context, 'has_logs') && stim_context.has_logs ...
+        && isfield(stim_context, 'logs') && isstruct(stim_context.logs) ...
+        && isfield(stim_context.logs, 'sync') && istable(stim_context.logs.sync)
+    sync_available = true;
+end
 fprintf('Stim context summary [%s]:\n', caller_name);
 fprintf('  record mode: %s\n', string(stim_context.recordmode));
 fprintf('  selected program: %s\n', string(stim_context.selected_program));
 fprintf('  selected label: %s\n', string(stim_context.selected_label));
 fprintf('  classified stim type: %s\n', string(stim_context.stim_type));
 fprintf('  logs available: %d | stimSpec available: %d | sync available: %d\n', ...
-    stim_context.has_logs, stim_context.has_stimSpec, ...
-    stim_context.has_logs && isfield(stim_context.logs, 'sync') && istable(stim_context.logs.sync));
+    stim_context.has_logs, stim_context.has_stimSpec, sync_available);
 fprintf('  voltage sync var: %s | calcium sync var: %s\n', ...
     string(stim_context.voltage_sync_var), string(stim_context.calcium_sync_var));
 fprintf('  OSI/DSI eligible: %s\n', ternary(strcmpi(string(stim_context.stim_type), "visualstim_grating"), 'yes', 'no'));
@@ -2515,7 +3925,12 @@ else
     block_labels = string(block_labels(:));
 end
 
-if isfield(channel_windows, 'block_time_ranges') && ~isempty(channel_windows.block_time_ranges) && numel(block_labels) == size(channel_windows.block_time_ranges, 1)
+if isfield(channel_windows, 'shading_time_ranges') && ~isempty(channel_windows.shading_time_ranges) ...
+        && isfield(channel_windows, 'shading_labels') && numel(channel_windows.shading_labels) == size(channel_windows.shading_time_ranges, 1)
+    time_ranges = channel_windows.shading_time_ranges;
+    shading_labels = string(channel_windows.shading_labels(:));
+    use_default_colors = false;
+elseif isfield(channel_windows, 'block_time_ranges') && ~isempty(channel_windows.block_time_ranges) && numel(block_labels) == size(channel_windows.block_time_ranges, 1)
     time_ranges = channel_windows.block_time_ranges;
     shading_labels = block_labels;
     use_default_colors = false;
@@ -2557,7 +3972,10 @@ label = lower(char(string(trial_label)));
 shade_color = default_color;
 shade_alpha = default_alpha;
 
-if contains(label, 'black')
+if contains(label, 'flash')
+    shade_color = [1.00 0.82 0.20];
+    shade_alpha = max(default_alpha, 0.26);
+elseif contains(label, 'black')
     shade_color = [0.05 0.05 0.05];
     shade_alpha = max(default_alpha, 0.18);
 elseif contains(label, 'white')
@@ -2745,8 +4163,8 @@ plot_background_trace_panel(traces_calcium_bg, background_fit_calcium, t_calcium
 
 fig_filename = fullfile(save_path, '1_dual_background_correction_summary.fig');
 png_filename = fullfile(save_path, '1_dual_background_correction_summary.png');
-saveas(fig, fig_filename, 'fig');
-saveas(fig, png_filename, 'png');
+save_figure_bundle(fig, fig_filename, png_filename);
+close(fig);
 end
 
 function plot_background_mask_panel(mean_image, roi_mask, background_mask, colors, panel_title)
@@ -2921,11 +4339,11 @@ for roi_idx = 1:nrois
 end
 
 sgtitle(sprintf('%s (%s)', figure_label, stim_context.selected_label));
-saveas(fig, fullfile(save_path, [file_stem '.fig']), 'fig');
-saveas(fig, fullfile(save_path, [file_stem '.png']), 'png');
+save_figure_bundle(fig, fullfile(save_path, [file_stem '.fig']), fullfile(save_path, [file_stem '.png']));
+close(fig);
 end
 
-function comparison = build_dual_metric_comparison(metric_name, voltage_traces, calcium_traces, t_voltage, t_calcium, downsample_window, save_path, stim_windows, voltage_polarity, calcium_polarity)
+function comparison = build_dual_metric_comparison(metric_name, voltage_traces, calcium_traces, t_voltage, t_calcium, calcium_smoothing_window, save_path, stim_windows, voltage_polarity, calcium_polarity)
 % Build the main dual-channel comparison package for one metric type
 % (currently sensitivity or SNR). The output combines overlap,
 % accumulated-voltage comparison, calcium deconvolution, and ROI-matched
@@ -2945,6 +4363,7 @@ quad_fig = fullfile(save_path, sprintf('5_dual_%s_quad_summary.fig', metric_name
 quad_png = fullfile(save_path, sprintf('5_dual_%s_quad_summary.png', metric_name));
 overlap_fig = fullfile(save_path, sprintf('5_dual_%s_overlap.fig', metric_name));
 overlap_png = fullfile(save_path, sprintf('5_dual_%s_overlap.png', metric_name));
+overlap_roi_dir = fullfile(save_path, sprintf('5_dual_%s_overlap_rois', metric_name));
 correlation_fig = fullfile(save_path, sprintf('6_dual_%s_correlation.fig', metric_name));
 correlation_png = fullfile(save_path, sprintf('6_dual_%s_correlation.png', metric_name));
 mat_file = fullfile(save_path, sprintf('6_dual_%s_comparison.mat', metric_name));
@@ -2952,18 +4371,24 @@ mat_file = fullfile(save_path, sprintf('6_dual_%s_comparison.mat', metric_name))
 plot_dual_quad_summary( ...
     t_calcium, t_voltage, calcium_normalized, calcium_deconv_display, voltage_integral, voltage_display, ...
     size(calcium_metric, 2), metric_name, stim_windows);
-saveas(gcf, quad_fig, 'fig');
-saveas(gcf, quad_png, 'png');
+quad_handle = gcf;
+save_figure_bundle(quad_handle, quad_fig, quad_png);
+close(quad_handle);
 
 plot_dual_overlap_summary( ...
     t_calcium, t_voltage, calcium_display, voltage_display, ...
     size(calcium_metric, 2), metric_name, stim_windows);
-saveas(gcf, overlap_fig, 'fig');
-saveas(gcf, overlap_png, 'png');
+overlap_handle = gcf;
+save_figure_bundle_preserve_layout(overlap_handle, overlap_fig, overlap_png);
+close(overlap_handle);
+save_dual_overlap_per_roi( ...
+    t_calcium, t_voltage, calcium_display, voltage_display, ...
+    size(calcium_metric, 2), metric_name, stim_windows, overlap_roi_dir);
 
 plot_dual_correlation_summary(correlation_stats, metric_name);
-saveas(gcf, correlation_fig, 'fig');
-saveas(gcf, correlation_png, 'png');
+correlation_handle = gcf;
+save_figure_bundle(correlation_handle, correlation_fig, correlation_png);
+close(correlation_handle);
 
 save(mat_file, ...
     'voltage_metric', 'calcium_metric', 'voltage_display', 'calcium_display', ...
@@ -2990,11 +4415,12 @@ comparison = struct( ...
         'metric_name', metric_name, ...
         'deconvolution', deconv_info, ...
         'display_smoothing', 'none', ...
-        'legacy_downsample_window_argument', downsample_window, ...
+        'calcium_smoothing_window', calcium_smoothing_window, ...
         'quad_fig', quad_fig, ...
         'quad_png', quad_png, ...
         'overlap_fig', overlap_fig, ...
         'overlap_png', overlap_png, ...
+        'overlap_roi_dir', overlap_roi_dir, ...
         'correlation_fig', correlation_fig, ...
         'correlation_png', correlation_png, ...
         'mat_file', mat_file, ...
@@ -3216,39 +4642,19 @@ end
 
 function plot_dual_overlap_summary(t_calcium, t_voltage, calcium_trace, voltage_trace, nrois, metric_name, stim_windows)
 xlimit = [0, max([t_calcium(:); t_voltage(:)])];
+roi_per_row = 3;
+ncols = min(roi_per_row, max(1, nrois));
+nrows = max(1, ceil(nrois / roi_per_row));
 
 fig = figure('Name', sprintf('Dual %s Overlap', upper(metric_name)), ...
-    'Color', 'w', 'Position', [100, 100, 1200, max(400, 220 * nrois)]);
+    'Color', 'w', 'Position', [100, 100, max(1200, 420 * ncols), max(420, 260 * nrows)]);
 
 for i = 1:nrois
-    ax = subplot(nrois, 1, i);
-    hold(ax, 'on');
-    if nargin >= 7 && isstruct(stim_windows) && isfield(stim_windows, 'voltage') && isfield(stim_windows.voltage, 'stim_time_ranges')
-        add_stim_shading(ax, stim_windows.voltage, stim_windows.condition_index, stim_windows.condition_colors, 0.12, stim_windows.trial_labels, stim_windows.block_labels);
-    end
+    ax = subplot(nrows, ncols, i);
+    plot_single_dual_overlap_axis( ...
+        ax, t_calcium, t_voltage, calcium_trace(:, i), voltage_trace(:, i), i, xlimit, stim_windows);
 
-    voltage_norm = normalize_columns_to_unit_range(voltage_trace(:, i));
-    calcium_norm = normalize_columns_to_unit_range(calcium_trace(:, i));
-
-    yyaxis(ax, 'left');
-    plot(ax, t_voltage, voltage_norm, 'r', 'LineWidth', 1);
-    ylim(ax, [0 1]);
-    ax.YColor = [0.85 0.15 0.15];
-    ylabel(ax, 'Voltage (norm)');
-
-    yyaxis(ax, 'right');
-    plot(ax, t_calcium, calcium_norm, 'g', 'LineWidth', 1);
-    ylim(ax, [0 1]);
-    ax.YColor = [0.1 0.65 0.2];
-    ylabel(ax, 'Calcium (norm)');
-
-    xlim(ax, xlimit);
-    ax.Box = 'off';
-    ax.Color = 'none';
-    ax.TickLength = [0.01 0.01];
-    title(ax, sprintf('ROI %d', i), 'FontSize', 9, 'FontWeight', 'bold');
-
-    if i < nrois
+    if i <= (nrows - 1) * ncols
         ax.XTickLabel = [];
     else
         xlabel(ax, 'Time (s)');
@@ -3256,7 +4662,67 @@ for i = 1:nrois
 end
 
 sgtitle(sprintf('Dual %s Overlap: Dual yyaxis, separately normalized', upper(metric_name)));
-set(fig, 'Position', get(0, 'Screensize'));
+end
+
+function save_dual_overlap_per_roi(t_calcium, t_voltage, calcium_trace, voltage_trace, nrois, metric_name, stim_windows, output_dir)
+if ~isfolder(output_dir)
+    mkdir(output_dir);
+end
+xlimit = [0, max([t_calcium(:); t_voltage(:)])];
+
+for roi_idx = 1:nrois
+    fig = figure('Name', sprintf('Dual %s Overlap ROI %d', upper(metric_name), roi_idx), ...
+        'Color', 'w', 'Position', [100, 100, 1400, 360]);
+    ax = axes(fig);
+    plot_single_dual_overlap_axis( ...
+        ax, t_calcium, t_voltage, calcium_trace(:, roi_idx), voltage_trace(:, roi_idx), roi_idx, xlimit, stim_windows);
+    xlabel(ax, 'Time (s)');
+    fig_file = fullfile(output_dir, sprintf('ROI_%03d.fig', roi_idx));
+    png_file = fullfile(output_dir, sprintf('ROI_%03d.png', roi_idx));
+    save_figure_bundle_preserve_layout(fig, fig_file, png_file);
+    close(fig);
+end
+end
+
+function plot_single_dual_overlap_axis(ax, t_calcium, t_voltage, calcium_trace_one, voltage_trace_one, roi_idx, xlimit, stim_windows)
+hold(ax, 'on');
+if isstruct(stim_windows) && isfield(stim_windows, 'voltage') && isfield(stim_windows.voltage, 'stim_time_ranges')
+    add_stim_shading(ax, stim_windows.voltage, stim_windows.condition_index, stim_windows.condition_colors, 0.12, stim_windows.trial_labels, stim_windows.block_labels);
+end
+
+voltage_norm = normalize_columns_to_unit_range(voltage_trace_one);
+calcium_norm = normalize_columns_to_unit_range(calcium_trace_one);
+
+yyaxis(ax, 'left');
+plot(ax, t_voltage, voltage_norm, 'r', 'LineWidth', 1);
+ylim(ax, [0 1]);
+ax.YColor = [0.85 0.15 0.15];
+ylabel(ax, 'Voltage (norm)');
+
+yyaxis(ax, 'right');
+plot(ax, t_calcium, calcium_norm, 'g', 'LineWidth', 1);
+ylim(ax, [0 1]);
+ax.YColor = [0.1 0.65 0.2];
+ylabel(ax, 'Calcium (norm)');
+
+xlim(ax, xlimit);
+ax.Box = 'off';
+ax.Color = 'none';
+ax.TickLength = [0.01 0.01];
+add_overlap_roi_corner_label(ax, roi_idx);
+end
+
+function add_overlap_roi_corner_label(ax, roi_idx)
+text(ax, 0.03, 0.95, sprintf('ROI %d', roi_idx), ...
+    'Units', 'normalized', ...
+    'HorizontalAlignment', 'left', ...
+    'VerticalAlignment', 'top', ...
+    'FontSize', 9, ...
+    'FontWeight', 'bold', ...
+    'Color', [0.1 0.1 0.1], ...
+    'BackgroundColor', [1 1 1], ...
+    'Margin', 2, ...
+    'Interpreter', 'none');
 end
 
 function trace_out = normalize_columns_to_unit_range(trace_in)
@@ -3349,8 +4815,8 @@ linkaxes([ax21, ax22], 'x');
 
 fig_filename = fullfile(save_path, '2_dual_bleach_correction_stacked.fig');
 png_filename = fullfile(save_path, '2_dual_bleach_correction_stacked.png');
-saveas(fig, fig_filename, 'fig');
-saveas(fig, png_filename, 'png');
+save_figure_bundle(fig, fig_filename, png_filename);
+close(fig);
 end
 
 function plot_bleach_panel_fit(traces_input, baseline, t_axis, panel_title)
@@ -3415,8 +4881,8 @@ plot_trace_reference_comparison(traces_calcium_bleach, calcium_noise_reference, 
 
 fig_filename = fullfile(save_path, '3_dual_noise_reference_comparison.fig');
 png_filename = fullfile(save_path, '3_dual_noise_reference_comparison.png');
-saveas(fig, fig_filename, 'fig');
-saveas(fig, png_filename, 'png');
+save_figure_bundle(fig, fig_filename, png_filename);
+close(fig);
 end
 
 function plot_trace_reference_comparison(signal_traces, reference_traces, t_axis, panel_title)
@@ -3489,6 +4955,857 @@ for i = 1:nrois
     paired_corr(i) = corr(voltage_integral(:, i), calcium_normalized(:, i), 'Rows', 'complete');
     paired_spearman(i) = corr(voltage_integral(:, i), calcium_normalized(:, i), 'Type', 'Spearman', 'Rows', 'complete');
 end
+end
+
+function [dual_info, voltage_results, calcium_results, dual_results, stim_results, stim_context, stim_windows] = load_saved_analysis_only_context(reuse_results_path)
+% Reload one finished Dual_analysis3 output folder and reuse everything up
+% through ROI selection so the later trace-analysis sections can run
+% without repeating movie loading, motion correction, or ROI drawing.
+if strlength(string(reuse_results_path)) == 0
+    error('analysis_mode=analysis_only requires reuse_results_path.');
+end
+
+fprintf('Reusing saved results from: %s\n', reuse_results_path);
+
+dual_info_path = fullfile(reuse_results_path, 'dual_info.mat');
+voltage_results_path = fullfile(reuse_results_path, 'voltage_results.mat');
+calcium_results_path = fullfile(reuse_results_path, 'calcium_results.mat');
+dual_results_path = fullfile(reuse_results_path, 'dual_results.mat');
+stim_results_path = fullfile(reuse_results_path, 'stim_results.mat');
+
+dual_info = load_required_struct(dual_info_path, 'dual_info');
+voltage_results = load_required_struct(voltage_results_path, 'voltage_results');
+calcium_results = load_required_struct(calcium_results_path, 'calcium_results');
+if isfile(dual_results_path)
+    dual_results = load_required_struct(dual_results_path, 'dual_results');
+else
+    dual_results = struct();
+end
+if isfile(stim_results_path)
+    stim_results = load_required_struct(stim_results_path, 'stim_results');
+else
+    stim_results = struct();
+end
+
+stim_context = dual_info.stim_context;
+stim_windows = struct();
+if isstruct(stim_results) && isfield(stim_results, 'windows')
+    stim_windows = stim_results.windows;
+end
+fprintf('Analysis-only reuse loaded: saved ROI/channel/stim results are available for downstream sections.\n');
+end
+
+function save_figure_bundle(fig_handle, fig_file, png_file)
+% Save the editable FIG plus a large PNG snapshot. PNG export is done
+% after maximizing the figure so saved images match the on-screen layout
+% more closely than the MATLAB default small window capture.
+prepare_figure_for_png_export(fig_handle);
+saveas(fig_handle, fig_file, 'fig');
+exportgraphics(fig_handle, png_file, 'Resolution', 150);
+end
+
+function save_figure_bundle_preserve_layout(fig_handle, fig_file, png_file)
+if ~isgraphics(fig_handle, 'figure')
+    return;
+end
+saveas(fig_handle, fig_file, 'fig');
+exportgraphics(fig_handle, png_file, 'Resolution', 150);
+end
+
+function prepare_figure_for_png_export(fig_handle)
+if ~isgraphics(fig_handle, 'figure')
+    return;
+end
+set(fig_handle, 'Units', 'pixels');
+try
+    set(fig_handle, 'WindowState', 'maximized');
+catch
+    screen_size = get(groot, 'ScreenSize');
+    if isnumeric(screen_size) && numel(screen_size) >= 4
+        set(fig_handle, 'Position', screen_size);
+    end
+end
+drawnow;
+end
+
+function time_frequency_results = run_dual_time_frequency_section( ...
+    voltage_results, calcium_results, ...
+    t_voltage_default, t_calcium_default, ...
+    freq_voltage_default, freq_calcium_default, ...
+    stim_windows, save_path, ...
+    voltage_polarity, calcium_polarity)
+% Build the final spectral summary directly from saved processed traces.
+% This keeps the last section independent from the earlier movie-based
+% steps and makes iterative figure changes much cheaper to rerun.
+[voltage_trace, voltage_stage, t_voltage, freq_voltage] = resolve_time_frequency_channel_input( ...
+    voltage_results, {'snr', 'sensitivity', 'bleach_removed'}, t_voltage_default, freq_voltage_default);
+[calcium_trace, calcium_stage, t_calcium, freq_calcium] = resolve_time_frequency_channel_input( ...
+    calcium_results, {'snr', 'sensitivity', 'bleach_removed'}, t_calcium_default, freq_calcium_default);
+
+params = struct();
+params.voltage_stage = string(voltage_stage);
+params.calcium_stage = string(calcium_stage);
+params.min_freq_hz = 0.5;
+params.max_freq_hz = min([80, freq_voltage / 2 - eps, freq_calcium / 2 - eps]);
+params.wavelet_voices_per_octave = 12;
+params.wavelet_name = "amor";
+
+fprintf('Time-frequency input stages | voltage=%s | calcium=%s\n', ...
+    string(voltage_stage), string(calcium_stage));
+fprintf('Time-frequency frequency range | min=%.2f Hz | max=%.2f Hz\n', ...
+    params.min_freq_hz, params.max_freq_hz);
+fprintf('Time-frequency settings | spectrum=direct FFT | wavelet=%s\n', ...
+    params.wavelet_name);
+
+cleanup_legacy_oscillation_outputs(save_path);
+
+voltage_display = double(voltage_polarity) * double(voltage_trace);
+calcium_display = double(calcium_polarity) * double(calcium_trace);
+
+voltage_tf = analyze_population_time_frequency( ...
+    voltage_display, freq_voltage, t_voltage, params, 'Voltage');
+calcium_tf = analyze_population_time_frequency( ...
+    calcium_display, freq_calcium, t_calcium, params, 'Calcium');
+
+[fourier_fig, fourier_png] = plot_population_fourier_summary( ...
+    voltage_tf, calcium_tf, stim_windows, params, save_path);
+[wavelet_fig, wavelet_png] = plot_population_wavelet_summary( ...
+    voltage_tf, calcium_tf, stim_windows, save_path);
+
+time_frequency_results = struct( ...
+    'parameters', params, ...
+    'voltage', voltage_tf, ...
+    'calcium', calcium_tf, ...
+    'visualizations', struct( ...
+        'fourier_summary', struct('fig_file', fourier_fig, 'png_file', fourier_png), ...
+        'wavelet_summary', struct('fig_file', wavelet_fig, 'png_file', wavelet_png)));
+end
+
+function result = analyze_population_time_frequency(trace_matrix, frame_rate, t_axis, params, channel_name)
+trace_matrix = double(trace_matrix);
+t_axis = double(t_axis(:));
+nframes = size(trace_matrix, 1);
+nrois = size(trace_matrix, 2);
+
+spectrum_frequency = [];
+spectrum_amplitude = [];
+peak_frequency_hz = NaN(nrois, 1);
+peak_amplitude = NaN(nrois, 1);
+signal_rms = NaN(nrois, 1);
+
+for roi_idx = 1:nrois
+    x = sanitize_trace_for_spectrum(trace_matrix(:, roi_idx));
+    signal_rms(roi_idx) = rms(x);
+    [frequency_i, amplitude_i] = compute_trace_fft_spectrum(x, frame_rate);
+    if isempty(spectrum_frequency)
+        spectrum_frequency = frequency_i;
+        spectrum_amplitude = NaN(numel(frequency_i), nrois);
+    end
+    if isempty(amplitude_i)
+        continue;
+    end
+    spectrum_amplitude(:, roi_idx) = amplitude_i;
+
+    valid_mask = frequency_i >= params.min_freq_hz & frequency_i <= params.max_freq_hz;
+    valid_frequency = frequency_i(valid_mask);
+    valid_amplitude = amplitude_i(valid_mask);
+    if isempty(valid_frequency)
+        continue;
+    end
+
+    [peak_value, max_idx] = max(valid_amplitude);
+    peak_frequency_hz(roi_idx) = valid_frequency(max_idx);
+    peak_amplitude(roi_idx) = peak_value;
+end
+
+representative_roi = find(peak_amplitude == max(peak_amplitude, [], 'omitnan'), 1, 'first');
+if isempty(representative_roi)
+    representative_roi = 1;
+end
+representative_trace = sanitize_trace_for_spectrum(trace_matrix(:, representative_roi));
+representative_wavelet = compute_wavelet_scalogram(representative_trace, frame_rate, t_axis, params);
+
+result = struct( ...
+    'channel_name', string(channel_name), ...
+    'frame_rate', frame_rate, ...
+    'time', t_axis, ...
+    'trace_matrix', trace_matrix, ...
+    'analysis_parameters', params, ...
+    'fft', struct('frequency', spectrum_frequency, 'amplitude', spectrum_amplitude), ...
+    'roi', struct( ...
+        'peak_frequency_hz', peak_frequency_hz, ...
+        'peak_amplitude', peak_amplitude, ...
+        'signal_rms', signal_rms), ...
+    'representative', struct( ...
+        'roi_index', representative_roi, ...
+        'trace', representative_trace, ...
+        'peak_frequency_hz', peak_frequency_hz(representative_roi), ...
+        'wavelet', representative_wavelet), ...
+    'summary', struct( ...
+        'nrois', nrois, ...
+        'median_peak_frequency_hz', median(peak_frequency_hz, 'omitnan'), ...
+        'median_peak_amplitude', median(peak_amplitude, 'omitnan')));
+end
+
+function x = sanitize_trace_for_spectrum(x)
+x = double(x(:));
+if isempty(x) || all(~isfinite(x))
+    x = zeros(size(x));
+    return;
+end
+x = fillmissing(x, 'linear', 'EndValues', 'nearest');
+x = x - mean(x, 'omitnan');
+end
+
+function [frequency, amplitude] = compute_trace_fft_spectrum(x, frame_rate)
+x = sanitize_trace_for_spectrum(x);
+nsamples = numel(x);
+if nsamples < 8
+    frequency = zeros(0, 1);
+    amplitude = zeros(0, 1);
+    return;
+end
+nfft = 2 ^ nextpow2(nsamples);
+y = fft(x, nfft);
+p2 = abs(y / nsamples);
+amplitude = p2(1:nfft / 2 + 1);
+if numel(amplitude) > 2
+    amplitude(2:end-1) = 2 * amplitude(2:end-1);
+end
+frequency = frame_rate * (0:(nfft / 2))' / nfft;
+end
+
+function wavelet_data = compute_wavelet_scalogram(x, frame_rate, t_axis, params)
+x = sanitize_trace_for_spectrum(x);
+if numel(x) < 8
+    wavelet_data = struct('time', double(t_axis(:)), 'frequency', zeros(0, 1), 'power', zeros(0, 0));
+    return;
+end
+
+[wt, frequency] = cwt(x, frame_rate);
+valid_mask = frequency >= params.min_freq_hz & frequency <= params.max_freq_hz;
+if numel(t_axis) ~= numel(x)
+    t_axis = (0:numel(x) - 1)' / frame_rate;
+end
+wavelet_data = struct( ...
+    'time', double(t_axis(:)), ...
+    'frequency', frequency(valid_mask), ...
+    'power', abs(wt(valid_mask, :)).^2);
+end
+
+function [fig_file, png_file] = plot_population_fourier_summary(voltage_tf, calcium_tf, stim_windows, params, save_path)
+fig = figure('Color', 'w', 'Name', 'Population FFT Summary');
+tiledlayout(fig, 4, 2, 'Padding', 'compact', 'TileSpacing', 'compact');
+
+nexttile;
+plot_channel_fft_summary(voltage_tf, 'r', 'Voltage FFT Amplitude', [0, params.max_freq_hz], false);
+
+nexttile;
+plot_channel_fft_summary(calcium_tf, 'g', 'Calcium FFT Amplitude', [0, params.max_freq_hz], false);
+
+nexttile;
+plot_channel_fft_summary(voltage_tf, 'r', 'Voltage FFT Amplitude', [0, 10], true);
+
+nexttile;
+plot_channel_fft_summary(calcium_tf, 'g', 'Calcium FFT Amplitude', [0, 10], true);
+
+nexttile;
+plot_flash_fft_comparison( ...
+    voltage_tf, resolve_channel_stim_windows(stim_windows, 'voltage'), params, 'r', 'Voltage Flash FFT');
+
+nexttile;
+plot_flash_fft_comparison( ...
+    calcium_tf, resolve_channel_stim_windows(stim_windows, 'calcium'), params, 'g', 'Calcium Flash FFT');
+
+nexttile;
+plot_roi_peak_summary(voltage_tf, [0, 10], 'Voltage ROI Peak Frequency (0-10 Hz)');
+
+nexttile;
+plot_roi_peak_summary(calcium_tf, [0, 10], 'Calcium ROI Peak Frequency (0-10 Hz)');
+
+fig_file = fullfile(save_path, '8_fourier_summary.fig');
+png_file = fullfile(save_path, '8_fourier_summary.png');
+save_figure_bundle(fig, fig_file, png_file);
+close(fig);
+end
+
+function [fig_file, png_file] = plot_population_wavelet_summary(voltage_tf, calcium_tf, stim_windows, save_path)
+fig = figure('Color', 'w', 'Name', 'Population Wavelet Summary');
+nrois = size(voltage_tf.trace_matrix, 2);
+tiledlayout(fig, nrois, 4, 'Padding', 'compact', 'TileSpacing', 'compact');
+
+for roi_idx = 1:nrois
+    nexttile;
+    plot_roi_trace_with_stim( ...
+        gca, voltage_tf, roi_idx, resolve_channel_stim_windows(stim_windows, 'voltage'), 'r', 'Voltage Trace');
+
+    nexttile;
+    plot_roi_wavelet_scalogram( ...
+        gca, voltage_tf, roi_idx, resolve_channel_stim_windows(stim_windows, 'voltage'), 'Voltage Wavelet');
+
+    nexttile;
+    plot_roi_trace_with_stim( ...
+        gca, calcium_tf, roi_idx, resolve_channel_stim_windows(stim_windows, 'calcium'), 'g', 'Calcium Trace');
+
+    nexttile;
+    plot_roi_wavelet_scalogram( ...
+        gca, calcium_tf, roi_idx, resolve_channel_stim_windows(stim_windows, 'calcium'), 'Calcium Wavelet');
+end
+
+fig_file = fullfile(save_path, '8_wavelet_summary.fig');
+png_file = fullfile(save_path, '8_wavelet_summary.png');
+save_figure_bundle(fig, fig_file, png_file);
+close(fig);
+end
+
+function plot_channel_fft_summary(channel_result, trace_color, title_text, display_band_hz, annotate_peak)
+frequency = channel_result.fft.frequency;
+amplitude = channel_result.fft.amplitude;
+if isempty(frequency) || isempty(amplitude)
+    text(0.5, 0.5, 'FFT unavailable', 'Units', 'normalized', 'HorizontalAlignment', 'center');
+    axis off;
+    return;
+end
+
+display_mask = frequency >= display_band_hz(1) & frequency <= display_band_hz(2);
+if ~any(display_mask)
+    text(0.5, 0.5, 'No spectral points in display band', 'Units', 'normalized', 'HorizontalAlignment', 'center');
+    axis off;
+    return;
+end
+
+plot(frequency(display_mask), amplitude(display_mask, :), 'Color', [0.82 0.82 0.82], 'LineWidth', 0.8);
+hold on;
+mean_amplitude = mean(amplitude, 2, 'omitnan');
+plot(frequency(display_mask), mean_amplitude(display_mask), trace_color, 'LineWidth', 2);
+if annotate_peak
+    [display_peak_hz, display_peak_amplitude] = find_band_peak_from_amplitude( ...
+        frequency, mean_amplitude, display_band_hz);
+    if isfinite(display_peak_hz)
+        xline(display_peak_hz, '--', sprintf('%.2f Hz', display_peak_hz), ...
+            'Color', trace_color, 'LineWidth', 1.2, 'LabelVerticalAlignment', 'middle');
+        scatter(display_peak_hz, display_peak_amplitude, 42, trace_color, 'filled');
+        text(display_peak_hz, display_peak_amplitude, sprintf('  %.2f Hz', display_peak_hz), ...
+        'Color', trace_color, 'FontSize', 9, 'VerticalAlignment', 'bottom');
+    end
+end
+xlabel('Frequency (Hz)');
+ylabel('Single-Sided Amplitude');
+if annotate_peak
+    title(sprintf('%s | 0-10 Hz zoom', title_text));
+else
+    title(sprintf('%s | full range', title_text));
+end
+xlim(display_band_hz);
+grid on;
+end
+
+function plot_roi_peak_summary(channel_result, display_band_hz, title_text)
+peak_frequency_hz = NaN(size(channel_result.roi.peak_frequency_hz(:)));
+peak_amplitude = NaN(size(channel_result.roi.peak_amplitude(:)));
+roi_index = (1:numel(peak_frequency_hz))';
+for roi_idx = 1:numel(peak_frequency_hz)
+    [peak_frequency_hz(roi_idx), peak_amplitude(roi_idx)] = find_band_peak_from_amplitude( ...
+        channel_result.fft.frequency, channel_result.fft.amplitude(:, roi_idx), display_band_hz);
+end
+valid = isfinite(peak_frequency_hz) & isfinite(peak_amplitude);
+if ~any(valid)
+    text(0.5, 0.5, 'ROI peak summary unavailable', 'Units', 'normalized', 'HorizontalAlignment', 'center');
+    axis off;
+    return;
+end
+
+scatter(roi_index(valid), peak_frequency_hz(valid), 42, peak_amplitude(valid), 'filled', 'MarkerFaceAlpha', 0.8);
+hold on;
+plot(roi_index(valid), peak_frequency_hz(valid), '-', 'Color', [0.75 0.75 0.75]);
+xlabel('ROI');
+ylabel('Peak Frequency (Hz)');
+ylim(display_band_hz);
+title(title_text);
+cb = colorbar;
+cb.Label.String = 'Peak Amplitude';
+grid on;
+end
+
+function plot_representative_trace_with_stim(ax, channel_result, channel_windows, trace_color, title_text)
+t = channel_result.time(:);
+x = channel_result.representative.trace(:);
+[y_label, scale_suffix, stage_label] = resolve_time_frequency_trace_label(channel_result);
+plot(ax, t, x, 'Color', trace_color, 'LineWidth', 1.2);
+apply_trace_axis_limits(ax, x);
+if isstruct(channel_windows) && ~isempty(fieldnames(channel_windows))
+    nshades = count_channel_shading_ranges(channel_windows);
+    add_stim_shading( ...
+        ax, channel_windows, ...
+        ones(max(1, nshades), 1), ...
+        repmat([0.75 0.75 0.75], max(1, nshades), 1), ...
+        0.16);
+    hold(ax, 'on');
+end
+plot(ax, t, x, 'Color', trace_color, 'LineWidth', 1.2);
+xlabel(ax, 'Time (s)');
+ylabel(ax, y_label);
+title(ax, sprintf('%s (%s) | ROI %d | peak %.2f Hz', ...
+    title_text, stage_label, channel_result.representative.roi_index, channel_result.representative.peak_frequency_hz));
+grid(ax, 'on');
+add_axis_scalebar(ax, t, x, trace_color, scale_suffix);
+end
+
+function plot_roi_trace_with_stim(ax, channel_result, roi_idx, channel_windows, trace_color, title_text)
+t = channel_result.time(:);
+x = double(channel_result.trace_matrix(:, roi_idx));
+[y_label, scale_suffix, stage_label] = resolve_time_frequency_trace_label(channel_result);
+plot(ax, t, x, 'Color', trace_color, 'LineWidth', 1.0);
+apply_trace_axis_limits(ax, x);
+if isstruct(channel_windows) && ~isempty(fieldnames(channel_windows))
+    nshades = count_channel_shading_ranges(channel_windows);
+    add_stim_shading( ...
+        ax, channel_windows, ...
+        ones(max(1, nshades), 1), ...
+        repmat([0.75 0.75 0.75], max(1, nshades), 1), ...
+        0.16);
+    hold(ax, 'on');
+end
+plot(ax, t, x, 'Color', trace_color, 'LineWidth', 1.0);
+xlabel(ax, 'Time (s)');
+ylabel(ax, y_label);
+title(ax, sprintf('%s (%s) | ROI %d | peak %.2f Hz', ...
+    title_text, stage_label, roi_idx, channel_result.roi.peak_frequency_hz(roi_idx)));
+grid(ax, 'on');
+add_axis_scalebar(ax, t, x, trace_color, scale_suffix);
+end
+
+function [y_label, scale_suffix, stage_label] = resolve_time_frequency_trace_label(channel_result)
+stage_name = "";
+if isfield(channel_result, 'analysis_parameters') && isstruct(channel_result.analysis_parameters)
+    if strcmpi(string(channel_result.channel_name), "Voltage") ...
+            && isfield(channel_result.analysis_parameters, 'voltage_stage')
+        stage_name = string(channel_result.analysis_parameters.voltage_stage);
+    elseif strcmpi(string(channel_result.channel_name), "Calcium") ...
+            && isfield(channel_result.analysis_parameters, 'calcium_stage')
+        stage_name = string(channel_result.analysis_parameters.calcium_stage);
+    end
+end
+[y_label, scale_suffix, stage_label] = describe_trace_stage_for_display(stage_name);
+end
+
+function [y_label, scale_suffix, stage_label] = describe_trace_stage_for_display(stage_name)
+stage_name = lower(string(stage_name));
+switch stage_name
+    case "snr"
+        y_label = 'SNR (signed)';
+        scale_suffix = 'SNR';
+        stage_label = 'SNR';
+    case "sensitivity"
+        y_label = 'Sensitivity (signed)';
+        scale_suffix = 'Sensitivity';
+        stage_label = 'Sensitivity';
+    case "bleach_removed"
+        y_label = 'Bleach-Removed Signal';
+        scale_suffix = 'a.u.';
+        stage_label = 'bleach removed';
+    case "bg_removed"
+        y_label = 'BG-Removed Signal';
+        scale_suffix = 'a.u.';
+        stage_label = 'bg removed';
+    otherwise
+        y_label = 'Trace Value';
+        scale_suffix = 'a.u.';
+        if strlength(stage_name) == 0
+            stage_label = 'trace';
+        else
+            stage_label = char(strrep(stage_name, "_", " "));
+        end
+    end
+end
+
+function apply_trace_axis_limits(ax, x)
+x = double(x(:));
+valid = isfinite(x);
+if ~any(valid)
+    ylim(ax, [-1, 1]);
+    return;
+end
+ymin = min(x(valid));
+ymax = max(x(valid));
+if ymax <= ymin
+    pad = max(1e-3, abs(ymax) * 0.1 + 1e-3);
+else
+    pad = 0.08 * (ymax - ymin);
+end
+ylim(ax, [ymin - pad, ymax + pad]);
+end
+
+function [peak_frequency_hz, peak_amplitude] = find_band_peak_from_amplitude(frequency, amplitude, display_band_hz)
+peak_frequency_hz = NaN;
+peak_amplitude = NaN;
+if isempty(frequency) || isempty(amplitude)
+    return;
+end
+band_mask = frequency >= display_band_hz(1) & frequency <= display_band_hz(2);
+if ~any(band_mask)
+    return;
+end
+
+band_frequency = frequency(band_mask);
+band_amplitude = double(amplitude(band_mask));
+if all(~isfinite(band_amplitude))
+    return;
+end
+[peak_value, max_idx] = max(band_amplitude);
+peak_frequency_hz = band_frequency(max_idx);
+peak_amplitude = peak_value;
+end
+
+function plot_flash_fft_comparison(channel_result, channel_windows, ~, trace_color, title_text)
+[baseline_trace, stim_trace, t_local, supported] = extract_flash_average_segments(channel_result, channel_windows);
+if ~supported
+    text(0.5, 0.5, 'Flash pre/post FFT unavailable', 'Units', 'normalized', 'HorizontalAlignment', 'center');
+    axis off;
+    return;
+end
+
+[f_base, a_base] = compute_trace_fft_spectrum(baseline_trace, channel_result.frame_rate);
+[f_stim, a_stim] = compute_trace_fft_spectrum(stim_trace, channel_result.frame_rate);
+base_mask = f_base >= 0 & f_base <= 10;
+stim_mask = f_stim >= 0 & f_stim <= 10;
+plot(f_base(base_mask), a_base(base_mask), 'Color', [0.55 0.55 0.55], 'LineWidth', 1.5);
+hold on;
+plot(f_stim(stim_mask), a_stim(stim_mask), 'Color', trace_color, 'LineWidth', 2);
+[peak_base_hz, peak_base_amp] = find_band_peak_from_amplitude(f_base, a_base, [0, 10]);
+[peak_stim_hz, peak_stim_amp] = find_band_peak_from_amplitude(f_stim, a_stim, [0, 10]);
+if isfinite(peak_base_hz)
+    scatter(peak_base_hz, peak_base_amp, 36, [0.35 0.35 0.35], 'filled');
+end
+if isfinite(peak_stim_hz)
+    scatter(peak_stim_hz, peak_stim_amp, 36, trace_color, 'filled');
+end
+xlabel('Frequency (Hz)');
+ylabel('Single-Sided Amplitude');
+title(sprintf('%s | baseline vs response', title_text));
+legend({'Baseline', 'Response'}, 'Location', 'best');
+xlim([0, 10]);
+grid on;
+end
+
+function [baseline_trace, stim_trace, t_local, supported] = extract_flash_average_segments(channel_result, channel_windows)
+baseline_trace = [];
+stim_trace = [];
+t_local = [];
+supported = isstruct(channel_windows) ...
+    && isfield(channel_windows, 'baseline_frames') ...
+    && isfield(channel_windows, 'stim_frames') ...
+    && ~isempty(channel_windows.baseline_frames) ...
+    && ~isempty(channel_windows.stim_frames);
+if ~supported
+    return;
+end
+
+trace = channel_result.representative.trace(:);
+baseline_trials = extract_aligned_trials(trace, channel_windows.baseline_frames);
+stim_trials = extract_aligned_trials(trace, channel_windows.stim_frames);
+if isempty(baseline_trials) || isempty(stim_trials)
+    supported = false;
+    return;
+end
+baseline_trace = mean(baseline_trials, 2, 'omitnan');
+stim_trace = mean(stim_trials, 2, 'omitnan');
+t_local = (0:numel(baseline_trace) - 1)' / channel_result.frame_rate;
+end
+
+function trials = extract_aligned_trials(trace, frame_ranges)
+trace = double(trace(:));
+frame_ranges = round(frame_ranges);
+ntrials = size(frame_ranges, 1);
+trial_lengths = frame_ranges(:, 2) - frame_ranges(:, 1) + 1;
+valid_lengths = trial_lengths(isfinite(trial_lengths) & trial_lengths > 1);
+if isempty(valid_lengths)
+    trials = [];
+    return;
+end
+target_length = min(valid_lengths);
+trials = NaN(target_length, ntrials);
+count = 0;
+for idx = 1:ntrials
+    start_idx = max(1, frame_ranges(idx, 1));
+    end_idx = min(numel(trace), frame_ranges(idx, 2));
+    if end_idx - start_idx + 1 < target_length
+        continue;
+    end
+    count = count + 1;
+    trials(:, count) = trace(start_idx:start_idx + target_length - 1);
+end
+trials = trials(:, 1:count);
+end
+
+function nshades = count_channel_shading_ranges(channel_windows)
+nshades = 0;
+if ~isstruct(channel_windows)
+    return;
+end
+if isfield(channel_windows, 'shading_time_ranges') && ~isempty(channel_windows.shading_time_ranges)
+    nshades = size(channel_windows.shading_time_ranges, 1);
+elseif isfield(channel_windows, 'block_time_ranges') && ~isempty(channel_windows.block_time_ranges)
+    nshades = size(channel_windows.block_time_ranges, 1);
+elseif isfield(channel_windows, 'stim_time_ranges') && ~isempty(channel_windows.stim_time_ranges)
+    nshades = size(channel_windows.stim_time_ranges, 1);
+end
+end
+
+function plot_wavelet_scalogram(ax, channel_result, channel_windows, title_text, frequency_band_hz)
+if nargin < 5 || isempty(frequency_band_hz)
+    frequency_band_hz = [];
+end
+spec = channel_result.representative.wavelet;
+if isempty(spec.frequency) || isempty(spec.power)
+    text(ax, 0.5, 0.5, 'Wavelet map unavailable', 'Units', 'normalized', 'HorizontalAlignment', 'center');
+    axis(ax, 'off');
+    return;
+end
+
+frequency = spec.frequency;
+power = spec.power;
+if ~isempty(frequency_band_hz)
+    band_mask = frequency >= frequency_band_hz(1) & frequency <= frequency_band_hz(2);
+    if any(band_mask)
+        frequency = frequency(band_mask);
+        power = power(band_mask, :);
+    end
+end
+
+% CWT frequencies are not linearly spaced. Using imagesc would stretch the
+% rows onto a linear y-axis and can make the same power ridge appear at the
+% wrong frequency after zooming. Draw the scalogram on the true frequency
+% coordinates instead.
+[frequency, sort_idx] = sort(frequency(:), 'ascend');
+power = power(sort_idx, :);
+surface(ax, ...
+    repmat(spec.time(:)', numel(frequency), 1), ...
+    repmat(frequency, 1, numel(spec.time)), ...
+    zeros(size(power)), ...
+    power, ...
+    'EdgeColor', 'none');
+view(ax, 2);
+set(ax, 'YDir', 'normal');
+set(ax, 'YScale', 'log');
+xlabel(ax, 'Time (s)');
+ylabel(ax, 'Frequency (Hz)');
+if isempty(frequency_band_hz)
+    title(ax, sprintf('%s | ROI %d', title_text, channel_result.representative.roi_index));
+else
+    title(ax, sprintf('%s | ROI %d | %.0f-%.0f Hz', ...
+        title_text, channel_result.representative.roi_index, frequency_band_hz(1), frequency_band_hz(2)));
+end
+cb = colorbar(ax);
+cb.Label.String = 'Wavelet Power';
+hold(ax, 'on');
+if isfinite(channel_result.representative.peak_frequency_hz)
+    yline(ax, channel_result.representative.peak_frequency_hz, 'w--', 'LineWidth', 1.0);
+end
+if ~isempty(frequency_band_hz)
+    ymin = max(min(frequency(frequency > 0)), max(frequency_band_hz(1), 0.5));
+    ymax = min(max(frequency), frequency_band_hz(2));
+    ylim(ax, [ymin, ymax]);
+    yticks(ax, [1 3 10 30]);
+else
+    ymin = max(min(frequency(frequency > 0)), 0.5);
+    ymax = max(frequency);
+    ylim(ax, [ymin, ymax]);
+    yticks(ax, [1 3 10 30 80]);
+end
+overlay_stim_boundaries(ax, channel_windows);
+end
+
+function plot_roi_wavelet_scalogram(ax, channel_result, roi_idx, channel_windows, title_text)
+trace = double(channel_result.trace_matrix(:, roi_idx));
+params = channel_result.analysis_parameters;
+spec = compute_wavelet_scalogram(trace, channel_result.frame_rate, channel_result.time, params);
+if isempty(spec.frequency) || isempty(spec.power)
+    text(ax, 0.5, 0.5, 'Wavelet map unavailable', 'Units', 'normalized', 'HorizontalAlignment', 'center');
+    axis(ax, 'off');
+    return;
+end
+
+[frequency, sort_idx] = sort(spec.frequency(:), 'ascend');
+power = spec.power(sort_idx, :);
+surface(ax, ...
+    repmat(spec.time(:)', numel(frequency), 1), ...
+    repmat(frequency, 1, numel(spec.time)), ...
+    zeros(size(power)), ...
+    power, ...
+    'EdgeColor', 'none');
+view(ax, 2);
+set(ax, 'YDir', 'normal');
+set(ax, 'YScale', 'log');
+xlabel(ax, 'Time (s)');
+ylabel(ax, 'Frequency (Hz)');
+title(ax, sprintf('%s | ROI %d | peak %.2f Hz', ...
+    title_text, roi_idx, channel_result.roi.peak_frequency_hz(roi_idx)));
+cb = colorbar(ax);
+cb.Label.String = 'Wavelet Power';
+hold(ax, 'on');
+if isfinite(channel_result.roi.peak_frequency_hz(roi_idx))
+    yline(ax, channel_result.roi.peak_frequency_hz(roi_idx), 'w--', 'LineWidth', 1.0);
+end
+ymin = max(min(frequency(frequency > 0)), 0.5);
+ymax = max(frequency);
+ylim(ax, [ymin, ymax]);
+yticks(ax, [1 3 10 30 80]);
+overlay_stim_boundaries(ax, channel_windows);
+end
+
+function overlay_stim_boundaries(ax, channel_windows)
+if ~isstruct(channel_windows)
+    return;
+end
+
+time_ranges = [];
+if isfield(channel_windows, 'shading_time_ranges') && ~isempty(channel_windows.shading_time_ranges)
+    time_ranges = channel_windows.shading_time_ranges;
+elseif isfield(channel_windows, 'block_time_ranges') && ~isempty(channel_windows.block_time_ranges)
+    time_ranges = channel_windows.block_time_ranges;
+elseif isfield(channel_windows, 'stim_time_ranges') && ~isempty(channel_windows.stim_time_ranges)
+    time_ranges = channel_windows.stim_time_ranges;
+end
+
+for idx = 1:size(time_ranges, 1)
+    xline(ax, time_ranges(idx, 1), 'k:', 'LineWidth', 0.8);
+    xline(ax, time_ranges(idx, 2), 'k:', 'LineWidth', 0.8);
+end
+end
+
+function channel_windows = resolve_channel_stim_windows(stim_windows, channel_name)
+channel_windows = struct();
+if isstruct(stim_windows) && isfield(stim_windows, channel_name)
+    channel_windows = stim_windows.(channel_name);
+end
+end
+
+function cleanup_legacy_oscillation_outputs(save_path)
+legacy_files = { ...
+    '8_oscillation_waveform_summary.fig', ...
+    '8_oscillation_waveform_summary.png', ...
+    '8_oscillation_spectral_summary.fig', ...
+    '8_oscillation_spectral_summary.png', ...
+    '8_oscillation_dual_summary.fig', ...
+    '8_oscillation_dual_summary.png', ...
+    '8_oscillation_condition_summary.fig', ...
+    '8_oscillation_condition_summary.png', ...
+    '8_oscillation_results.mat', ...
+    '8_fourier_zoom_summary.fig', ...
+    '8_fourier_zoom_summary.png', ...
+    '8_wavelet_flash_comparison.fig', ...
+    '8_wavelet_flash_comparison.png'};
+for i = 1:numel(legacy_files)
+    legacy_path = fullfile(save_path, legacy_files{i});
+    if isfile(legacy_path)
+        delete(legacy_path);
+    end
+end
+end
+
+function [trace_data, stage_name, t_axis, frame_rate] = resolve_time_frequency_channel_input(results, preferred_stages, t_axis_default, frame_rate_default)
+[trace_data, stage_name] = resolve_preferred_trace_stage(results, preferred_stages);
+t_axis = [];
+frame_rate = frame_rate_default;
+if isstruct(results) && isfield(results, 'trace_results') && isfield(results.trace_results, stage_name)
+    stage_struct = results.trace_results.(stage_name);
+    if isfield(stage_struct, 'time')
+        t_axis = double(stage_struct.time(:));
+    end
+    if isfield(stage_struct, 'frame_rate')
+        frame_rate = double(stage_struct.frame_rate);
+    end
+end
+
+if isempty(t_axis)
+    if ~isempty(t_axis_default)
+        t_axis = double(t_axis_default(:));
+    else
+        t_axis = (0:size(trace_data, 1) - 1)' / frame_rate;
+    end
+end
+end
+
+function frame_rate = resolve_saved_channel_frame_rate(dual_info, role_name)
+frame_rate = NaN;
+if isfield(dual_info, 'camera_cfg')
+    camera_cfg = dual_info.camera_cfg;
+    for idx = 1:numel(camera_cfg)
+        if isfield(camera_cfg(idx), 'role') && strcmpi(string(camera_cfg(idx).role), role_name)
+            if isfield(camera_cfg(idx), 'frame_rate') && ~isempty(camera_cfg(idx).frame_rate)
+                frame_rate = double(camera_cfg(idx).frame_rate);
+                return;
+            end
+        end
+    end
+end
+if ~isfinite(frame_rate)
+    error('Cannot resolve frame_rate for %s from dual_info.', role_name);
+end
+end
+
+function frame_count = resolve_saved_channel_frame_count(movie_info)
+frame_count = NaN;
+if isfield(movie_info, 'frame_count') && ~isempty(movie_info.frame_count)
+    frame_count = double(movie_info.frame_count);
+elseif isfield(movie_info, 'movie_size') && numel(movie_info.movie_size) >= 3
+    frame_count = double(movie_info.movie_size(3));
+end
+if ~isfinite(frame_count)
+    error('Cannot resolve frame_count from saved movie_info.');
+end
+end
+
+function [ncols, nrows] = resolve_saved_analysis_frame_size(voltage_movie_info, calcium_movie_info)
+ncols = NaN;
+nrows = NaN;
+if isfield(voltage_movie_info, 'analysis_frame_size') && numel(voltage_movie_info.analysis_frame_size) >= 2
+    ncols = double(voltage_movie_info.analysis_frame_size(1));
+    nrows = double(voltage_movie_info.analysis_frame_size(2));
+elseif isfield(calcium_movie_info, 'analysis_frame_size') && numel(calcium_movie_info.analysis_frame_size) >= 2
+    ncols = double(calcium_movie_info.analysis_frame_size(1));
+    nrows = double(calcium_movie_info.analysis_frame_size(2));
+end
+if ~isfinite(ncols) || ~isfinite(nrows)
+    error('Cannot resolve saved analysis frame size from movie_info.');
+end
+end
+
+function value = load_required_struct(mat_path, variable_name)
+if ~isfile(mat_path)
+    error('Required saved result file is missing: %s', mat_path);
+end
+tmp = load(mat_path, variable_name);
+if ~isfield(tmp, variable_name)
+    error('Variable %s is missing from %s', variable_name, mat_path);
+end
+value = tmp.(variable_name);
+end
+
+function save_explicit_dual_results_summary( ...
+    save_path, ...
+    dual_info, dual_info_path, ...
+    voltage_results, voltage_results_path, ...
+    calcium_results, calcium_results_path, ...
+    dual_results, dual_results_path, ...
+    stim_results, stim_results_path, ...
+    time_frequency_results, time_frequency_results_path)
+explicit_dual_results = struct( ...
+    'dual_info', dual_info, ...
+    'result_files', struct( ...
+        'dual_info', dual_info_path, ...
+        'voltage_results', voltage_results_path, ...
+        'calcium_results', calcium_results_path, ...
+        'dual_results', dual_results_path, ...
+        'stim_results', stim_results_path, ...
+        'time_frequency_results', time_frequency_results_path), ...
+    'available_voltage_trace_stages', string(fieldnames(voltage_results.trace_results)), ...
+    'available_calcium_trace_stages', string(fieldnames(calcium_results.trace_results)), ...
+    'dual_result_fields', string(fieldnames(dual_results)), ...
+    'stim_result_fields', string(fieldnames(stim_results)), ...
+    'time_frequency_result_fields', string(fieldnames(time_frequency_results)));
+save(fullfile(save_path, '-1_explicit_dual_results.mat'), 'explicit_dual_results', '-v7.3');
 end
 
 function print_section(section_name)
@@ -3567,6 +5884,682 @@ if ~isempty(roi_results_file) && isfile(roi_results_file)
         nrois = size(traces_voltage_raw, 2);
     end
 end
+end
+
+function bootstrap_volpy_voltage_reanalysis(cycle_path, save_path, source_results_path, auto_run, force_rerun, use_existing, flip_signal, voltage_polarity, calcium_polarity, calcium_smoothing_window)
+% Build a standalone voltage-reanalysis bundle that reuses the existing
+% dual ROI/calcium/stim context while replacing only the voltage trace
+% stages with VolPy-derived outputs saved under a separate folder.
+source_results_path = resolve_volpy_source_results_path(cycle_path, source_results_path);
+[source_dual_info, source_voltage_results, source_calcium_results, source_dual_results, source_stim_results, source_stim_context, source_stim_windows] = ...
+    load_saved_analysis_only_context(source_results_path);
+source_dual_results_path = fullfile(source_results_path, 'dual_results.mat');
+[source_dual_results, rois, ~, ~, roi_results_file] = load_dual_roi_context(source_dual_results_path, source_dual_results);
+if isempty(fieldnames(rois)) || ~isfield(rois, 'bwmask') || isempty(rois.bwmask)
+    error('VolPy voltage re-analysis requires an existing dual ROI mask in the source results.');
+end
+
+voltage_movie_path = resolve_channel_movie_path_from_dual_info(source_dual_info, "voltage");
+if ~isfile(voltage_movie_path)
+    error('Voltage movie for VolPy re-analysis was not found: %s', voltage_movie_path);
+end
+
+voltage_frame_rate = double(source_voltage_results.movie_info.frame_rate);
+volpy_output_dir = fullfile(save_path, '0_volpy_backend');
+if ~isfolder(volpy_output_dir)
+    mkdir(volpy_output_dir);
+end
+roi_mask_file = fullfile(volpy_output_dir, 'volpy_roi_mask.mat');
+mask = uint16(rois.bwmask);
+save(roi_mask_file, 'mask');
+
+result_mat_path = fullfile(volpy_output_dir, 'volpy_results.mat');
+volpy_backend_info = run_volpy_backend_pipeline_dual( ...
+    voltage_movie_path, voltage_frame_rate, flip_signal, ...
+    auto_run, force_rerun, use_existing, ...
+    volpy_output_dir, result_mat_path, roi_mask_file);
+volpy_data = load_volpy_backend_results_dual(char(volpy_backend_info.result_mat));
+
+voltage_results = source_voltage_results;
+voltage_results = preserve_standard_voltage_stage(voltage_results, 'raw');
+voltage_results = preserve_standard_voltage_stage(voltage_results, 'bleach_removed');
+voltage_results = preserve_standard_voltage_stage(voltage_results, 'baseline');
+voltage_results = preserve_standard_voltage_stage(voltage_results, 'noise_reference');
+voltage_results = preserve_standard_voltage_stage(voltage_results, 'noise');
+voltage_results = preserve_standard_voltage_stage(voltage_results, 'sensitivity');
+voltage_results = preserve_standard_voltage_stage(voltage_results, 'snr');
+
+voltage_results.movie_info.motion.applied = true;
+voltage_results.movie_info.motion.method = 'VolPy internal MotionCorrect';
+voltage_results.movie_info.motion.shift_file = char(volpy_backend_info.motion_corrected_file);
+voltage_results.movie_info.motion.parameter_file = char(volpy_backend_info.result_mat);
+voltage_results.movie_info.updated_at = datetime("now");
+
+voltage_results = store_trace_stage( ...
+    voltage_results, 'raw', volpy_data.t, {}, roi_results_file, ...
+    voltage_results.movie_info, 'volpy_trace', struct('source', char(volpy_backend_info.result_mat)));
+voltage_results = store_trace_stage( ...
+    voltage_results, 'bleach_removed', volpy_data.t, {'raw'}, roi_results_file, ...
+    voltage_results.movie_info, 'volpy_import_compat', struct('source_stage', 'volpy_t'));
+voltage_results = store_trace_stage( ...
+    voltage_results, 'baseline', volpy_data.f0, {'volpy_t'}, roi_results_file, ...
+    voltage_results.movie_info, 'volpy_F0', struct());
+voltage_results = store_trace_stage( ...
+    voltage_results, 'noise_reference', volpy_data.t_rec, {'volpy_t'}, roi_results_file, ...
+    voltage_results.movie_info, 'volpy_reconstructed_spike_trace', struct());
+voltage_results = store_trace_stage( ...
+    voltage_results, 'noise', volpy_data.noise, {'volpy_t', 'noise_reference'}, roi_results_file, ...
+    voltage_results.movie_info, 'volpy_residual', struct('expression', 'volpy_t - noise_reference'));
+voltage_results = store_trace_stage( ...
+    voltage_results, 'sensitivity', volpy_data.dff, {'volpy_t', 'baseline'}, roi_results_file, ...
+    voltage_results.movie_info, 'volpy_dff_import', struct());
+voltage_results = store_trace_stage( ...
+    voltage_results, 'snr', volpy_data.snr_trace, {'volpy_t', 'noise'}, roi_results_file, ...
+    voltage_results.movie_info, 'volpy_trace_divided_by_residual_std', struct());
+voltage_results = store_trace_stage( ...
+    voltage_results, 'volpy_t', volpy_data.t, {'raw'}, roi_results_file, ...
+    voltage_results.movie_info, 'volpy_trace', struct('source', char(volpy_backend_info.result_mat)));
+voltage_results = store_trace_stage( ...
+    voltage_results, 'volpy_ts', volpy_data.ts, {'volpy_t'}, roi_results_file, ...
+    voltage_results.movie_info, 'volpy_matched_filter_trace', struct());
+voltage_results = store_trace_stage( ...
+    voltage_results, 'volpy_t_rec', volpy_data.t_rec, {'volpy_t'}, roi_results_file, ...
+    voltage_results.movie_info, 'volpy_reconstructed_spike_trace', struct());
+voltage_results = store_trace_stage( ...
+    voltage_results, 'volpy_subthreshold', volpy_data.t_sub, {'volpy_t'}, roi_results_file, ...
+    voltage_results.movie_info, 'volpy_subthreshold', struct());
+voltage_results = store_trace_stage( ...
+    voltage_results, 'volpy_dff', volpy_data.dff, {'volpy_t', 'baseline'}, roi_results_file, ...
+    voltage_results.movie_info, 'volpy_dff', struct());
+voltage_results = store_trace_stage( ...
+    voltage_results, 'volpy_noise', volpy_data.noise, {'volpy_t', 'volpy_t_rec'}, roi_results_file, ...
+    voltage_results.movie_info, 'volpy_residual', struct('expression', 'volpy_t - volpy_t_rec'));
+
+calcium_results = source_calcium_results;
+dual_results = source_dual_results;
+stim_results = source_stim_results;
+dual_info = source_dual_info;
+dual_info.analysis_name = 'Dual_analysis3';
+dual_info.analysis_backend = 'volpy_voltage_reanalysis';
+dual_info.save_path = save_path;
+dual_info.created_at = datetime("now");
+dual_info.volpy_source_results_path = source_results_path;
+dual_info.volpy_backend = struct( ...
+    'output_dir', string(volpy_backend_info.output_dir), ...
+    'result_mat', string(volpy_backend_info.result_mat), ...
+    'motion_corrected_file', string(volpy_backend_info.motion_corrected_file), ...
+    'roi_mask_file', string(roi_mask_file), ...
+    'flip_signal', logical(flip_signal), ...
+    'voltage_movie_path', string(voltage_movie_path), ...
+    'calcium_smoothing_window', calcium_smoothing_window, ...
+    'voltage_polarity', voltage_polarity, ...
+    'calcium_polarity', calcium_polarity);
+if ~isstruct(dual_results)
+    dual_results = struct();
+end
+dual_results.volpy_voltage_reanalysis = struct( ...
+    'data', struct(), ...
+    'info', struct( ...
+        'source_results_path', string(source_results_path), ...
+        'result_mat', string(volpy_backend_info.result_mat), ...
+        'motion_corrected_file', string(volpy_backend_info.motion_corrected_file), ...
+        'roi_mask_file', string(roi_mask_file), ...
+        'created_at', datetime("now")));
+stim_results.info = rmfield_if_exists(source_stim_context, {'logs', 'method_manifest'});
+stim_results.windows = source_stim_windows;
+
+save(fullfile(save_path, 'dual_info.mat'), 'dual_info');
+save(fullfile(save_path, 'voltage_results.mat'), 'voltage_results', '-v7.3');
+save(fullfile(save_path, 'calcium_results.mat'), 'calcium_results', '-v7.3');
+save(fullfile(save_path, 'dual_results.mat'), 'dual_results', '-v7.3');
+save(fullfile(save_path, 'stim_results.mat'), 'stim_results', '-v7.3');
+fprintf('VolPy voltage re-analysis bundle prepared in: %s\n', save_path);
+fprintf('VolPy backend result: %s\n', volpy_backend_info.result_mat);
+end
+
+function source_results_path = resolve_volpy_source_results_path(cycle_path, source_results_path)
+source_results_path = string(source_results_path);
+if strlength(source_results_path) > 0
+    if ~isfolder(source_results_path)
+        error('Provided volpy_source_results_path does not exist: %s', source_results_path);
+    end
+    return;
+end
+explicit_result = find_latest_standard_explicit_result(cycle_path);
+if strlength(explicit_result) == 0
+    error('No existing standard Dual_analysis3 result was found under this cycle for VolPy re-analysis.');
+end
+source_results_path = string(fileparts(explicit_result));
+end
+
+function explicit_result = find_latest_standard_explicit_result(cycle_path)
+explicit_result = "";
+listing = dir(fullfile(cycle_path, 'Dual_analysis3', '**', '-1_explicit_dual_results.mat'));
+if isempty(listing)
+    return;
+end
+[~, newest_idx] = max([listing.datenum]);
+explicit_result = string(fullfile(listing(newest_idx).folder, listing(newest_idx).name));
+end
+
+function movie_path = resolve_channel_movie_path_from_dual_info(dual_info, role_name)
+movie_path = "";
+if ~isstruct(dual_info) || ~isfield(dual_info, 'camera_source')
+    return;
+end
+camera_source = dual_info.camera_source;
+camera_cfg = dual_info.camera_cfg;
+for idx = 1:min(numel(camera_source), numel(camera_cfg))
+    if strcmpi(string(camera_cfg(idx).role), string(role_name))
+        movie_path = string(camera_source(idx).path);
+        movie_path = resolve_movie_file_from_camera_source_path(movie_path);
+        return;
+    end
+end
+end
+
+function movie_file = resolve_movie_file_from_camera_source_path(camera_source_path)
+camera_source_path = string(camera_source_path);
+movie_file = camera_source_path;
+if strlength(movie_file) == 0
+    return;
+end
+if isfile(movie_file)
+    return;
+end
+if ~isfolder(movie_file)
+    movie_file = "";
+    return;
+end
+listing = dir(fullfile(char(movie_file), '*.tif'));
+if isempty(listing)
+    listing = dir(fullfile(char(movie_file), '*.tiff'));
+end
+if isempty(listing)
+    movie_file = "";
+    return;
+end
+if numel(listing) == 1
+    movie_file = string(fullfile(listing(1).folder, listing(1).name));
+    return;
+end
+[~, newest_idx] = max([listing.datenum]);
+movie_file = string(fullfile(listing(newest_idx).folder, listing(newest_idx).name));
+end
+
+function info = run_volpy_backend_pipeline_dual(input_movie_path, frame_rate, flip_signal, auto_run, force_rerun, use_existing, output_dir, result_mat_path, roi_mask_file)
+python_exe = 'C:\Users\DELL\anaconda3\envs\caiman\python.exe';
+script_path = fullfile(fileparts(mfilename('fullpath')), 'python_seg', 'run_volpy_backend.py');
+
+if ~isfile(python_exe)
+    error('VolPy backend python interpreter not found: %s', python_exe);
+end
+if ~isfile(script_path)
+    error('VolPy backend script not found: %s', script_path);
+end
+if ~isfolder(output_dir)
+    mkdir(output_dir);
+end
+
+result_exists = isfile(result_mat_path);
+should_run = force_rerun || ~(result_exists && use_existing);
+cmdout = "existing result reused";
+if should_run
+    if ~auto_run && ~force_rerun
+        error('VolPy backend result not found and auto-run is disabled: %s', result_mat_path);
+    end
+    flip_text = ternary(flip_signal, 'true', 'false');
+    cmd = sprintf('"%s" "%s" "%s" --output-dir "%s" --frame-rate %.12g --flip-signal %s --roi-mask "%s"', ...
+        python_exe, script_path, input_movie_path, output_dir, frame_rate, flip_text, roi_mask_file);
+    [status, raw_cmdout] = system(cmd);
+    cmdout = string(raw_cmdout);
+    if status ~= 0
+        error('VolPy backend command failed:\n%s', raw_cmdout);
+    end
+end
+
+if ~isfile(result_mat_path)
+    error('VolPy backend did not create result file: %s', result_mat_path);
+end
+
+manifest_path = fullfile(output_dir, 'run_manifest.json');
+motion_corrected_file = "";
+memmap_file = "";
+if isfile(manifest_path)
+    manifest = jsondecode(fileread(manifest_path));
+    if isfield(manifest, 'motion_corrected_file')
+        motion_corrected_file = string(manifest.motion_corrected_file);
+    end
+    if isfield(manifest, 'memmap_file')
+        memmap_file = string(manifest.memmap_file);
+    end
+end
+
+info = struct( ...
+    'input_movie_path', string(input_movie_path), ...
+    'output_dir', string(output_dir), ...
+    'result_mat', string(result_mat_path), ...
+    'manifest_path', string(manifest_path), ...
+    'motion_corrected_file', motion_corrected_file, ...
+    'memmap_file', memmap_file, ...
+    'frame_rate', frame_rate, ...
+    'flip_signal', flip_signal, ...
+    'roi_mask_file', string(roi_mask_file), ...
+    'script_path', string(script_path), ...
+    'command_output', string(cmdout));
+end
+
+function data = load_volpy_backend_results_dual(result_mat_path)
+s = load(result_mat_path);
+data = struct();
+data.mask = uint16(s.mask);
+data.t = cell_columns_to_matrix_dual(s.t);
+data.ts = cell_columns_to_matrix_dual(s.ts);
+data.t_rec = cell_columns_to_matrix_dual(s.t_rec);
+data.t_sub = cell_columns_to_matrix_dual(s.t_sub);
+if isfield(s, 'F0')
+    data.f0 = cell_columns_to_matrix_dual(s.F0);
+else
+    data.f0 = ones(size(data.t));
+end
+if isfield(s, 'dFF')
+    data.dff = cell_columns_to_matrix_dual(s.dFF);
+else
+    baseline_safe = data.f0;
+    baseline_safe(abs(baseline_safe) < eps) = 1;
+    data.dff = data.t ./ baseline_safe;
+end
+
+nframes = size(data.t, 1);
+nrois = size(data.t, 2);
+data.noise = data.t - data.t_rec;
+data.snr_trace = zeros(size(data.t));
+for i = 1:nrois
+    noise_std = std(data.noise(:, i), 0, 1);
+    if ~isfinite(noise_std) || noise_std <= eps
+        noise_std = 1;
+    end
+    data.snr_trace(:, i) = data.t(:, i) ./ noise_std;
+end
+
+data.spikes = cell(1, nrois);
+data.peak_amplitude = cell(1, nrois);
+data.peaks_polarity = cell(1, nrois);
+for i = 1:nrois
+    idx = round(double(s.spikes{i}(:)));
+    idx = idx(idx >= 1 & idx <= nframes);
+    data.spikes{i} = idx;
+    data.peak_amplitude{i} = data.t(idx, i);
+    polarity = 1;
+    if isfield(s, 'templates') && numel(s.templates) >= i && ~isempty(s.templates{i})
+        template_i = double(s.templates{i}(:));
+        template_i = template_i(~isnan(template_i));
+        if ~isempty(template_i)
+            polarity = sign(sum(template_i));
+        end
+    end
+    if ~isfinite(polarity) || polarity == 0
+        polarity = 1;
+    end
+    data.peaks_polarity{i} = polarity;
+end
+
+if isfield(s, 'snr')
+    data.snr_scalar = double(s.snr(:));
+else
+    data.snr_scalar = zeros(nrois, 1);
+end
+if isfield(s, 'locality')
+    data.locality = logical(s.locality(:));
+else
+    data.locality = true(nrois, 1);
+end
+if isfield(s, 'low_spikes')
+    data.low_spikes = logical(s.low_spikes(:));
+else
+    data.low_spikes = false(nrois, 1);
+end
+end
+
+function matrix = cell_columns_to_matrix_dual(cell_values)
+if ~iscell(cell_values)
+    matrix = double(cell_values);
+    return;
+end
+if isempty(cell_values)
+    matrix = [];
+    return;
+end
+column_cells = cellfun(@(v) double(v(:)), cell_values, 'UniformOutput', false);
+matrix = cell2mat(column_cells);
+end
+
+function results = preserve_standard_voltage_stage(results, stage_name)
+backup_name = "standard_" + string(stage_name);
+if has_trace_stage(results, stage_name) && ~has_trace_stage(results, char(backup_name))
+    results.trace_results.(char(backup_name)) = results.trace_results.(stage_name);
+end
+end
+
+function nframes = infer_frame_count_from_channel_results(results)
+nframes = [];
+if isstruct(results) && isfield(results, 'movie_info') && isfield(results.movie_info, 'frame_count') ...
+        && ~isempty(results.movie_info.frame_count)
+    nframes = double(results.movie_info.frame_count);
+    return;
+end
+preferred_fields = fieldnames(results.trace_results);
+for idx = 1:numel(preferred_fields)
+    stage = preferred_fields{idx};
+    if isfield(results.trace_results.(stage), 'data') && ~isempty(results.trace_results.(stage).data)
+        nframes = size(results.trace_results.(stage).data, 1);
+        return;
+    end
+end
+error('Could not infer frame count from saved channel results.');
+end
+
+function run_dual_post_trace_sections( ...
+    save_path, ...
+    dual_info, dual_info_path, ...
+    voltage_results, voltage_results_path, ...
+    calcium_results, calcium_results_path, ...
+    dual_results, dual_results_path, ...
+    stim_results, stim_results_path, ...
+    stim_context, stim_windows, ...
+    t_voltage, t_calcium, ...
+    freq_voltage, freq_calcium, ...
+    nframes_voltage, nframes_calcium, ...
+    voltage_polarity, calcium_polarity, calcium_smoothing_window, reuse_saved_stim_windows)
+print_section('Channel Summary Plots');
+fprintf('Saving channel summary plots...\n');
+[voltage_results, calcium_results] = load_channel_results( ...
+    voltage_results_path, calcium_results_path, voltage_results, calcium_results);
+traces_voltage_raw = fetch_trace_stage(voltage_results, 'raw');
+has_calcium_raw = has_trace_stage(calcium_results, 'raw_smoothed') || has_trace_stage(calcium_results, 'raw');
+has_voltage_sensitivity = has_trace_stage(voltage_results, 'sensitivity');
+has_voltage_snr = has_trace_stage(voltage_results, 'snr');
+has_calcium_sensitivity = has_trace_stage(calcium_results, 'sensitivity_smoothed') || has_trace_stage(calcium_results, 'sensitivity');
+has_calcium_snr = has_trace_stage(calcium_results, 'snr_smoothed') || has_trace_stage(calcium_results, 'snr');
+if has_voltage_sensitivity
+    voltage_sensitivity = fetch_trace_stage(voltage_results, 'sensitivity');
+else
+    voltage_sensitivity = [];
+end
+if has_voltage_snr
+    voltage_snr = fetch_trace_stage(voltage_results, 'snr');
+else
+    voltage_snr = [];
+end
+if has_calcium_raw
+    [traces_calcium_raw, calcium_raw_stage] = resolve_preferred_trace_stage(calcium_results, {'raw_smoothed', 'raw'});
+else
+    traces_calcium_raw = [];
+    calcium_raw_stage = '';
+end
+if has_calcium_sensitivity
+    [calcium_sensitivity, calcium_sensitivity_stage] = resolve_preferred_trace_stage(calcium_results, {'sensitivity_smoothed', 'sensitivity'});
+else
+    calcium_sensitivity = [];
+    calcium_sensitivity_stage = '';
+end
+if has_calcium_snr
+    [calcium_snr, calcium_snr_stage] = resolve_preferred_trace_stage(calcium_results, {'snr_smoothed', 'snr'});
+else
+    calcium_snr = [];
+    calcium_snr_stage = '';
+end
+summary_fig = figure('Color', 'w');
+subplot(2, 3, 1); hold on; title('Voltage Raw'); plot_offset_stage(traces_voltage_raw, t_voltage);
+subplot(2, 3, 2); hold on; title('Voltage Sensitivity'); plot_optional_stage(voltage_polarity * voltage_sensitivity, t_voltage, has_voltage_sensitivity, 'Sensitivity stage unavailable');
+subplot(2, 3, 3); hold on; title('Voltage SNR'); plot_optional_stage(voltage_polarity * voltage_snr, t_voltage, has_voltage_snr, 'SNR stage unavailable');
+subplot(2, 3, 4); hold on; title(sprintf('Calcium Raw (%s, window=%d)', strrep(char(calcium_raw_stage), '_', '\_'), calcium_smoothing_window)); plot_optional_stage(traces_calcium_raw, t_calcium, has_calcium_raw, 'Raw stage unavailable');
+subplot(2, 3, 5); hold on; title(sprintf('Calcium Sensitivity (%s, window=%d)', strrep(char(calcium_sensitivity_stage), '_', '\_'), calcium_smoothing_window)); plot_optional_stage(calcium_polarity * calcium_sensitivity, t_calcium, has_calcium_sensitivity, 'Sensitivity stage unavailable');
+subplot(2, 3, 6); hold on; title(sprintf('Calcium SNR (%s, window=%d)', strrep(char(calcium_snr_stage), '_', '\_'), calcium_smoothing_window)); plot_optional_stage(calcium_polarity * calcium_snr, t_calcium, has_calcium_snr, 'SNR stage unavailable');
+save_figure_bundle(summary_fig, fullfile(save_path, '4_dual_trace_summary.fig'), fullfile(save_path, '4_dual_trace_summary.png'));
+close(summary_fig);
+
+print_section('Dual Comparison');
+fprintf('Building dual-channel comparison results...\n');
+if stim_context.supported
+    if reuse_saved_stim_windows && isstruct(stim_results) && isfield(stim_results, 'windows') && ~isempty(stim_results.windows)
+        stim_windows = stim_results.windows;
+        fprintf('VolPy re-analysis: reusing saved stim windows from the standard dual results.\n');
+    elseif reuse_saved_stim_windows && ~(isfield(stim_context, 'logs') && isstruct(stim_context.logs))
+        fprintf(['VolPy re-analysis: saved stim windows are unavailable and saved stim_context has no logs. ' ...
+            'Rebuilding stim metadata from the current cycle manifests/logs.\n']);
+        voltage_idx_local = find(strcmpi(string({dual_info.camera_cfg.role}), "voltage"), 1, 'first');
+        calcium_idx_local = find(strcmpi(string({dual_info.camera_cfg.role}), "calcium"), 1, 'first');
+        raw_dual_input_cfg_local = struct();
+        if isfield(dual_info, 'manual_options') && isstruct(dual_info.manual_options) ...
+                && isfield(dual_info.manual_options, 'raw_dual_input_cfg')
+            raw_dual_input_cfg_local = dual_info.manual_options.raw_dual_input_cfg;
+        end
+        [cycle_manifest_reload, record_manifest_reload, ~, input_layout_reload] = resolve_dual_camera_sources( ...
+            cycle_path, dual_info.camera_cfg, [], raw_dual_input_cfg_local);
+        stim_context = resolve_stim_context( ...
+            cycle_path, cycle_manifest_reload, record_manifest_reload, ...
+            dual_info.camera_cfg(voltage_idx_local).camera_index, dual_info.camera_cfg(calcium_idx_local).camera_index, ...
+            [], input_layout_reload);
+        stim_windows = build_visual_stim_windows(stim_context, freq_voltage, freq_calcium, nframes_voltage, nframes_calcium);
+    else
+        stim_windows = build_visual_stim_windows(stim_context, freq_voltage, freq_calcium, nframes_voltage, nframes_calcium);
+    end
+    print_stim_context_summary(stim_context, stim_windows, 'Dual Comparison');
+else
+    print_stim_context_summary(stim_context, struct(), 'Dual Comparison');
+end
+[voltage_results, calcium_results] = load_channel_results( ...
+    voltage_results_path, calcium_results_path, voltage_results, calcium_results);
+has_sensitivity_pair = has_trace_stage(voltage_results, 'sensitivity') ...
+    && (has_trace_stage(calcium_results, 'sensitivity_smoothed') || has_trace_stage(calcium_results, 'sensitivity'));
+has_snr_pair = has_trace_stage(voltage_results, 'snr') ...
+    && (has_trace_stage(calcium_results, 'snr_smoothed') || has_trace_stage(calcium_results, 'snr'));
+if has_sensitivity_pair
+    voltage_sensitivity = fetch_trace_stage(voltage_results, 'sensitivity');
+    [calcium_sensitivity, calcium_sensitivity_stage] = resolve_preferred_trace_stage(calcium_results, {'sensitivity_smoothed', 'sensitivity'});
+else
+    voltage_sensitivity = [];
+    calcium_sensitivity = [];
+    calcium_sensitivity_stage = '';
+end
+if has_snr_pair
+    voltage_snr = fetch_trace_stage(voltage_results, 'snr');
+    [calcium_snr, calcium_snr_stage] = resolve_preferred_trace_stage(calcium_results, {'snr_smoothed', 'snr'});
+else
+    voltage_snr = [];
+    calcium_snr = [];
+    calcium_snr_stage = '';
+end
+comparison_data = struct();
+comparison_info = struct();
+if has_sensitivity_pair
+    comparison_sensitivity = build_dual_metric_comparison( ...
+        'sensitivity', voltage_sensitivity, calcium_sensitivity, ...
+        t_voltage, t_calcium, calcium_smoothing_window, save_path, stim_windows, voltage_polarity, calcium_polarity);
+    comparison_data.sensitivity = comparison_sensitivity.data;
+    comparison_info.sensitivity = comparison_sensitivity.info;
+end
+if has_snr_pair
+    comparison_snr = build_dual_metric_comparison( ...
+        'snr', voltage_snr, calcium_snr, ...
+        t_voltage, t_calcium, calcium_smoothing_window, save_path, stim_windows, voltage_polarity, calcium_polarity);
+    comparison_data.snr = comparison_snr.data;
+    comparison_info.snr = comparison_snr.info;
+end
+if ~has_sensitivity_pair && ~has_snr_pair
+    error('VolPy dual comparison cannot run because neither sensitivity nor snr stage is available in both channels.');
+end
+dual_results.comparison = struct( ...
+    'data', comparison_data, ...
+    'info', struct( ...
+        'method', 'dual_metric_comparison_with_quad_and_overlap_plots', ...
+        'parameters', struct('calcium_smoothing_window', calcium_smoothing_window), ...
+        'input_stages', struct( ...
+            'voltage_sensitivity', 'sensitivity', ...
+            'voltage_snr', 'snr', ...
+            'calcium_sensitivity', string(calcium_sensitivity_stage), ...
+            'calcium_snr', string(calcium_snr_stage)), ...
+        'available_stage_pairs', struct('sensitivity', has_sensitivity_pair, 'snr', has_snr_pair), ...
+        'comparison_files', comparison_info, ...
+        'created_at', datetime("now")));
+save(dual_results_path, 'dual_results', '-v7.3');
+
+print_section('Stim-Aware Analysis');
+fprintf('Running stimulus-specific analysis after dual comparison...\n');
+[voltage_results, calcium_results] = load_channel_results( ...
+    voltage_results_path, calcium_results_path, voltage_results, calcium_results);
+has_voltage_sensitivity = has_trace_stage(voltage_results, 'sensitivity');
+has_voltage_snr = has_trace_stage(voltage_results, 'snr');
+has_calcium_sensitivity = has_trace_stage(calcium_results, 'sensitivity_smoothed') || has_trace_stage(calcium_results, 'sensitivity');
+has_calcium_snr = has_trace_stage(calcium_results, 'snr_smoothed') || has_trace_stage(calcium_results, 'snr');
+if has_voltage_sensitivity
+    voltage_sensitivity = fetch_trace_stage(voltage_results, 'sensitivity');
+else
+    voltage_sensitivity = [];
+end
+if has_voltage_snr
+    voltage_snr = fetch_trace_stage(voltage_results, 'snr');
+else
+    voltage_snr = [];
+end
+if has_calcium_sensitivity
+    [calcium_sensitivity, calcium_sensitivity_stage] = resolve_preferred_trace_stage(calcium_results, {'sensitivity_smoothed', 'sensitivity'});
+else
+    calcium_sensitivity = [];
+    calcium_sensitivity_stage = '';
+end
+if has_calcium_snr
+    [calcium_snr, calcium_snr_stage] = resolve_preferred_trace_stage(calcium_results, {'snr_smoothed', 'snr'});
+else
+    calcium_snr = [];
+    calcium_snr_stage = '';
+end
+stim_results.info = rmfield_if_exists(stim_context, {'logs', 'method_manifest'});
+stim_results.windows = stim_windows;
+if stim_context.supported
+    print_stim_context_summary(stim_context, stim_windows, 'Stim-Aware Analysis');
+    stim_results.status = ternary(isstruct(stim_windows) && isfield(stim_windows, 'supported') && stim_windows.supported, ...
+        'supported', 'unsupported_window_layout');
+    if stim_windows.supported
+        if ~(has_voltage_snr && has_calcium_snr)
+            error('Stim-aware analysis requires snr stage in both voltage_results and calcium_results.');
+        end
+        stim_trace_fig = figure('Color', 'w');
+        subplot(2, 2, 1); hold on; title('Voltage Sensitivity'); plot_optional_stage(voltage_polarity * voltage_sensitivity, t_voltage, has_voltage_sensitivity, 'Sensitivity stage unavailable'); add_stim_shading(gca, stim_windows.voltage, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
+        subplot(2, 2, 2); hold on; title('Voltage SNR'); plot_optional_stage(voltage_polarity * voltage_snr, t_voltage, has_voltage_snr, 'SNR stage unavailable'); add_stim_shading(gca, stim_windows.voltage, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
+        subplot(2, 2, 3); hold on; title(sprintf('Calcium Sensitivity (%s)', strrep(char(calcium_sensitivity_stage), '_', '\_'))); plot_optional_stage(calcium_polarity * calcium_sensitivity, t_calcium, has_calcium_sensitivity, 'Sensitivity stage unavailable'); add_stim_shading(gca, stim_windows.calcium, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
+        subplot(2, 2, 4); hold on; title(sprintf('Calcium SNR (%s)', strrep(char(calcium_snr_stage), '_', '\_'))); plot_optional_stage(calcium_polarity * calcium_snr, t_calcium, has_calcium_snr, 'SNR stage unavailable'); add_stim_shading(gca, stim_windows.calcium, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
+        save_figure_bundle(stim_trace_fig, fullfile(save_path, '4_dual_trace_summary_with_stim.fig'), fullfile(save_path, '4_dual_trace_summary_with_stim.png'));
+        close(stim_trace_fig);
+
+        voltage_stim_metrics_snr = compute_stim_trial_metrics(voltage_snr, stim_windows.voltage, voltage_polarity, freq_voltage);
+        calcium_stim_metrics_snr = compute_stim_trial_metrics(calcium_snr, stim_windows.calcium, calcium_polarity, freq_calcium);
+        stim_results.response = struct( ...
+            'analysis_trace_stage', struct( ...
+                'snr', struct('voltage', "snr", 'calcium', string(calcium_snr_stage)), ...
+                'sensitivity', struct('voltage', "sensitivity", 'calcium', string(calcium_sensitivity_stage))), ...
+            'plot_trace_stage', struct('voltage_sensitivity', "sensitivity", 'voltage_snr', "snr", ...
+                'calcium_sensitivity', string(calcium_sensitivity_stage), 'calcium_snr', string(calcium_snr_stage)), ...
+            'calcium_smoothing_window', calcium_smoothing_window, ...
+            'voltage_polarity', voltage_polarity, ...
+            'calcium_polarity', calcium_polarity, ...
+            'snr', struct('voltage', voltage_stim_metrics_snr, 'calcium', calcium_stim_metrics_snr));
+
+        if has_voltage_sensitivity && has_calcium_sensitivity
+            voltage_stim_metrics_sensitivity = compute_stim_trial_metrics(voltage_sensitivity, stim_windows.voltage, voltage_polarity, freq_voltage);
+            calcium_stim_metrics_sensitivity = compute_stim_trial_metrics(calcium_sensitivity, stim_windows.calcium, calcium_polarity, freq_calcium);
+            stim_results.response.sensitivity = struct('voltage', voltage_stim_metrics_sensitivity, 'calcium', calcium_stim_metrics_sensitivity);
+        else
+            voltage_stim_metrics_sensitivity = [];
+            calcium_stim_metrics_sensitivity = [];
+        end
+
+        if stim_windows.is_grating
+            voltage_tuning = compute_grating_tuning(voltage_stim_metrics_snr.delta_mean, stim_windows.orientations);
+            calcium_tuning = compute_grating_tuning(calcium_stim_metrics_snr.delta_mean, stim_windows.orientations);
+            stim_results.analysis_kind = 'grating_tuning';
+            stim_results.tuning = struct('voltage', voltage_tuning, 'calcium', calcium_tuning);
+            save(fullfile(save_path, '7_stim_tuning_summary.mat'), 'voltage_tuning', 'calcium_tuning');
+            stim_tuning_fig = figure('Color', 'w');
+            subplot(2, 2, 1); plot_tuning_population(voltage_tuning.unique_orientations, voltage_tuning.response_by_condition, 'r', 'Voltage');
+            subplot(2, 2, 2); plot_tuning_population(calcium_tuning.unique_orientations, calcium_tuning.response_by_condition, 'g', 'Calcium');
+            subplot(2, 2, 3); scatter(voltage_tuning.gosi, calcium_tuning.gosi, 28, 'filled'); xlabel('Voltage gOSI'); ylabel('Calcium gOSI'); title('Orientation Selectivity'); grid on;
+            subplot(2, 2, 4); scatter(voltage_tuning.pref_dir, calcium_tuning.pref_dir, 28, 'filled'); hold on; plot([0 360], [0 360], 'k--'); xlim([0 360]); ylim([0 360]); xlabel('Voltage Pref. Dir (deg)'); ylabel('Calcium Pref. Dir (deg)'); title('Preferred Direction'); grid on;
+            save_figure_bundle(stim_tuning_fig, fullfile(save_path, '7_stim_tuning_summary.fig'), fullfile(save_path, '7_stim_tuning_summary.png'));
+            close(stim_tuning_fig);
+        else
+            voltage_block_summary_snr = summarize_block_by_condition(voltage_snr, stim_windows.voltage, stim_windows.block_labels, voltage_polarity, stim_windows.trial_labels);
+            calcium_block_summary_snr = summarize_block_by_condition(calcium_snr, stim_windows.calcium, stim_windows.block_labels, calcium_polarity, stim_windows.trial_labels);
+            voltage_delta_summary_snr = summarize_stim_by_condition(voltage_stim_metrics_snr, stim_windows);
+            calcium_delta_summary_snr = summarize_stim_by_condition(calcium_stim_metrics_snr, stim_windows);
+            stim_results.analysis_kind = 'condition_response';
+            stim_results.condition_summary = struct( ...
+                'snr', struct( ...
+                    'block', struct('voltage', voltage_block_summary_snr, 'calcium', calcium_block_summary_snr), ...
+                    'delta', struct('voltage', voltage_delta_summary_snr, 'calcium', calcium_delta_summary_snr)));
+            plot_stim_condition_summary(voltage_block_summary_snr, calcium_block_summary_snr, stim_context, save_path, '7_stim_block_summary_snr', 'SNR Block Response', 'SNR');
+            plot_stim_condition_summary(voltage_delta_summary_snr, calcium_delta_summary_snr, stim_context, save_path, '7_stim_delta_summary_snr', 'SNR Delta Response', '\Delta SNR (stim - baseline)');
+            if ~isempty(voltage_stim_metrics_sensitivity) && ~isempty(calcium_stim_metrics_sensitivity)
+                voltage_block_summary_sensitivity = summarize_block_by_condition(voltage_sensitivity, stim_windows.voltage, stim_windows.block_labels, voltage_polarity, stim_windows.trial_labels);
+                calcium_block_summary_sensitivity = summarize_block_by_condition(calcium_sensitivity, stim_windows.calcium, stim_windows.block_labels, calcium_polarity, stim_windows.trial_labels);
+                voltage_delta_summary_sensitivity = summarize_stim_by_condition(voltage_stim_metrics_sensitivity, stim_windows);
+                calcium_delta_summary_sensitivity = summarize_stim_by_condition(calcium_stim_metrics_sensitivity, stim_windows);
+                stim_results.condition_summary.sensitivity = struct( ...
+                    'block', struct('voltage', voltage_block_summary_sensitivity, 'calcium', calcium_block_summary_sensitivity), ...
+                    'delta', struct('voltage', voltage_delta_summary_sensitivity, 'calcium', calcium_delta_summary_sensitivity));
+                plot_stim_condition_summary(voltage_block_summary_sensitivity, calcium_block_summary_sensitivity, stim_context, save_path, '7_stim_block_summary_sensitivity', 'Sensitivity Block Response', 'Sensitivity');
+                plot_stim_condition_summary(voltage_delta_summary_sensitivity, calcium_delta_summary_sensitivity, stim_context, save_path, '7_stim_delta_summary_sensitivity', 'Sensitivity Delta Response', '\Delta Sensitivity (stim - baseline)');
+            end
+        end
+    end
+else
+    stim_results.status = 'not_applicable_or_missing_inputs';
+end
+save(stim_results_path, 'stim_results', '-v7.3');
+
+print_section('Population Time-Frequency Analysis');
+fprintf('Running Fourier and wavelet analysis after dual/stim summaries...\n');
+[voltage_results, calcium_results] = load_channel_results( ...
+    voltage_results_path, calcium_results_path, voltage_results, calcium_results);
+time_frequency_results = run_dual_time_frequency_section( ...
+    voltage_results, calcium_results, ...
+    t_voltage, t_calcium, ...
+    freq_voltage, freq_calcium, ...
+    stim_windows, ...
+    save_path, ...
+    voltage_polarity, calcium_polarity);
+time_frequency_record = build_section_record( ...
+    'Population Time-Frequency Analysis', ...
+    'Summarize processed dual-channel traces with direct FFT spectra and wavelet time-frequency maps, while reusing the saved processed trace stages as section inputs.', ...
+    struct( ...
+        'voltage_results_file', string(voltage_results_path), ...
+        'calcium_results_file', string(calcium_results_path), ...
+        'stim_results_file', string(stim_results_path), ...
+        'voltage_stage', string(time_frequency_results.parameters.voltage_stage), ...
+        'calcium_stage', string(time_frequency_results.parameters.calcium_stage)), ...
+    time_frequency_results.parameters, ...
+    struct( ...
+        'fourier_summary_png', string(time_frequency_results.visualizations.fourier_summary.png_file), ...
+        'wavelet_summary_png', string(time_frequency_results.visualizations.wavelet_summary.png_file)), ...
+    struct(), ...
+    "To rerun the VolPy voltage re-analysis pipeline, rerun Dual_analysis3 with analysis_backend = 'volpy_voltage_reanalysis'.");
+time_frequency_results.record = time_frequency_record;
+time_frequency_results_path = fullfile(save_path, '8_time_frequency_results.mat');
+save(time_frequency_results_path, 'time_frequency_results', '-v7.3');
+
+print_section('Save Explicit Results');
+save_explicit_dual_results_summary( ...
+    save_path, ...
+    dual_info, dual_info_path, ...
+    voltage_results, voltage_results_path, ...
+    calcium_results, calcium_results_path, ...
+    dual_results, dual_results_path, ...
+    stim_results, stim_results_path, ...
+    time_frequency_results, time_frequency_results_path);
+
+fprintf('Dual_analysis3 VolPy voltage re-analysis finished.\n');
+fprintf('Results saved to: %s\n', save_path);
 end
 
 function data = fetch_trace_stage(results, stage_name)

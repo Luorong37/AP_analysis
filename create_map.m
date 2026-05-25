@@ -66,12 +66,28 @@ h = ones(3,3);
 h(5) = 0;
 movie_binned = reshape(movie,ncols,nrows,[]);
 % movie_sum = zeros(size(movie_3D));
+% Prefer the original parfor path, but keep a serial fallback if pool startup fails.
+[~, useParallelMap] = ensure_local_parallel_pool([], 'create_map');
 
-parfor i = 1:nframe
-    current_frame = movie_binned(:,:,i)./8;
-    sum_frame = imfilter(current_frame,h,'conv');
-    movie_binned(:,:,i) = sum_frame;
+if useParallelMap
+    parfor i = 1:nframe
+        current_frame = movie_binned(:,:,i)./8;
+        sum_frame = imfilter(current_frame,h,'conv');
+        movie_binned(:,:,i) = sum_frame;
+    end
+else
+    for i = 1:nframe
+        current_frame = movie_binned(:,:,i)./8;
+        sum_frame = imfilter(current_frame,h,'conv');
+        movie_binned(:,:,i) = sum_frame;
+    end
 end
+
+if any(strcmpi(mode, {'voltage_chunked', 'paper'}))
+    quick_map = create_voltage_chunked_map(movie_binned);
+    return;
+end
+
 movie_binned = reshape(movie_binned,nrows*ncols,[]);
 % reshape to high dimension for each bin
 % movie_5D = reshape(movie,bin,ncols/bin,bin,nrows/bin,[]);
@@ -93,8 +109,6 @@ npixels = size(movie_binned,1);
 % fitted_curves = f.a*exp(f.b*x)+f.c*exp(f.d*x);
 % movie_binned_corrected = movie_binned ./ fitted_curves';
 % movie_binned_corrected = wdenoise(movie_binned_corrected',DenoisingMethod="FDR")';
-k = 5;
-n = 3;
 %
 % print_count = 0;
 % % % 定义滤波器参数
@@ -136,6 +150,7 @@ n = 3;
 
 
 
+if useParallelMap
 parfor i = 1:npixels
     % fprintf('Processing %d / %d\n', i, npixels );
     % fprintf(repmat('\b',1,print_count));
@@ -148,7 +163,7 @@ parfor i = 1:npixels
     % pixel_trace_corrected =  movie_binned(i, :) - movie_binned_corrected (i, :);
     % baseline =mean(pixel_trace_corrected);
     % baseline = mean(pixel_trace_corrected); % filted
-    if strcmp(mode,'voltage')
+    if strcmpi(mode,'voltage')
         pixel_trace_corrected = detrend(double(movie_binned(i, :)),1);
         % abstrace = abs(pixel_trace_corrected - baseline);
         abstrace = abs(pixel_trace_corrected);
@@ -159,12 +174,44 @@ parfor i = 1:npixels
         quick_map(i) = pointdff(1);
         % quick_map(i) = sign(pointdff(1)) .* (1 - exp(-k * abs(pointdff(1)*n).^n)) / (1 - exp(-k));
 
-    elseif strcmp(mode,'calcium')
+    elseif strcmpi(mode,'calcium')
         pixel_trace_corrected = detrend(double(movie_binned(i, :)),2);
         quick_map(i) = std(pixel_trace_corrected);
         % quick_map(i) = (max(pixel_trace_corrected)-baseline) /std(pixel_trace_corrected);
     end
     % send(q, 1);  % 每完成一个发一个通知（内容可忽略）
+end
+else
+for i = 1:npixels
+    % fprintf('Processing %d / %d\n', i, npixels );
+    % fprintf(repmat('\b',1,print_count));
+    % % fprintf('Calculating %.2f %% \n', i/npixels*100);
+    % print_count = fprintf('Calculating %.2f %% \n', i/npixels*100);
+    % pixel_trace_corrected = movie_binned(i, :);
+    % pixel_trace_corrected = movie_binned(i, :);
+    % pixel_trace_corrected = wdenoise(movie_binned_corrected(i, :));
+    % pixel_trace_corrected = detrend(double(movie_binned(i, :)),1);
+    % pixel_trace_corrected =  movie_binned(i, :) - movie_binned_corrected (i, :);
+    % baseline =mean(pixel_trace_corrected);
+    % baseline = mean(pixel_trace_corrected); % filted
+    if strcmpi(mode,'voltage')
+        pixel_trace_corrected = detrend(double(movie_binned(i, :)),1);
+        % abstrace = abs(pixel_trace_corrected - baseline);
+        abstrace = abs(pixel_trace_corrected);
+        maxpointabs =  max(abstrace);
+        maxpointindex = abstrace == maxpointabs;
+        pointdff  = pixel_trace_corrected(maxpointindex);
+        % pointdff = ((maxpoint-baseline)/baseline);
+        quick_map(i) = pointdff(1);
+        % quick_map(i) = sign(pointdff(1)) .* (1 - exp(-k * abs(pointdff(1)*n).^n)) / (1 - exp(-k));
+
+    elseif strcmpi(mode,'calcium')
+        pixel_trace_corrected = detrend(double(movie_binned(i, :)),2);
+        quick_map(i) = std(pixel_trace_corrected);
+        % quick_map(i) = (max(pixel_trace_corrected)-baseline) /std(pixel_trace_corrected);
+    end
+    % send(q, 1);  % 每完成一个发一个通知（内容可忽略）
+end
 end
 
 % converse to Z score
@@ -194,4 +241,69 @@ quick_map(quick_map<0) = quick_map(quick_map<0) - mean(quick_map(quick_map<0));
 % end
 % end
 
+end
+
+function quick_map = create_voltage_chunked_map(movie_3d)
+% Paper-inspired summary map for voltage imaging.
+% It aggregates short temporal chunks using average and max-minus-median images.
+
+[ncols, nrows, nframe] = size(movie_3d);
+chunk_size = 50;
+min_chunk_frames = min(10, nframe);
+spatial_sigma = 1.0;
+avg_weight = 0.35;
+active_weight = 0.65;
+
+aggregate_map = zeros(ncols, nrows, 'single');
+active_map = zeros(ncols, nrows, 'single');
+chunk_counter = 0;
+
+for start_idx = 1:chunk_size:nframe
+    stop_idx = min(start_idx + chunk_size - 1, nframe);
+    chunk = movie_3d(:,:,start_idx:stop_idx);
+    if size(chunk, 3) < min_chunk_frames
+        continue;
+    end
+
+    chunk = smooth_chunk_spatially(chunk, spatial_sigma);
+    avg_image = normalize_robust(mean(chunk, 3));
+    active_image = normalize_robust(max(chunk, [], 3) - median(chunk, 3));
+    chunk_score = avg_weight .* avg_image + active_weight .* active_image;
+
+    aggregate_map = max(aggregate_map, single(chunk_score));
+    active_map = max(active_map, single(active_image));
+    chunk_counter = chunk_counter + 1;
+end
+
+if chunk_counter == 0
+    chunk = smooth_chunk_spatially(movie_3d, spatial_sigma);
+    avg_image = normalize_robust(mean(chunk, 3));
+    active_image = normalize_robust(max(chunk, [], 3) - median(chunk, 3));
+    aggregate_map = avg_weight .* avg_image + active_weight .* active_image;
+    active_map = active_image;
+end
+
+% Favor pixels that are strong in both structure and transient activity.
+quick_map = normalize_robust(0.7 .* aggregate_map + 0.3 .* active_map);
+end
+
+function chunk_smoothed = smooth_chunk_spatially(chunk, sigma)
+chunk_smoothed = zeros(size(chunk), 'single');
+for frame_idx = 1:size(chunk, 3)
+    chunk_smoothed(:,:,frame_idx) = imgaussfilt(single(chunk(:,:,frame_idx)), sigma);
+end
+end
+
+function image_norm = normalize_robust(image_in)
+image_in = single(image_in);
+low_val = prctile(image_in(:), 1);
+high_val = prctile(image_in(:), 99.5);
+
+if ~isfinite(low_val) || ~isfinite(high_val) || high_val <= low_val
+    image_norm = zeros(size(image_in), 'single');
+    return;
+end
+
+image_norm = (image_in - low_val) ./ (high_val - low_val);
+image_norm = min(max(image_norm, 0), 1);
 end
