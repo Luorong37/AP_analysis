@@ -66,8 +66,16 @@ h = ones(3,3);
 h(5) = 0;
 movie_binned = reshape(movie,ncols,nrows,[]);
 % movie_sum = zeros(size(movie_3D));
-% Prefer the original parfor path, but keep a serial fallback if pool startup fails.
-[~, useParallelMap] = ensure_local_parallel_pool([], 'create_map');
+% Prefer the original parfor path when the caller has already opened a
+% parallel pool. Pool startup is handled by the top-level analysis script.
+useParallelMap = false;
+if exist('gcp', 'file') == 2
+    try
+        useParallelMap = ~isempty(gcp('nocreate'));
+    catch
+        useParallelMap = false;
+    end
+end
 
 if useParallelMap
     parfor i = 1:nframe

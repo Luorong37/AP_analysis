@@ -10,7 +10,7 @@
 % Dual_analysis3.m does not clear the workspace automatically. This wrapper
 % clears local variables first so old settings are not reused by accident.
 
-% clearvars;
+ % clearvars;
 clc;
 
 %% 1. Input / Output Paths
@@ -113,7 +113,7 @@ reuse_roi_file = '';
 % 'none'            -> use reuse_offset or [0 0]
 % 'manual_points'   -> manually click one matching voltage/calcium point
 % 'matlab_register' -> estimate translation with MATLAB registration
-correct_offset_mode = 'manual_points';
+correct_offset_mode = 'none';
 
 % Offset convention:
 %   voltage_position = calcium_position + offset
@@ -156,7 +156,7 @@ stim_context_override = [];
 % gpu=true lets Dual_analysis3 try to open a parallel pool for full movie
 % loading / motion stages. It continues without an explicit pool if that
 % startup fails.
-gpu = false;
+gpu = true;
 
 %% 12. Run Dual_analysis3
 script_dir = fileparts(mfilename('fullpath'));

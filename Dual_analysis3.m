@@ -325,6 +325,23 @@ end
 mkdir(save_path);
 analysis_only_mode = strcmpi(string(analysis_mode), "analysis_only");
 volpy_reanalysis_mode = strcmpi(string(analysis_backend), "volpy_voltage_reanalysis");
+% Parallel pool setup happens once, before any movie loading or map
+% generation. Helper functions only reuse an existing pool and fall back to
+% serial work when no pool is available.
+parallel_pool_info = struct( ...
+    'requested', logical(gpu && ~volpy_reanalysis_mode && ~analysis_only_mode), ...
+    'ready', false, ...
+    'num_workers', 0, ...
+    'message', "", ...
+    'initialized_before_movie_load', true);
+if parallel_pool_info.requested
+    print_section('Parallel Pool Setup');
+    [~, parallel_pool_ready, parallel_pool_info] = initialize_dual_parallel_pool(parallel_pool_info);
+    parallel_pool_info.ready = parallel_pool_ready;
+else
+    parallel_pool_info.message = "Parallel pool not requested for this mode.";
+end
+
 if volpy_reanalysis_mode
     bootstrap_volpy_voltage_reanalysis( ...
         cycle_path, save_path, volpy_source_results_path, ...
@@ -337,20 +354,6 @@ if analysis_only_mode
     % resumes the analysis sections that operate on saved ROI traces.
     [dual_info, voltage_results, calcium_results, dual_results, stim_results, stim_context, stim_windows] = ...
         load_saved_analysis_only_context(reuse_results_path);
-end
-
-% Parallel pool is only needed for the full movie-loading / motion stage.
-% In analysis_only mode we are resuming from saved traces, so attempting
-% to launch parpool here only adds a fragile dependency and can fail on
-% machines where the interactive pool is unavailable.
-if gpu && ~volpy_reanalysis_mode && ~analysis_only_mode && isempty(gcp('nocreate'))
-    try
-        gcp;
-    catch ME
-        warning('Dual_analysis3:ParpoolUnavailable', ...
-            ['Parallel pool could not be started (%s). ' ...
-            'Continuing without explicitly opening parpool.'], ME.message);
-    end
 end
 
 if volpy_reanalysis_mode
@@ -430,6 +433,7 @@ dual_info.manual_options = struct( ...
     'voltage_transpose_movie', logical(voltage_transpose_movie), ...
     'calcium_transpose_movie', logical(calcium_transpose_movie), ...
     'run_motion_correction', logical(run_motion_correction), ...
+    'parallel_pool_info', parallel_pool_info, ...
     'correct_offset_mode', string(correct_offset_mode), ...
     'raw_dual_input_cfg', raw_dual_input_cfg, ...
     'reuse_roi_resolution', reuse_roi_resolution);
@@ -1703,6 +1707,46 @@ save_explicit_dual_results_summary( ...
 
 fprintf('Dual_analysis3 finished.\n');
 fprintf('Results saved to: %s\n', save_path);
+
+function [poolObj, poolReady, poolInfo] = initialize_dual_parallel_pool(poolInfo)
+poolObj = [];
+poolReady = false;
+
+if exist('gcp', 'file') ~= 2
+    poolInfo.message = "Parallel Computing Toolbox is not available.";
+    warning('Dual_analysis3:ParallelUnavailable', '%s Continuing in serial mode.', poolInfo.message);
+    return;
+end
+
+try
+    poolObj = gcp('nocreate');
+    if isempty(poolObj)
+        fprintf('Opening parallel pool before movie loading...\n');
+        poolObj = gcp;
+    else
+        fprintf('Reusing existing parallel pool before movie loading.\n');
+    end
+
+    poolReady = ~isempty(poolObj);
+    poolInfo.ready = poolReady;
+    if poolReady && isprop(poolObj, 'NumWorkers')
+        poolInfo.num_workers = poolObj.NumWorkers;
+        poolInfo.message = sprintf('Parallel pool ready with %d workers.', poolObj.NumWorkers);
+    elseif poolReady
+        poolInfo.message = "Parallel pool ready.";
+    else
+        poolInfo.message = "Parallel pool was requested but is empty.";
+    end
+    fprintf('%s\n', poolInfo.message);
+catch ME
+    poolInfo.ready = false;
+    poolInfo.num_workers = 0;
+    poolInfo.message = string(ME.message);
+    warning('Dual_analysis3:ParpoolUnavailable', ...
+        ['Parallel pool could not be started (%s). ' ...
+        'Continuing in serial mode.'], ME.message);
+end
+end
 
 function [cycle_manifest, record_manifest, camera_source, input_layout_info] = resolve_dual_camera_sources(cycle_path, camera_cfg, camera_source_override, raw_dual_input_cfg)
 % Resolve where each camera movie came from and which label belongs to it.
