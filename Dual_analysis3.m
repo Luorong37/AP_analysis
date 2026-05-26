@@ -1343,15 +1343,46 @@ fprintf('Channel summary calcium stages | raw=%s | sensitivity=%s | snr=%s\n', .
 fprintf('Channel summary calcium final smoothing window=%d\n', calcium_smoothing_window);
 
 %% ROI Calcium Heatmap With Voltage Trace
-% One ROI-aligned population view:
-%   - calcium sensitivity is the heatmap background
-%   - voltage sensitivity is overlaid as one trace per ROI
-%   - voltage traces share one global y-axis scale so ROI amplitudes remain
-%     comparable across rows
+% One ROI-aligned population view for inspecting voltage/calcium coupling.
+%
+% Display contract:
+%   - each y-row is one paired ROI;
+%   - calcium sensitivity is drawn first as the heatmap background;
+%   - voltage sensitivity is then overlaid on top of the corresponding ROI
+%     row as a red trace;
+%   - the x coordinates keep each channel's saved physical time axis in
+%     seconds. Voltage is not resampled onto calcium frames; this preserves
+%     the original high-rate voltage timing while the heatmap x-limits come
+%     from the calcium axis;
+%   - the ROI order is the saved ROI column order from select_ROI_dual.
+%
+% Voltage vertical scaling rule:
+%   - for every ROI, compute voltage max-min after display polarity is
+%     applied;
+%   - find the ROI with the largest max-min range;
+%   - use that single largest range as the global scale for all ROIs;
+%   - center every ROI trace by its own midpoint, then divide by the global
+%     range. Therefore, the reference ROI's min lies at the bottom edge of
+%     its heatmap row and its max lies at the top edge; all other ROIs are
+%     shown on the same comparable scale.
+%
+% Calcium heatmap rule:
+%   - prefer the final saved calcium stage sensitivity_smoothed, then fall
+%     back to sensitivity for old result folders;
+%   - after polarity, subtract each ROI's 1st percentile as that ROI's
+%     displayed sensitivity zero;
+%   - clip values below that percentile-zero baseline to 0 for display;
+%   - use the black-blue-white "ice" colormap from heatmap_sensitivity.mlx;
+%   - use [0 max] on the percentile-zeroed display matrix.
 print_section('ROI Calcium Heatmap With Voltage Trace');
 fprintf('Saving ROI-aligned calcium heatmap with overlaid voltage sensitivity traces...\n');
 [voltage_results, calcium_results] = load_channel_results( ...
     voltage_results_path, calcium_results_path, voltage_results, calcium_results);
+
+% Initialize a result record before any validation. This keeps
+% dual_results.visualizations.roi_calcium_heatmap_voltage_trace present
+% even if the section has to skip because an old result folder lacks one of
+% the required sensitivity stages.
 roi_heatmap_trace_result = struct( ...
     'status', "skipped", ...
     'reason', "", ...
@@ -1359,6 +1390,11 @@ roi_heatmap_trace_result = struct( ...
     'png_file', "", ...
     'mat_file', "", ...
     'created_at', datetime("now"));
+
+% The figure requires one voltage sensitivity matrix and one calcium
+% sensitivity matrix. Calcium has a preferred final display stage because
+% earlier sections intentionally create sensitivity_smoothed for calcium
+% after the main metric calculation.
 has_voltage_sensitivity = has_trace_stage(voltage_results, 'sensitivity');
 has_calcium_sensitivity = has_trace_stage(calcium_results, 'sensitivity_smoothed') ...
     || has_trace_stage(calcium_results, 'sensitivity');
@@ -1367,11 +1403,19 @@ if ~has_voltage_sensitivity || ~has_calcium_sensitivity
         has_voltage_sensitivity, has_calcium_sensitivity);
     fprintf('Skipping ROI calcium heatmap/voltage trace plot: %s\n', roi_heatmap_trace_result.reason);
 else
+    % Fetch saved trace stages and apply display polarity immediately.
+    % From this point onward, "display" variables are exactly what will be
+    % plotted and saved in the diagnostic MAT file.
     voltage_heatmap_stage = 'sensitivity';
     voltage_heatmap_display = double(voltage_polarity) * double(fetch_trace_stage(voltage_results, voltage_heatmap_stage));
     [calcium_heatmap_display, calcium_heatmap_stage] = resolve_preferred_trace_stage(calcium_results, {'sensitivity_smoothed', 'sensitivity'});
     calcium_heatmap_display = double(calcium_polarity) * double(calcium_heatmap_display);
 
+    % Make the time vectors match their own trace matrices. This is only a
+    % defensive repair for older or hand-edited result files:
+    %   - if the saved time vector is too long, truncate it;
+    %   - if it is too short, extend it using the median frame interval;
+    %   - do not interpolate trace values.
     t_voltage_heatmap = double(t_voltage(:));
     voltage_time_info = struct('channel', "voltage", 'input_time_points', numel(t_voltage_heatmap), ...
         'trace_frames', size(voltage_heatmap_display, 1), 'rule', "unchanged");
@@ -1414,6 +1458,10 @@ else
         calcium_time_info.rule = "extended time axis using median dt";
     end
 
+    % Pair ROIs by column index. Dual ROI selection saves voltage and
+    % calcium traces in matching ROI order, so column 1 is ROI 1 in both
+    % channels. If a legacy file has unequal ROI counts, keep the shared
+    % prefix and report the mismatch rather than guessing a remapping.
     nrois_voltage_heatmap = size(voltage_heatmap_display, 2);
     nrois_calcium_heatmap = size(calcium_heatmap_display, 2);
     nrois_heatmap = min(nrois_voltage_heatmap, nrois_calcium_heatmap);
@@ -1426,8 +1474,15 @@ else
                 nrois_voltage_heatmap, nrois_calcium_heatmap, nrois_heatmap);
         end
         voltage_heatmap_display = voltage_heatmap_display(:, 1:nrois_heatmap);
-        calcium_heatmap_display = calcium_heatmap_display(:, 1:nrois_heatmap);
+        calcium_heatmap_display_raw = calcium_heatmap_display(:, 1:nrois_heatmap);
 
+        % Voltage overlay scaling:
+        %   y_trace = roi_index + (trace - roi_midpoint) / global_range
+        %
+        % Because global_range is the largest ROI max-min value, the ROI
+        % with the largest sensitivity swing fills exactly one heatmap row
+        % from bottom edge (roi-0.5) to top edge (roi+0.5). Smaller ROIs
+        % keep their relative amplitude on the same global scale.
         voltage_roi_min = min(voltage_heatmap_display, [], 1, 'omitnan');
         voltage_roi_max = max(voltage_heatmap_display, [], 1, 'omitnan');
         voltage_roi_range = voltage_roi_max - voltage_roi_min;
@@ -1439,19 +1494,27 @@ else
         voltage_roi_mid = (voltage_roi_min + voltage_roi_max) / 2;
         voltage_roi_mid(~isfinite(voltage_roi_mid)) = 0;
 
-        finite_calcium = calcium_heatmap_display(isfinite(calcium_heatmap_display));
+        % Calcium heatmap baseline rule:
+        %   each ROI uses its own 1st percentile as displayed sensitivity 0.
+        % Values below that baseline are clipped to 0 for display, while
+        % the raw polarity-adjusted calcium matrix is still saved below.
+        calcium_heatmap_zero_percentile = 1;
+        calcium_heatmap_baseline = prctile(calcium_heatmap_display_raw, calcium_heatmap_zero_percentile, 1);
+        calcium_heatmap_baseline(~isfinite(calcium_heatmap_baseline)) = 0;
+        calcium_heatmap_display_zeroed = calcium_heatmap_display_raw - calcium_heatmap_baseline;
+        calcium_heatmap_display_zeroed(calcium_heatmap_display_zeroed < 0) = 0;
+
+        % After percentile-zeroing, color limits are intentionally [0 max].
+        % A flat or empty heatmap falls back to [0 1] so clim remains valid.
+        finite_calcium = calcium_heatmap_display_zeroed(isfinite(calcium_heatmap_display_zeroed));
         if isempty(finite_calcium)
             calcium_heatmap_clim = [0, 1];
             calcium_heatmap_clim_rule = "fallback_empty_to_0_1";
         else
             calcium_heatmap_max = max(finite_calcium);
-            calcium_heatmap_min = min(finite_calcium);
             if calcium_heatmap_max > 0
                 calcium_heatmap_clim = [0, calcium_heatmap_max];
-                calcium_heatmap_clim_rule = "mlx_calcium_positive_0_to_max";
-            elseif calcium_heatmap_min < 0
-                calcium_heatmap_clim = [calcium_heatmap_min, 0];
-                calcium_heatmap_clim_rule = "negative_fallback_min_to_0";
+                calcium_heatmap_clim_rule = "roi_1st_percentile_zero_to_max";
             else
                 calcium_heatmap_clim = [0, 1];
                 calcium_heatmap_clim_rule = "fallback_flat_to_0_1";
@@ -1462,8 +1525,12 @@ else
             calcium_heatmap_clim_rule = calcium_heatmap_clim_rule + "_expanded_flat_range";
         end
 
-        gamma_val_calcium = 0.8;
-        color_pivot_calcium = 0.1;
+        % Inline version of heatmap_sensitivity.mlx custom_ice_adjust:
+        % black background, blue/cyan midrange, white strongest values.
+        % gamma controls how much low activity stays dark; pivot controls
+        % how quickly blue transitions toward brighter cyan/white.
+        gamma_val_calcium = 0.9;
+        color_pivot_calcium = 0.5;
         cmap_n = 256;
         base_ice = zeros(cmap_n, 3);
         base_ice(:, 3) = linspace(0, 1, cmap_n);
@@ -1477,6 +1544,60 @@ else
         warped = min(max(warped, 0), 1);
         calcium_heatmap_cmap = interp1(x_old, base_ice, warped);
 
+        % Diagnostic transfer-curve plot for tuning the calcium heatmap.
+        % normalized input x means the calcium value after clim maps into
+        % [0, 1]. The dashed curve is x^gamma; the solid curve is the final
+        % colormap index after applying pivot. The vertical pivot line marks
+        % the raw x value where x^gamma reaches color_pivot_calcium.
+        gamma_curve_input = linspace(0, 1, cmap_n);
+        gamma_curve_after_gamma = gamma_curve_input .^ gamma_val_calcium;
+        gamma_curve_warped = interp1([0, color_pivot_calcium, 1], [0, 0.5, 1], ...
+            gamma_curve_after_gamma, 'linear', 'extrap');
+        gamma_curve_warped = min(max(gamma_curve_warped, 0), 1);
+        if gamma_val_calcium > 0
+            gamma_curve_pivot_input = color_pivot_calcium .^ (1 / gamma_val_calcium);
+        else
+            gamma_curve_pivot_input = NaN;
+        end
+
+        colormap_curve_fig = figure( ...
+            'Name', 'Calcium Heatmap Colormap Transfer Curve', ...
+            'Color', 'w', ...
+            'Units', 'pixels', ...
+            'Position', [120, 120, 920, 620]);
+        curve_layout = tiledlayout(colormap_curve_fig, 2, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+        ax_curve = nexttile(curve_layout, 1);
+        plot(ax_curve, gamma_curve_input, gamma_curve_after_gamma, '--', 'Color', [0.25 0.25 0.25], 'LineWidth', 1.3);
+        hold(ax_curve, 'on');
+        plot(ax_curve, gamma_curve_input, gamma_curve_warped, 'b-', 'LineWidth', 1.8);
+        if isfinite(gamma_curve_pivot_input)
+            xline(ax_curve, gamma_curve_pivot_input, ':', sprintf('pivot x=%.3g', gamma_curve_pivot_input), ...
+                'Color', [0.2 0.2 0.2], 'LabelVerticalAlignment', 'bottom');
+        end
+        yline(ax_curve, 0.5, ':', 'colormap midpoint', 'Color', [0.45 0.45 0.45]);
+        xlabel(ax_curve, 'Normalized calcium value after clim');
+        ylabel(ax_curve, 'Colormap lookup index');
+        title(ax_curve, sprintf('Calcium colormap transfer | gamma=%.3g, pivot=%.3g', ...
+            gamma_val_calcium, color_pivot_calcium));
+        legend(ax_curve, {'x^{gamma}', 'warped final index'}, 'Location', 'southeast');
+        grid(ax_curve, 'on');
+        ylim(ax_curve, [0 1]);
+
+        ax_strip = nexttile(curve_layout, 2);
+        image(ax_strip, gamma_curve_input, 1, reshape(calcium_heatmap_cmap, [1, cmap_n, 3]));
+        set(ax_strip, 'YTick', [], 'TickDir', 'out');
+        xlabel(ax_strip, 'Normalized calcium value after clim');
+        title(ax_strip, 'Resulting black-blue-white color strip');
+        xlim(ax_strip, [0 1]);
+
+        colormap_curve_fig_file = fullfile(save_path, '4_dual_roi_calcium_heatmap_colormap_curve.fig');
+        colormap_curve_png_file = fullfile(save_path, '4_dual_roi_calcium_heatmap_colormap_curve.png');
+        save_figure_bundle_preserve_layout(colormap_curve_fig, colormap_curve_fig_file, colormap_curve_png_file);
+        close(colormap_curve_fig);
+
+        % Figure height grows with ROI count but is capped so export remains
+        % manageable. save_figure_bundle_preserve_layout is used here so
+        % this tall layout is not maximized and distorted before PNG export.
         fig_height = min(2200, max(650, 24 * nrois_heatmap + 180));
         roi_heatmap_fig = figure( ...
             'Name', 'ROI Calcium Heatmap With Voltage Sensitivity Trace', ...
@@ -1484,13 +1605,15 @@ else
             'Units', 'pixels', ...
             'Position', [80, 80, 1500, fig_height]);
         ax = axes(roi_heatmap_fig);
-        imagesc(ax, t_calcium_heatmap, 1:nrois_heatmap, calcium_heatmap_display');
+        imagesc(ax, t_calcium_heatmap, 1:nrois_heatmap, calcium_heatmap_display_zeroed');
         set(ax, 'YDir', 'normal', 'TickDir', 'out', 'Layer', 'top');
         colormap(ax, calcium_heatmap_cmap);
         clim(ax, calcium_heatmap_clim);
         hold(ax, 'on');
         for roi_idx = 1:nrois_heatmap
-            y_trace = roi_idx + (voltage_heatmap_display(:, roi_idx) - voltage_roi_mid(roi_idx)) / voltage_global_range;
+            % The centered and globally scaled trace is drawn directly in
+            % ROI-row coordinates, so y=roi_idx is that row's midline.
+            y_trace = roi_idx + (voltage_heatmap_display(:, roi_idx) - voltage_roi_mid(roi_idx)) / voltage_global_range *1.5;
             plot(ax, t_voltage_heatmap, y_trace, 'Color', [1.0, 0.12, 0.02], 'LineWidth', 0.45);
         end
         xlim(ax, [min(t_calcium_heatmap), max(t_calcium_heatmap)]);
@@ -1516,12 +1639,17 @@ else
         save_figure_bundle_preserve_layout(roi_heatmap_fig, roi_heatmap_fig_file, roi_heatmap_png_file);
         close(roi_heatmap_fig);
 
+        % Store enough provenance for later interpretation without forcing
+        % the user to infer which stage, polarity, scale, ROI truncation,
+        % and color-limit rules were active when the figure was generated.
         roi_heatmap_trace_result = struct( ...
             'status', "completed", ...
             'reason', "", ...
             'fig_file', string(roi_heatmap_fig_file), ...
             'png_file', string(roi_heatmap_png_file), ...
             'mat_file', string(roi_heatmap_mat_file), ...
+            'colormap_curve_fig_file', string(colormap_curve_fig_file), ...
+            'colormap_curve_png_file', string(colormap_curve_png_file), ...
             'input_stages', struct('voltage', string(voltage_heatmap_stage), 'calcium', string(calcium_heatmap_stage)), ...
             'parameters', struct( ...
                 'voltage_polarity', voltage_polarity, ...
@@ -1530,6 +1658,8 @@ else
                 'calcium_colormap', "custom_ice_adjust_inline", ...
                 'calcium_colormap_gamma', gamma_val_calcium, ...
                 'calcium_colormap_pivot', color_pivot_calcium, ...
+                'calcium_zero_rule', "per-ROI 1st percentile subtracted, then values below zero clipped", ...
+                'calcium_zero_percentile', calcium_heatmap_zero_percentile, ...
                 'calcium_clim', calcium_heatmap_clim, ...
                 'calcium_clim_rule', string(calcium_heatmap_clim_rule), ...
                 'voltage_scale_rule', "global max-min range; each ROI centered by its own midpoint", ...
@@ -1543,16 +1673,26 @@ else
             'time_axis_info', struct('voltage', voltage_time_info, 'calcium', calcium_time_info), ...
             'created_at', datetime("now"));
 
+        % Save the exact displayed matrices rather than the raw stage data:
+        % polarity has already been applied and the ROI columns have already
+        % been restricted to the paired shared set. This makes the MAT file
+        % match the figure pixel-for-pixel.
         save(roi_heatmap_mat_file, ...
             'roi_heatmap_trace_result', ...
             'voltage_heatmap_display', ...
-            'calcium_heatmap_display', ...
+            'calcium_heatmap_display_raw', ...
+            'calcium_heatmap_display_zeroed', ...
+            'calcium_heatmap_baseline', ...
             't_voltage_heatmap', ...
             't_calcium_heatmap', ...
             'voltage_roi_min', ...
             'voltage_roi_max', ...
             'voltage_roi_range', ...
             'voltage_reference_roi', ...
+            'gamma_curve_input', ...
+            'gamma_curve_after_gamma', ...
+            'gamma_curve_warped', ...
+            'gamma_curve_pivot_input', ...
             '-v7.3');
     end
 end
@@ -6587,10 +6727,38 @@ subplot(2, 3, 6); hold on; title(sprintf('Calcium SNR (%s, window=%d)', strrep(c
 save_figure_bundle(summary_fig, fullfile(save_path, '4_dual_trace_summary.fig'), fullfile(save_path, '4_dual_trace_summary.png'));
 close(summary_fig);
 
+% ROI-aligned population view for analysis-only / post-trace reruns.
+% This is intentionally kept inline, matching the main-script section, so
+% the figure can be debugged by setting breakpoints directly in the rerun
+% path.
+%
+% Display contract:
+%   - one y-row represents one paired ROI;
+%   - calcium sensitivity is the background heatmap;
+%   - voltage sensitivity is overlaid as a red trace in the same ROI row;
+%   - voltage keeps its saved high-rate time axis and is not resampled;
+%   - the x-limits follow the calcium heatmap time axis.
+%
+% Scaling contract:
+%   - find the voltage ROI with the largest displayed max-min range;
+%   - use that range as the global scale;
+%   - center every ROI by its own midpoint before plotting;
+%   - the reference ROI fills one full row, and other ROIs shrink relative
+%     to that same scale.
+%
+% Calcium heatmap baseline/color contract:
+%   - prefer sensitivity_smoothed, falling back to sensitivity;
+%   - subtract each ROI's 1st percentile as displayed sensitivity zero;
+%   - clip values below that percentile-zero baseline to 0 for display;
+%   - use [0 max] on the percentile-zeroed display matrix.
 print_section('ROI Calcium Heatmap With Voltage Trace');
 fprintf('Saving ROI-aligned calcium heatmap with overlaid voltage sensitivity traces...\n');
 [voltage_results, calcium_results] = load_channel_results( ...
     voltage_results_path, calcium_results_path, voltage_results, calcium_results);
+
+% Initialize a result record before validation so this section leaves a
+% clear status in dual_results even when it skips on old or incomplete
+% analysis-only result folders.
 roi_heatmap_trace_result = struct( ...
     'status', "skipped", ...
     'reason', "", ...
@@ -6598,6 +6766,10 @@ roi_heatmap_trace_result = struct( ...
     'png_file', "", ...
     'mat_file', "", ...
     'created_at', datetime("now"));
+
+% Required inputs are one voltage sensitivity stage and one calcium
+% sensitivity stage. Calcium prefers sensitivity_smoothed because that is
+% the final calcium display stage created after metric computation.
 has_voltage_sensitivity = has_trace_stage(voltage_results, 'sensitivity');
 has_calcium_sensitivity = has_trace_stage(calcium_results, 'sensitivity_smoothed') ...
     || has_trace_stage(calcium_results, 'sensitivity');
@@ -6606,11 +6778,16 @@ if ~has_voltage_sensitivity || ~has_calcium_sensitivity
         has_voltage_sensitivity, has_calcium_sensitivity);
     fprintf('Skipping ROI calcium heatmap/voltage trace plot: %s\n', roi_heatmap_trace_result.reason);
 else
+    % Fetch trace stages and apply display polarity up front. Everything
+    % below uses these display matrices, including the saved diagnostic MAT.
     voltage_heatmap_stage = 'sensitivity';
     voltage_heatmap_display = double(voltage_polarity) * double(fetch_trace_stage(voltage_results, voltage_heatmap_stage));
     [calcium_heatmap_display, calcium_heatmap_stage] = resolve_preferred_trace_stage(calcium_results, {'sensitivity_smoothed', 'sensitivity'});
     calcium_heatmap_display = double(calcium_polarity) * double(calcium_heatmap_display);
 
+    % Repair time-axis length mismatches defensively without resampling the
+    % trace data. Too-long axes are truncated; too-short axes are extended
+    % with the median frame interval. The rule is stored in time_axis_info.
     t_voltage_heatmap = double(t_voltage(:));
     voltage_time_info = struct('channel', "voltage", 'input_time_points', numel(t_voltage_heatmap), ...
         'trace_frames', size(voltage_heatmap_display, 1), 'rule', "unchanged");
@@ -6653,6 +6830,9 @@ else
         calcium_time_info.rule = "extended time axis using median dt";
     end
 
+    % Pair ROIs by saved column order. If an older result folder has unequal
+    % voltage/calcium ROI counts, plot only the shared prefix and record the
+    % original counts in the result metadata.
     nrois_voltage_heatmap = size(voltage_heatmap_display, 2);
     nrois_calcium_heatmap = size(calcium_heatmap_display, 2);
     nrois_heatmap = min(nrois_voltage_heatmap, nrois_calcium_heatmap);
@@ -6665,8 +6845,16 @@ else
                 nrois_voltage_heatmap, nrois_calcium_heatmap, nrois_heatmap);
         end
         voltage_heatmap_display = voltage_heatmap_display(:, 1:nrois_heatmap);
-        calcium_heatmap_display = calcium_heatmap_display(:, 1:nrois_heatmap);
+        calcium_heatmap_display_raw = calcium_heatmap_display(:, 1:nrois_heatmap);
 
+        % Voltage overlay scaling:
+        %   1. compute each ROI's displayed max-min range;
+        %   2. use the largest ROI range as the single global scale;
+        %   3. center each ROI by its own midpoint before scaling.
+        %
+        % This makes the reference ROI fill exactly one heatmap row from
+        % bottom to top, while all other ROIs are comparable to that same
+        % reference amplitude.
         voltage_roi_min = min(voltage_heatmap_display, [], 1, 'omitnan');
         voltage_roi_max = max(voltage_heatmap_display, [], 1, 'omitnan');
         voltage_roi_range = voltage_roi_max - voltage_roi_min;
@@ -6678,19 +6866,27 @@ else
         voltage_roi_mid = (voltage_roi_min + voltage_roi_max) / 2;
         voltage_roi_mid(~isfinite(voltage_roi_mid)) = 0;
 
-        finite_calcium = calcium_heatmap_display(isfinite(calcium_heatmap_display));
+        % Calcium heatmap baseline rule:
+        %   each ROI uses its own 1st percentile as displayed sensitivity 0.
+        % Values below that baseline are clipped to 0 for display, while
+        % the raw polarity-adjusted calcium matrix is still saved below.
+        calcium_heatmap_zero_percentile = 1;
+        calcium_heatmap_baseline = prctile(calcium_heatmap_display_raw, calcium_heatmap_zero_percentile, 1);
+        calcium_heatmap_baseline(~isfinite(calcium_heatmap_baseline)) = 0;
+        calcium_heatmap_display_zeroed = calcium_heatmap_display_raw - calcium_heatmap_baseline;
+        calcium_heatmap_display_zeroed(calcium_heatmap_display_zeroed < 0) = 0;
+
+        % After percentile-zeroing, color limits are intentionally [0 max].
+        % A flat or empty heatmap falls back to [0 1] so clim remains valid.
+        finite_calcium = calcium_heatmap_display_zeroed(isfinite(calcium_heatmap_display_zeroed));
         if isempty(finite_calcium)
             calcium_heatmap_clim = [0, 1];
             calcium_heatmap_clim_rule = "fallback_empty_to_0_1";
         else
             calcium_heatmap_max = max(finite_calcium);
-            calcium_heatmap_min = min(finite_calcium);
             if calcium_heatmap_max > 0
                 calcium_heatmap_clim = [0, calcium_heatmap_max];
-                calcium_heatmap_clim_rule = "mlx_calcium_positive_0_to_max";
-            elseif calcium_heatmap_min < 0
-                calcium_heatmap_clim = [calcium_heatmap_min, 0];
-                calcium_heatmap_clim_rule = "negative_fallback_min_to_0";
+                calcium_heatmap_clim_rule = "roi_1st_percentile_zero_to_max";
             else
                 calcium_heatmap_clim = [0, 1];
                 calcium_heatmap_clim_rule = "fallback_flat_to_0_1";
@@ -6701,6 +6897,8 @@ else
             calcium_heatmap_clim_rule = calcium_heatmap_clim_rule + "_expanded_flat_range";
         end
 
+        % Inline black-blue-white colormap from the MLX reference. Keeping
+        % it inline here makes this section easy to tune interactively.
         gamma_val_calcium = 0.8;
         color_pivot_calcium = 0.1;
         cmap_n = 256;
@@ -6716,6 +6914,59 @@ else
         warped = min(max(warped, 0), 1);
         calcium_heatmap_cmap = interp1(x_old, base_ice, warped);
 
+        % Diagnostic transfer-curve plot for tuning the calcium heatmap.
+        % The dashed curve shows x^gamma and the solid curve shows the
+        % final colormap index after the pivot warp. This makes it easier
+        % to see why changing gamma or pivot changes background contrast.
+        gamma_curve_input = linspace(0, 1, cmap_n);
+        gamma_curve_after_gamma = gamma_curve_input .^ gamma_val_calcium;
+        gamma_curve_warped = interp1([0, color_pivot_calcium, 1], [0, 0.5, 1], ...
+            gamma_curve_after_gamma, 'linear', 'extrap');
+        gamma_curve_warped = min(max(gamma_curve_warped, 0), 1);
+        if gamma_val_calcium > 0
+            gamma_curve_pivot_input = color_pivot_calcium .^ (1 / gamma_val_calcium);
+        else
+            gamma_curve_pivot_input = NaN;
+        end
+
+        colormap_curve_fig = figure( ...
+            'Name', 'Calcium Heatmap Colormap Transfer Curve', ...
+            'Color', 'w', ...
+            'Units', 'pixels', ...
+            'Position', [120, 120, 920, 620]);
+        curve_layout = tiledlayout(colormap_curve_fig, 2, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+        ax_curve = nexttile(curve_layout, 1);
+        plot(ax_curve, gamma_curve_input, gamma_curve_after_gamma, '--', 'Color', [0.25 0.25 0.25], 'LineWidth', 1.3);
+        hold(ax_curve, 'on');
+        plot(ax_curve, gamma_curve_input, gamma_curve_warped, 'b-', 'LineWidth', 1.8);
+        if isfinite(gamma_curve_pivot_input)
+            xline(ax_curve, gamma_curve_pivot_input, ':', sprintf('pivot x=%.3g', gamma_curve_pivot_input), ...
+                'Color', [0.2 0.2 0.2], 'LabelVerticalAlignment', 'bottom');
+        end
+        yline(ax_curve, 0.5, ':', 'colormap midpoint', 'Color', [0.45 0.45 0.45]);
+        xlabel(ax_curve, 'Normalized calcium value after clim');
+        ylabel(ax_curve, 'Colormap lookup index');
+        title(ax_curve, sprintf('Calcium colormap transfer | gamma=%.3g, pivot=%.3g', ...
+            gamma_val_calcium, color_pivot_calcium));
+        legend(ax_curve, {'x^{gamma}', 'warped final index'}, 'Location', 'southeast');
+        grid(ax_curve, 'on');
+        ylim(ax_curve, [0 1]);
+
+        ax_strip = nexttile(curve_layout, 2);
+        image(ax_strip, gamma_curve_input, 1, reshape(calcium_heatmap_cmap, [1, cmap_n, 3]));
+        set(ax_strip, 'YTick', [], 'TickDir', 'out');
+        xlabel(ax_strip, 'Normalized calcium value after clim');
+        title(ax_strip, 'Resulting black-blue-white color strip');
+        xlim(ax_strip, [0 1]);
+
+        colormap_curve_fig_file = fullfile(save_path, '4_dual_roi_calcium_heatmap_colormap_curve.fig');
+        colormap_curve_png_file = fullfile(save_path, '4_dual_roi_calcium_heatmap_colormap_curve.png');
+        save_figure_bundle_preserve_layout(colormap_curve_fig, colormap_curve_fig_file, colormap_curve_png_file);
+        close(colormap_curve_fig);
+
+        % Build a tall single-axis figure: the heatmap supplies row
+        % backgrounds and every voltage trace is drawn in the same ROI row
+        % coordinate system.
         fig_height = min(2200, max(650, 24 * nrois_heatmap + 180));
         roi_heatmap_fig = figure( ...
             'Name', 'ROI Calcium Heatmap With Voltage Sensitivity Trace', ...
@@ -6723,12 +6974,15 @@ else
             'Units', 'pixels', ...
             'Position', [80, 80, 1500, fig_height]);
         ax = axes(roi_heatmap_fig);
-        imagesc(ax, t_calcium_heatmap, 1:nrois_heatmap, calcium_heatmap_display');
+        imagesc(ax, t_calcium_heatmap, 1:nrois_heatmap, calcium_heatmap_display_zeroed');
         set(ax, 'YDir', 'normal', 'TickDir', 'out', 'Layer', 'top');
         colormap(ax, calcium_heatmap_cmap);
         clim(ax, calcium_heatmap_clim);
         hold(ax, 'on');
         for roi_idx = 1:nrois_heatmap
+            % y=roi_idx is the row center. After subtracting each ROI's own
+            % midpoint, division by voltage_global_range maps the largest
+            % ROI swing to exactly +/-0.5 row units.
             y_trace = roi_idx + (voltage_heatmap_display(:, roi_idx) - voltage_roi_mid(roi_idx)) / voltage_global_range;
             plot(ax, t_voltage_heatmap, y_trace, 'Color', [1.0, 0.12, 0.02], 'LineWidth', 0.45);
         end
@@ -6755,12 +7009,17 @@ else
         save_figure_bundle_preserve_layout(roi_heatmap_fig, roi_heatmap_fig_file, roi_heatmap_png_file);
         close(roi_heatmap_fig);
 
+        % Persist a compact provenance record so analysis_only reruns can be
+        % audited later: selected stages, polarity, scaling reference ROI,
+        % color limits, ROI counts, and time-axis repair rules.
         roi_heatmap_trace_result = struct( ...
             'status', "completed", ...
             'reason', "", ...
             'fig_file', string(roi_heatmap_fig_file), ...
             'png_file', string(roi_heatmap_png_file), ...
             'mat_file', string(roi_heatmap_mat_file), ...
+            'colormap_curve_fig_file', string(colormap_curve_fig_file), ...
+            'colormap_curve_png_file', string(colormap_curve_png_file), ...
             'input_stages', struct('voltage', string(voltage_heatmap_stage), 'calcium', string(calcium_heatmap_stage)), ...
             'parameters', struct( ...
                 'voltage_polarity', voltage_polarity, ...
@@ -6769,6 +7028,8 @@ else
                 'calcium_colormap', "custom_ice_adjust_inline", ...
                 'calcium_colormap_gamma', gamma_val_calcium, ...
                 'calcium_colormap_pivot', color_pivot_calcium, ...
+                'calcium_zero_rule', "per-ROI 1st percentile subtracted, then values below zero clipped", ...
+                'calcium_zero_percentile', calcium_heatmap_zero_percentile, ...
                 'calcium_clim', calcium_heatmap_clim, ...
                 'calcium_clim_rule', string(calcium_heatmap_clim_rule), ...
                 'voltage_scale_rule', "global max-min range; each ROI centered by its own midpoint", ...
@@ -6782,16 +7043,25 @@ else
             'time_axis_info', struct('voltage', voltage_time_info, 'calcium', calcium_time_info), ...
             'created_at', datetime("now"));
 
+        % Save the actual display matrices used by the figure. These are
+        % polarity-adjusted and truncated to paired ROI columns, so they are
+        % intentionally not identical to the raw trace stage matrices.
         save(roi_heatmap_mat_file, ...
             'roi_heatmap_trace_result', ...
             'voltage_heatmap_display', ...
-            'calcium_heatmap_display', ...
+            'calcium_heatmap_display_raw', ...
+            'calcium_heatmap_display_zeroed', ...
+            'calcium_heatmap_baseline', ...
             't_voltage_heatmap', ...
             't_calcium_heatmap', ...
             'voltage_roi_min', ...
             'voltage_roi_max', ...
             'voltage_roi_range', ...
             'voltage_reference_roi', ...
+            'gamma_curve_input', ...
+            'gamma_curve_after_gamma', ...
+            'gamma_curve_warped', ...
+            'gamma_curve_pivot_input', ...
             '-v7.3');
     end
 end
