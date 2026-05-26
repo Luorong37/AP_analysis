@@ -1342,6 +1342,230 @@ fprintf('Channel summary calcium stages | raw=%s | sensitivity=%s | snr=%s\n', .
     string(calcium_raw_stage), string(calcium_sensitivity_stage), string(calcium_snr_stage));
 fprintf('Channel summary calcium final smoothing window=%d\n', calcium_smoothing_window);
 
+%% ROI Calcium Heatmap With Voltage Trace
+% One ROI-aligned population view:
+%   - calcium sensitivity is the heatmap background
+%   - voltage sensitivity is overlaid as one trace per ROI
+%   - voltage traces share one global y-axis scale so ROI amplitudes remain
+%     comparable across rows
+print_section('ROI Calcium Heatmap With Voltage Trace');
+fprintf('Saving ROI-aligned calcium heatmap with overlaid voltage sensitivity traces...\n');
+[voltage_results, calcium_results] = load_channel_results( ...
+    voltage_results_path, calcium_results_path, voltage_results, calcium_results);
+roi_heatmap_trace_result = struct( ...
+    'status', "skipped", ...
+    'reason', "", ...
+    'fig_file', "", ...
+    'png_file', "", ...
+    'mat_file', "", ...
+    'created_at', datetime("now"));
+has_voltage_sensitivity = has_trace_stage(voltage_results, 'sensitivity');
+has_calcium_sensitivity = has_trace_stage(calcium_results, 'sensitivity_smoothed') ...
+    || has_trace_stage(calcium_results, 'sensitivity');
+if ~has_voltage_sensitivity || ~has_calcium_sensitivity
+    roi_heatmap_trace_result.reason = sprintf('Missing required sensitivity stage: voltage=%d calcium=%d.', ...
+        has_voltage_sensitivity, has_calcium_sensitivity);
+    fprintf('Skipping ROI calcium heatmap/voltage trace plot: %s\n', roi_heatmap_trace_result.reason);
+else
+    voltage_heatmap_stage = 'sensitivity';
+    voltage_heatmap_display = double(voltage_polarity) * double(fetch_trace_stage(voltage_results, voltage_heatmap_stage));
+    [calcium_heatmap_display, calcium_heatmap_stage] = resolve_preferred_trace_stage(calcium_results, {'sensitivity_smoothed', 'sensitivity'});
+    calcium_heatmap_display = double(calcium_polarity) * double(calcium_heatmap_display);
+
+    t_voltage_heatmap = double(t_voltage(:));
+    voltage_time_info = struct('channel', "voltage", 'input_time_points', numel(t_voltage_heatmap), ...
+        'trace_frames', size(voltage_heatmap_display, 1), 'rule', "unchanged");
+    if numel(t_voltage_heatmap) > size(voltage_heatmap_display, 1)
+        t_voltage_heatmap = t_voltage_heatmap(1:size(voltage_heatmap_display, 1));
+        voltage_time_info.rule = "truncated time axis to trace frame count";
+    elseif numel(t_voltage_heatmap) < size(voltage_heatmap_display, 1)
+        if numel(t_voltage_heatmap) >= 2
+            dt_heatmap = median(diff(t_voltage_heatmap), 'omitnan');
+            if ~isfinite(dt_heatmap) || dt_heatmap <= 0
+                dt_heatmap = 1;
+            end
+            first_t_heatmap = t_voltage_heatmap(1);
+        else
+            dt_heatmap = 1;
+            first_t_heatmap = 0;
+        end
+        t_voltage_heatmap = first_t_heatmap + (0:size(voltage_heatmap_display, 1)-1)' * dt_heatmap;
+        voltage_time_info.rule = "extended time axis using median dt";
+    end
+
+    t_calcium_heatmap = double(t_calcium(:));
+    calcium_time_info = struct('channel', "calcium", 'input_time_points', numel(t_calcium_heatmap), ...
+        'trace_frames', size(calcium_heatmap_display, 1), 'rule', "unchanged");
+    if numel(t_calcium_heatmap) > size(calcium_heatmap_display, 1)
+        t_calcium_heatmap = t_calcium_heatmap(1:size(calcium_heatmap_display, 1));
+        calcium_time_info.rule = "truncated time axis to trace frame count";
+    elseif numel(t_calcium_heatmap) < size(calcium_heatmap_display, 1)
+        if numel(t_calcium_heatmap) >= 2
+            dt_heatmap = median(diff(t_calcium_heatmap), 'omitnan');
+            if ~isfinite(dt_heatmap) || dt_heatmap <= 0
+                dt_heatmap = 1;
+            end
+            first_t_heatmap = t_calcium_heatmap(1);
+        else
+            dt_heatmap = 1;
+            first_t_heatmap = 0;
+        end
+        t_calcium_heatmap = first_t_heatmap + (0:size(calcium_heatmap_display, 1)-1)' * dt_heatmap;
+        calcium_time_info.rule = "extended time axis using median dt";
+    end
+
+    nrois_voltage_heatmap = size(voltage_heatmap_display, 2);
+    nrois_calcium_heatmap = size(calcium_heatmap_display, 2);
+    nrois_heatmap = min(nrois_voltage_heatmap, nrois_calcium_heatmap);
+    if nrois_heatmap == 0
+        roi_heatmap_trace_result.reason = 'No shared ROI columns are available in the selected sensitivity stages.';
+        fprintf('Skipping ROI calcium heatmap/voltage trace plot: %s\n', roi_heatmap_trace_result.reason);
+    else
+        if nrois_voltage_heatmap ~= nrois_calcium_heatmap
+            fprintf('ROI heatmap/trace ROI mismatch: voltage=%d calcium=%d; plotting first %d paired ROIs.\n', ...
+                nrois_voltage_heatmap, nrois_calcium_heatmap, nrois_heatmap);
+        end
+        voltage_heatmap_display = voltage_heatmap_display(:, 1:nrois_heatmap);
+        calcium_heatmap_display = calcium_heatmap_display(:, 1:nrois_heatmap);
+
+        voltage_roi_min = min(voltage_heatmap_display, [], 1, 'omitnan');
+        voltage_roi_max = max(voltage_heatmap_display, [], 1, 'omitnan');
+        voltage_roi_range = voltage_roi_max - voltage_roi_min;
+        [voltage_global_range, voltage_reference_roi] = max(voltage_roi_range);
+        if ~isfinite(voltage_global_range) || voltage_global_range <= 0
+            voltage_global_range = 1;
+            voltage_reference_roi = 1;
+        end
+        voltage_roi_mid = (voltage_roi_min + voltage_roi_max) / 2;
+        voltage_roi_mid(~isfinite(voltage_roi_mid)) = 0;
+
+        finite_calcium = calcium_heatmap_display(isfinite(calcium_heatmap_display));
+        if isempty(finite_calcium)
+            calcium_heatmap_clim = [0, 1];
+            calcium_heatmap_clim_rule = "fallback_empty_to_0_1";
+        else
+            calcium_heatmap_max = max(finite_calcium);
+            calcium_heatmap_min = min(finite_calcium);
+            if calcium_heatmap_max > 0
+                calcium_heatmap_clim = [0, calcium_heatmap_max];
+                calcium_heatmap_clim_rule = "mlx_calcium_positive_0_to_max";
+            elseif calcium_heatmap_min < 0
+                calcium_heatmap_clim = [calcium_heatmap_min, 0];
+                calcium_heatmap_clim_rule = "negative_fallback_min_to_0";
+            else
+                calcium_heatmap_clim = [0, 1];
+                calcium_heatmap_clim_rule = "fallback_flat_to_0_1";
+            end
+        end
+        if calcium_heatmap_clim(1) == calcium_heatmap_clim(2)
+            calcium_heatmap_clim = calcium_heatmap_clim + [-0.5, 0.5];
+            calcium_heatmap_clim_rule = calcium_heatmap_clim_rule + "_expanded_flat_range";
+        end
+
+        gamma_val_calcium = 0.8;
+        color_pivot_calcium = 0.1;
+        cmap_n = 256;
+        base_ice = zeros(cmap_n, 3);
+        base_ice(:, 3) = linspace(0, 1, cmap_n);
+        cyan_start_node = max(1, floor(cmap_n * 0.1));
+        base_ice(cyan_start_node:end, 2) = linspace(0, 1, cmap_n - cyan_start_node + 1);
+        white_start_node = max(1, floor(cmap_n * 0.9));
+        base_ice(white_start_node:end, 1) = linspace(0, 1, cmap_n - white_start_node + 1);
+        x_old = linspace(0, 1, cmap_n);
+        x_new = linspace(0, 1, cmap_n) .^ gamma_val_calcium;
+        warped = interp1([0, color_pivot_calcium, 1], [0, 0.5, 1], x_new, 'linear', 'extrap');
+        warped = min(max(warped, 0), 1);
+        calcium_heatmap_cmap = interp1(x_old, base_ice, warped);
+
+        fig_height = min(2200, max(650, 24 * nrois_heatmap + 180));
+        roi_heatmap_fig = figure( ...
+            'Name', 'ROI Calcium Heatmap With Voltage Sensitivity Trace', ...
+            'Color', 'w', ...
+            'Units', 'pixels', ...
+            'Position', [80, 80, 1500, fig_height]);
+        ax = axes(roi_heatmap_fig);
+        imagesc(ax, t_calcium_heatmap, 1:nrois_heatmap, calcium_heatmap_display');
+        set(ax, 'YDir', 'normal', 'TickDir', 'out', 'Layer', 'top');
+        colormap(ax, calcium_heatmap_cmap);
+        clim(ax, calcium_heatmap_clim);
+        hold(ax, 'on');
+        for roi_idx = 1:nrois_heatmap
+            y_trace = roi_idx + (voltage_heatmap_display(:, roi_idx) - voltage_roi_mid(roi_idx)) / voltage_global_range;
+            plot(ax, t_voltage_heatmap, y_trace, 'Color', [1.0, 0.12, 0.02], 'LineWidth', 0.45);
+        end
+        xlim(ax, [min(t_calcium_heatmap), max(t_calcium_heatmap)]);
+        ylim(ax, [0.5, nrois_heatmap + 0.5]);
+        if nrois_heatmap <= 20
+            yticks(ax, 1:nrois_heatmap);
+        else
+            roi_tick_step = max(1, ceil(nrois_heatmap / 20));
+            yticks(ax, unique([1:roi_tick_step:nrois_heatmap, nrois_heatmap]));
+        end
+        xlabel(ax, 'Time (s)');
+        ylabel(ax, 'ROI');
+        title(ax, sprintf('Calcium Sensitivity Heatmap (%s) + Voltage Sensitivity Trace', ...
+            strrep(char(calcium_heatmap_stage), '_', '\_')));
+        cb = colorbar(ax);
+        ylabel(cb, 'Calcium sensitivity display value');
+        grid(ax, 'on');
+        box(ax, 'off');
+
+        roi_heatmap_fig_file = fullfile(save_path, '4_dual_roi_calcium_heatmap_voltage_trace.fig');
+        roi_heatmap_png_file = fullfile(save_path, '4_dual_roi_calcium_heatmap_voltage_trace.png');
+        roi_heatmap_mat_file = fullfile(save_path, '4_dual_roi_calcium_heatmap_voltage_trace.mat');
+        save_figure_bundle_preserve_layout(roi_heatmap_fig, roi_heatmap_fig_file, roi_heatmap_png_file);
+        close(roi_heatmap_fig);
+
+        roi_heatmap_trace_result = struct( ...
+            'status', "completed", ...
+            'reason', "", ...
+            'fig_file', string(roi_heatmap_fig_file), ...
+            'png_file', string(roi_heatmap_png_file), ...
+            'mat_file', string(roi_heatmap_mat_file), ...
+            'input_stages', struct('voltage', string(voltage_heatmap_stage), 'calcium', string(calcium_heatmap_stage)), ...
+            'parameters', struct( ...
+                'voltage_polarity', voltage_polarity, ...
+                'calcium_polarity', calcium_polarity, ...
+                'calcium_smoothing_window', calcium_smoothing_window, ...
+                'calcium_colormap', "custom_ice_adjust_inline", ...
+                'calcium_colormap_gamma', gamma_val_calcium, ...
+                'calcium_colormap_pivot', color_pivot_calcium, ...
+                'calcium_clim', calcium_heatmap_clim, ...
+                'calcium_clim_rule', string(calcium_heatmap_clim_rule), ...
+                'voltage_scale_rule', "global max-min range; each ROI centered by its own midpoint", ...
+                'voltage_global_range', voltage_global_range, ...
+                'voltage_reference_roi', voltage_reference_roi, ...
+                'roi_count_plotted', nrois_heatmap, ...
+                'roi_count_voltage', nrois_voltage_heatmap, ...
+                'roi_count_calcium', nrois_calcium_heatmap, ...
+                'x_axis_source', "calcium time axis", ...
+                'voltage_trace_time_rule', "overlay voltage trace using voltage seconds without resampling"), ...
+            'time_axis_info', struct('voltage', voltage_time_info, 'calcium', calcium_time_info), ...
+            'created_at', datetime("now"));
+
+        save(roi_heatmap_mat_file, ...
+            'roi_heatmap_trace_result', ...
+            'voltage_heatmap_display', ...
+            'calcium_heatmap_display', ...
+            't_voltage_heatmap', ...
+            't_calcium_heatmap', ...
+            'voltage_roi_min', ...
+            'voltage_roi_max', ...
+            'voltage_roi_range', ...
+            'voltage_reference_roi', ...
+            '-v7.3');
+    end
+end
+if ~isfield(dual_results, 'visualizations') || ~isstruct(dual_results.visualizations)
+    dual_results.visualizations = struct();
+end
+dual_results.visualizations.roi_calcium_heatmap_voltage_trace = roi_heatmap_trace_result;
+save(dual_results_path, 'dual_results', '-v7.3');
+fprintf('ROI heatmap/trace status: %s\n', string(roi_heatmap_trace_result.status));
+if isfield(roi_heatmap_trace_result, 'png_file') && strlength(string(roi_heatmap_trace_result.png_file)) > 0
+    fprintf('ROI heatmap/trace saved to: %s\n', roi_heatmap_trace_result.png_file);
+end
+
 %% Dual Comparison
 % This section asks whether the processed voltage and calcium traces tell a
 % consistent ROI-by-ROI story after each channel finishes its own
@@ -6362,6 +6586,220 @@ subplot(2, 3, 5); hold on; title(sprintf('Calcium Sensitivity (%s, window=%d)', 
 subplot(2, 3, 6); hold on; title(sprintf('Calcium SNR (%s, window=%d)', strrep(char(calcium_snr_stage), '_', '\_'), calcium_smoothing_window)); plot_optional_stage(calcium_polarity * calcium_snr, t_calcium, has_calcium_snr, 'SNR stage unavailable');
 save_figure_bundle(summary_fig, fullfile(save_path, '4_dual_trace_summary.fig'), fullfile(save_path, '4_dual_trace_summary.png'));
 close(summary_fig);
+
+print_section('ROI Calcium Heatmap With Voltage Trace');
+fprintf('Saving ROI-aligned calcium heatmap with overlaid voltage sensitivity traces...\n');
+[voltage_results, calcium_results] = load_channel_results( ...
+    voltage_results_path, calcium_results_path, voltage_results, calcium_results);
+roi_heatmap_trace_result = struct( ...
+    'status', "skipped", ...
+    'reason', "", ...
+    'fig_file', "", ...
+    'png_file', "", ...
+    'mat_file', "", ...
+    'created_at', datetime("now"));
+has_voltage_sensitivity = has_trace_stage(voltage_results, 'sensitivity');
+has_calcium_sensitivity = has_trace_stage(calcium_results, 'sensitivity_smoothed') ...
+    || has_trace_stage(calcium_results, 'sensitivity');
+if ~has_voltage_sensitivity || ~has_calcium_sensitivity
+    roi_heatmap_trace_result.reason = sprintf('Missing required sensitivity stage: voltage=%d calcium=%d.', ...
+        has_voltage_sensitivity, has_calcium_sensitivity);
+    fprintf('Skipping ROI calcium heatmap/voltage trace plot: %s\n', roi_heatmap_trace_result.reason);
+else
+    voltage_heatmap_stage = 'sensitivity';
+    voltage_heatmap_display = double(voltage_polarity) * double(fetch_trace_stage(voltage_results, voltage_heatmap_stage));
+    [calcium_heatmap_display, calcium_heatmap_stage] = resolve_preferred_trace_stage(calcium_results, {'sensitivity_smoothed', 'sensitivity'});
+    calcium_heatmap_display = double(calcium_polarity) * double(calcium_heatmap_display);
+
+    t_voltage_heatmap = double(t_voltage(:));
+    voltage_time_info = struct('channel', "voltage", 'input_time_points', numel(t_voltage_heatmap), ...
+        'trace_frames', size(voltage_heatmap_display, 1), 'rule', "unchanged");
+    if numel(t_voltage_heatmap) > size(voltage_heatmap_display, 1)
+        t_voltage_heatmap = t_voltage_heatmap(1:size(voltage_heatmap_display, 1));
+        voltage_time_info.rule = "truncated time axis to trace frame count";
+    elseif numel(t_voltage_heatmap) < size(voltage_heatmap_display, 1)
+        if numel(t_voltage_heatmap) >= 2
+            dt_heatmap = median(diff(t_voltage_heatmap), 'omitnan');
+            if ~isfinite(dt_heatmap) || dt_heatmap <= 0
+                dt_heatmap = 1;
+            end
+            first_t_heatmap = t_voltage_heatmap(1);
+        else
+            dt_heatmap = 1;
+            first_t_heatmap = 0;
+        end
+        t_voltage_heatmap = first_t_heatmap + (0:size(voltage_heatmap_display, 1)-1)' * dt_heatmap;
+        voltage_time_info.rule = "extended time axis using median dt";
+    end
+
+    t_calcium_heatmap = double(t_calcium(:));
+    calcium_time_info = struct('channel', "calcium", 'input_time_points', numel(t_calcium_heatmap), ...
+        'trace_frames', size(calcium_heatmap_display, 1), 'rule', "unchanged");
+    if numel(t_calcium_heatmap) > size(calcium_heatmap_display, 1)
+        t_calcium_heatmap = t_calcium_heatmap(1:size(calcium_heatmap_display, 1));
+        calcium_time_info.rule = "truncated time axis to trace frame count";
+    elseif numel(t_calcium_heatmap) < size(calcium_heatmap_display, 1)
+        if numel(t_calcium_heatmap) >= 2
+            dt_heatmap = median(diff(t_calcium_heatmap), 'omitnan');
+            if ~isfinite(dt_heatmap) || dt_heatmap <= 0
+                dt_heatmap = 1;
+            end
+            first_t_heatmap = t_calcium_heatmap(1);
+        else
+            dt_heatmap = 1;
+            first_t_heatmap = 0;
+        end
+        t_calcium_heatmap = first_t_heatmap + (0:size(calcium_heatmap_display, 1)-1)' * dt_heatmap;
+        calcium_time_info.rule = "extended time axis using median dt";
+    end
+
+    nrois_voltage_heatmap = size(voltage_heatmap_display, 2);
+    nrois_calcium_heatmap = size(calcium_heatmap_display, 2);
+    nrois_heatmap = min(nrois_voltage_heatmap, nrois_calcium_heatmap);
+    if nrois_heatmap == 0
+        roi_heatmap_trace_result.reason = 'No shared ROI columns are available in the selected sensitivity stages.';
+        fprintf('Skipping ROI calcium heatmap/voltage trace plot: %s\n', roi_heatmap_trace_result.reason);
+    else
+        if nrois_voltage_heatmap ~= nrois_calcium_heatmap
+            fprintf('ROI heatmap/trace ROI mismatch: voltage=%d calcium=%d; plotting first %d paired ROIs.\n', ...
+                nrois_voltage_heatmap, nrois_calcium_heatmap, nrois_heatmap);
+        end
+        voltage_heatmap_display = voltage_heatmap_display(:, 1:nrois_heatmap);
+        calcium_heatmap_display = calcium_heatmap_display(:, 1:nrois_heatmap);
+
+        voltage_roi_min = min(voltage_heatmap_display, [], 1, 'omitnan');
+        voltage_roi_max = max(voltage_heatmap_display, [], 1, 'omitnan');
+        voltage_roi_range = voltage_roi_max - voltage_roi_min;
+        [voltage_global_range, voltage_reference_roi] = max(voltage_roi_range);
+        if ~isfinite(voltage_global_range) || voltage_global_range <= 0
+            voltage_global_range = 1;
+            voltage_reference_roi = 1;
+        end
+        voltage_roi_mid = (voltage_roi_min + voltage_roi_max) / 2;
+        voltage_roi_mid(~isfinite(voltage_roi_mid)) = 0;
+
+        finite_calcium = calcium_heatmap_display(isfinite(calcium_heatmap_display));
+        if isempty(finite_calcium)
+            calcium_heatmap_clim = [0, 1];
+            calcium_heatmap_clim_rule = "fallback_empty_to_0_1";
+        else
+            calcium_heatmap_max = max(finite_calcium);
+            calcium_heatmap_min = min(finite_calcium);
+            if calcium_heatmap_max > 0
+                calcium_heatmap_clim = [0, calcium_heatmap_max];
+                calcium_heatmap_clim_rule = "mlx_calcium_positive_0_to_max";
+            elseif calcium_heatmap_min < 0
+                calcium_heatmap_clim = [calcium_heatmap_min, 0];
+                calcium_heatmap_clim_rule = "negative_fallback_min_to_0";
+            else
+                calcium_heatmap_clim = [0, 1];
+                calcium_heatmap_clim_rule = "fallback_flat_to_0_1";
+            end
+        end
+        if calcium_heatmap_clim(1) == calcium_heatmap_clim(2)
+            calcium_heatmap_clim = calcium_heatmap_clim + [-0.5, 0.5];
+            calcium_heatmap_clim_rule = calcium_heatmap_clim_rule + "_expanded_flat_range";
+        end
+
+        gamma_val_calcium = 0.8;
+        color_pivot_calcium = 0.1;
+        cmap_n = 256;
+        base_ice = zeros(cmap_n, 3);
+        base_ice(:, 3) = linspace(0, 1, cmap_n);
+        cyan_start_node = max(1, floor(cmap_n * 0.1));
+        base_ice(cyan_start_node:end, 2) = linspace(0, 1, cmap_n - cyan_start_node + 1);
+        white_start_node = max(1, floor(cmap_n * 0.9));
+        base_ice(white_start_node:end, 1) = linspace(0, 1, cmap_n - white_start_node + 1);
+        x_old = linspace(0, 1, cmap_n);
+        x_new = linspace(0, 1, cmap_n) .^ gamma_val_calcium;
+        warped = interp1([0, color_pivot_calcium, 1], [0, 0.5, 1], x_new, 'linear', 'extrap');
+        warped = min(max(warped, 0), 1);
+        calcium_heatmap_cmap = interp1(x_old, base_ice, warped);
+
+        fig_height = min(2200, max(650, 24 * nrois_heatmap + 180));
+        roi_heatmap_fig = figure( ...
+            'Name', 'ROI Calcium Heatmap With Voltage Sensitivity Trace', ...
+            'Color', 'w', ...
+            'Units', 'pixels', ...
+            'Position', [80, 80, 1500, fig_height]);
+        ax = axes(roi_heatmap_fig);
+        imagesc(ax, t_calcium_heatmap, 1:nrois_heatmap, calcium_heatmap_display');
+        set(ax, 'YDir', 'normal', 'TickDir', 'out', 'Layer', 'top');
+        colormap(ax, calcium_heatmap_cmap);
+        clim(ax, calcium_heatmap_clim);
+        hold(ax, 'on');
+        for roi_idx = 1:nrois_heatmap
+            y_trace = roi_idx + (voltage_heatmap_display(:, roi_idx) - voltage_roi_mid(roi_idx)) / voltage_global_range;
+            plot(ax, t_voltage_heatmap, y_trace, 'Color', [1.0, 0.12, 0.02], 'LineWidth', 0.45);
+        end
+        xlim(ax, [min(t_calcium_heatmap), max(t_calcium_heatmap)]);
+        ylim(ax, [0.5, nrois_heatmap + 0.5]);
+        if nrois_heatmap <= 20
+            yticks(ax, 1:nrois_heatmap);
+        else
+            roi_tick_step = max(1, ceil(nrois_heatmap / 20));
+            yticks(ax, unique([1:roi_tick_step:nrois_heatmap, nrois_heatmap]));
+        end
+        xlabel(ax, 'Time (s)');
+        ylabel(ax, 'ROI');
+        title(ax, sprintf('Calcium Sensitivity Heatmap (%s) + Voltage Sensitivity Trace', ...
+            strrep(char(calcium_heatmap_stage), '_', '\_')));
+        cb = colorbar(ax);
+        ylabel(cb, 'Calcium sensitivity display value');
+        grid(ax, 'on');
+        box(ax, 'off');
+
+        roi_heatmap_fig_file = fullfile(save_path, '4_dual_roi_calcium_heatmap_voltage_trace.fig');
+        roi_heatmap_png_file = fullfile(save_path, '4_dual_roi_calcium_heatmap_voltage_trace.png');
+        roi_heatmap_mat_file = fullfile(save_path, '4_dual_roi_calcium_heatmap_voltage_trace.mat');
+        save_figure_bundle_preserve_layout(roi_heatmap_fig, roi_heatmap_fig_file, roi_heatmap_png_file);
+        close(roi_heatmap_fig);
+
+        roi_heatmap_trace_result = struct( ...
+            'status', "completed", ...
+            'reason', "", ...
+            'fig_file', string(roi_heatmap_fig_file), ...
+            'png_file', string(roi_heatmap_png_file), ...
+            'mat_file', string(roi_heatmap_mat_file), ...
+            'input_stages', struct('voltage', string(voltage_heatmap_stage), 'calcium', string(calcium_heatmap_stage)), ...
+            'parameters', struct( ...
+                'voltage_polarity', voltage_polarity, ...
+                'calcium_polarity', calcium_polarity, ...
+                'calcium_smoothing_window', calcium_smoothing_window, ...
+                'calcium_colormap', "custom_ice_adjust_inline", ...
+                'calcium_colormap_gamma', gamma_val_calcium, ...
+                'calcium_colormap_pivot', color_pivot_calcium, ...
+                'calcium_clim', calcium_heatmap_clim, ...
+                'calcium_clim_rule', string(calcium_heatmap_clim_rule), ...
+                'voltage_scale_rule', "global max-min range; each ROI centered by its own midpoint", ...
+                'voltage_global_range', voltage_global_range, ...
+                'voltage_reference_roi', voltage_reference_roi, ...
+                'roi_count_plotted', nrois_heatmap, ...
+                'roi_count_voltage', nrois_voltage_heatmap, ...
+                'roi_count_calcium', nrois_calcium_heatmap, ...
+                'x_axis_source', "calcium time axis", ...
+                'voltage_trace_time_rule', "overlay voltage trace using voltage seconds without resampling"), ...
+            'time_axis_info', struct('voltage', voltage_time_info, 'calcium', calcium_time_info), ...
+            'created_at', datetime("now"));
+
+        save(roi_heatmap_mat_file, ...
+            'roi_heatmap_trace_result', ...
+            'voltage_heatmap_display', ...
+            'calcium_heatmap_display', ...
+            't_voltage_heatmap', ...
+            't_calcium_heatmap', ...
+            'voltage_roi_min', ...
+            'voltage_roi_max', ...
+            'voltage_roi_range', ...
+            'voltage_reference_roi', ...
+            '-v7.3');
+    end
+end
+if ~isfield(dual_results, 'visualizations') || ~isstruct(dual_results.visualizations)
+    dual_results.visualizations = struct();
+end
+dual_results.visualizations.roi_calcium_heatmap_voltage_trace = roi_heatmap_trace_result;
+save(dual_results_path, 'dual_results', '-v7.3');
 
 print_section('Dual Comparison');
 fprintf('Building dual-channel comparison results...\n');
