@@ -7,7 +7,7 @@
 %
 % This script keeps Dual_analysis3 as a normal runnable script.
 % It passes parameters in from an outer scope by calling run(...).
-
+clear var
 clc;
 
 %% Input Setup
@@ -17,7 +17,7 @@ clc;
 % A. Main batch scope
 % -------------------------------------------------------------------------
 if ~exist('rec_path', 'var') || isempty(rec_path)
-    rec_path = 'E:\1_Data\Luorong\26.04.29_dual_color_P85ras\Methods2_default\Rec1_2026-04-29_19-20-10';
+    rec_path = 'V:\Luorong\Invivo\26.01.29_invivo dual color\Methods2\Rec1_2026-01-29 19-39-03';
 end
 if ~exist('analysis_backend', 'var') || isempty(analysis_backend)
     analysis_backend = 'default';   % 'default' | 'volpy_voltage_reanalysis'
@@ -155,7 +155,7 @@ if ~exist('bleach_mode_calcium', 'var') || isempty(bleach_mode_calcium)
     bleach_mode_calcium = 'exp2';
 end
 if ~exist('run_background_removal', 'var') || isempty(run_background_removal)
-    run_background_removal = false;
+    run_background_removal = true;
 end
 if ~exist('voltage_polarity', 'var') || isempty(voltage_polarity)
     voltage_polarity = -1;

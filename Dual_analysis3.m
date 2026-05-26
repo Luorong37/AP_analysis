@@ -354,6 +354,11 @@ if analysis_only_mode
     % resumes the analysis sections that operate on saved ROI traces.
     [dual_info, voltage_results, calcium_results, dual_results, stim_results, stim_context, stim_windows] = ...
         load_saved_analysis_only_context(reuse_results_path);
+    if ~strcmpi(char(string(save_path)), char(string(reuse_results_path)))
+        [dual_info, voltage_results, calcium_results, dual_results, stim_results] = ...
+            seed_analysis_only_output_folder( ...
+            save_path, reuse_results_path, dual_info, voltage_results, calcium_results, dual_results, stim_results);
+    end
 end
 
 if volpy_reanalysis_mode
@@ -1529,8 +1534,8 @@ else
         % black background, blue/cyan midrange, white strongest values.
         % gamma controls how much low activity stays dark; pivot controls
         % how quickly blue transitions toward brighter cyan/white.
-        gamma_val_calcium = 0.9;
-        color_pivot_calcium = 0.5;
+        gamma_val_calcium = 0.6;
+        color_pivot_calcium = 0.4;
         cmap_n = 256;
         base_ice = zeros(cmap_n, 3);
         base_ice(:, 3) = linspace(0, 1, cmap_n);
@@ -4769,6 +4774,7 @@ correlation_stats = compute_dual_correlation_statistics(voltage_integral, calciu
 
 quad_fig = fullfile(save_path, sprintf('5_dual_%s_quad_summary.fig', metric_name));
 quad_png = fullfile(save_path, sprintf('5_dual_%s_quad_summary.png', metric_name));
+quad_roi_dir = fullfile(save_path, sprintf('5_dual_%s_quad_rois', metric_name));
 overlap_fig = fullfile(save_path, sprintf('5_dual_%s_overlap.fig', metric_name));
 overlap_png = fullfile(save_path, sprintf('5_dual_%s_overlap.png', metric_name));
 overlap_roi_dir = fullfile(save_path, sprintf('5_dual_%s_overlap_rois', metric_name));
@@ -4782,6 +4788,9 @@ plot_dual_quad_summary( ...
 quad_handle = gcf;
 save_figure_bundle(quad_handle, quad_fig, quad_png);
 close(quad_handle);
+save_dual_quad_per_roi( ...
+    t_calcium, t_voltage, calcium_normalized, calcium_deconv_display, voltage_integral, voltage_display, ...
+    size(calcium_metric, 2), metric_name, stim_windows, quad_roi_dir);
 
 plot_dual_overlap_summary( ...
     t_calcium, t_voltage, calcium_display, voltage_display, ...
@@ -4826,6 +4835,7 @@ comparison = struct( ...
         'calcium_smoothing_window', calcium_smoothing_window, ...
         'quad_fig', quad_fig, ...
         'quad_png', quad_png, ...
+        'quad_roi_dir', quad_roi_dir, ...
         'overlap_fig', overlap_fig, ...
         'overlap_png', overlap_png, ...
         'overlap_roi_dir', overlap_roi_dir, ...
@@ -5046,6 +5056,70 @@ end
 
 sgtitle(sprintf('Dual %s Summary: Calcium / Deconvolution / Accumulated Voltage / Voltage', upper(metric_name)));
 set(fig, 'Position', get(0, 'Screensize'));
+end
+
+function save_dual_quad_per_roi(t_calcium, t_voltage, calcium_trace, deconv_trace, integral_trace, voltage_trace, nrois, metric_name, stim_windows, roi_save_dir)
+% For large ROI sets, save one editable quad figure per ROI so each paired
+% calcium/voltage comparison remains easy to inspect during debugging.
+if nrois <= 5
+    return;
+end
+
+if ~exist(roi_save_dir, 'dir')
+    mkdir(roi_save_dir);
+end
+
+row_labels = {'Calcium', 'Deconv Ca', 'Accum V', 'Voltage'};
+row_colors = {[0.1 0.65 0.2], [0.1 0.35 0.9], [0.75 0.15 0.75], [0.85 0.15 0.15]};
+calcium_ylim = compute_shared_ylim(calcium_trace);
+deconv_ylim = compute_shared_ylim(deconv_trace);
+integral_ylim = compute_shared_ylim(integral_trace);
+voltage_ylim = compute_shared_ylim(voltage_trace);
+
+for roi_idx = 1:nrois
+    fig = figure('Name', sprintf('Dual %s Quad ROI %03d', upper(metric_name), roi_idx), ...
+        'Color', 'w', 'Position', [120, 80, 1200, 900]);
+    layout = tiledlayout(fig, 4, 1, 'Padding', 'compact', 'TileSpacing', 'compact');
+
+    ax1 = nexttile(layout);
+    plot(t_calcium, calcium_trace(:, roi_idx), 'Color', row_colors{1}, 'LineWidth', 1.1);
+    apply_dual_quad_roi_axis(ax1, t_calcium, calcium_trace(:, roi_idx), calcium_ylim, row_labels{1}, row_colors{1}, stim_windows, 'calcium');
+    title(ax1, sprintf('ROI %d | Dual %s Quad Pair', roi_idx, upper(metric_name)), 'FontSize', 10, 'FontWeight', 'normal');
+
+    ax2 = nexttile(layout);
+    plot(t_calcium, deconv_trace(:, roi_idx), 'Color', row_colors{2}, 'LineWidth', 1.1);
+    apply_dual_quad_roi_axis(ax2, t_calcium, deconv_trace(:, roi_idx), deconv_ylim, row_labels{2}, row_colors{2}, stim_windows, 'calcium');
+
+    ax3 = nexttile(layout);
+    plot(t_calcium, integral_trace(:, roi_idx), 'Color', row_colors{3}, 'LineWidth', 1.1);
+    apply_dual_quad_roi_axis(ax3, t_calcium, integral_trace(:, roi_idx), integral_ylim, row_labels{3}, row_colors{3}, stim_windows, 'calcium');
+
+    ax4 = nexttile(layout);
+    plot(t_voltage, voltage_trace(:, roi_idx), 'Color', row_colors{4}, 'LineWidth', 1.1);
+    apply_dual_quad_roi_axis(ax4, t_voltage, voltage_trace(:, roi_idx), voltage_ylim, row_labels{4}, row_colors{4}, stim_windows, 'voltage');
+    xlabel(ax4, 'Time (s)');
+
+    fig_file = fullfile(roi_save_dir, sprintf('ROI_%03d.fig', roi_idx));
+    png_file = fullfile(roi_save_dir, sprintf('ROI_%03d.png', roi_idx));
+    save_figure_bundle_preserve_layout(fig, fig_file, png_file);
+    close(fig);
+end
+fprintf('Dual %s per-ROI quad figures saved to: %s\n', metric_name, roi_save_dir);
+end
+
+function apply_dual_quad_roi_axis(ax, t_axis, y_values, y_limits, trace_label, trace_color, stim_windows, channel_name)
+hold(ax, 'on');
+if isstruct(stim_windows) && isfield(stim_windows, channel_name) && isfield(stim_windows.(channel_name), 'stim_time_ranges')
+    add_stim_shading(ax, stim_windows.(channel_name), stim_windows.condition_index, stim_windows.condition_colors, 0.12, stim_windows.trial_labels, stim_windows.block_labels);
+end
+plot(ax, t_axis, y_values, 'Color', trace_color, 'LineWidth', 1.1);
+xlim(ax, [min(t_axis), max(t_axis)]);
+ylim(ax, y_limits);
+ylabel(ax, trace_label);
+grid(ax, 'on');
+box(ax, 'off');
+add_trace_badge(ax, trace_label, trace_color);
+add_axis_scalebar(ax, t_axis, y_values, trace_color, '');
 end
 
 function plot_dual_overlap_summary(t_calcium, t_voltage, calcium_trace, voltage_trace, nrois, metric_name, stim_windows)
@@ -5403,6 +5477,56 @@ end
 fprintf('Analysis-only reuse loaded: saved ROI/channel/stim results are available for downstream sections.\n');
 end
 
+function [dual_info, voltage_results, calcium_results, dual_results, stim_results] = seed_analysis_only_output_folder(save_path, reuse_results_path, dual_info, voltage_results, calcium_results, dual_results, stim_results)
+% Create an analysis-only fork: load traces from the old result folder, but
+% write all rerun outputs into a new folder. The old folder stays read-only
+% from this point onward unless the caller explicitly uses it as save_path.
+if ~isfolder(save_path)
+    mkdir(save_path);
+end
+
+source_roi_file = "";
+if isstruct(dual_results) && isfield(dual_results, 'registration') ...
+        && isfield(dual_results.registration, 'info') ...
+        && isfield(dual_results.registration.info, 'roi_file')
+    source_roi_file = string(dual_results.registration.info.roi_file);
+end
+
+fork_roi_file = "";
+if strlength(source_roi_file) > 0 && isfile(char(source_roi_file))
+    fork_roi_file = string(fullfile(save_path, '1_dual_roi_results.mat'));
+    if ~strcmpi(char(source_roi_file), char(fork_roi_file))
+        copyfile(char(source_roi_file), char(fork_roi_file));
+    end
+    dual_results.registration.info.source_roi_file = source_roi_file;
+    dual_results.registration.info.roi_file = char(fork_roi_file);
+end
+
+if isstruct(dual_info)
+    if isfield(dual_info, 'save_path')
+        dual_info.source_save_path = string(dual_info.save_path);
+    else
+        dual_info.source_save_path = string(reuse_results_path);
+    end
+    dual_info.save_path = char(string(save_path));
+    dual_info.analysis_only_source_path = string(reuse_results_path);
+    dual_info.analysis_only_fork_created_at = datetime("now");
+end
+
+save(fullfile(save_path, 'dual_info.mat'), 'dual_info');
+save(fullfile(save_path, 'voltage_results.mat'), 'voltage_results', '-v7.3');
+save(fullfile(save_path, 'calcium_results.mat'), 'calcium_results', '-v7.3');
+save(fullfile(save_path, 'dual_results.mat'), 'dual_results', '-v7.3');
+save(fullfile(save_path, 'stim_results.mat'), 'stim_results', '-v7.3');
+
+fprintf('Analysis-only fork initialized.\n');
+fprintf('  source results: %s\n', reuse_results_path);
+fprintf('  output folder : %s\n', save_path);
+if strlength(fork_roi_file) > 0
+    fprintf('  ROI context copied to: %s\n', fork_roi_file);
+end
+end
+
 function save_figure_bundle(fig_handle, fig_file, png_file)
 % Save the editable FIG plus a large PNG snapshot. PNG export is done
 % after maximizing the figure so saved images match the on-screen layout
@@ -5477,7 +5601,7 @@ calcium_tf = analyze_population_time_frequency( ...
 
 [fourier_fig, fourier_png] = plot_population_fourier_summary( ...
     voltage_tf, calcium_tf, stim_windows, params, save_path);
-[wavelet_fig, wavelet_png] = plot_population_wavelet_summary( ...
+[wavelet_fig, wavelet_png, wavelet_roi_dir] = plot_population_wavelet_summary( ...
     voltage_tf, calcium_tf, stim_windows, save_path);
 
 time_frequency_results = struct( ...
@@ -5486,7 +5610,7 @@ time_frequency_results = struct( ...
     'calcium', calcium_tf, ...
     'visualizations', struct( ...
         'fourier_summary', struct('fig_file', fourier_fig, 'png_file', fourier_png), ...
-        'wavelet_summary', struct('fig_file', wavelet_fig, 'png_file', wavelet_png)));
+        'wavelet_summary', struct('fig_file', wavelet_fig, 'png_file', wavelet_png, 'roi_pair_dir', wavelet_roi_dir)));
 end
 
 function result = analyze_population_time_frequency(trace_matrix, frame_rate, t_axis, params, channel_name)
@@ -5637,33 +5761,77 @@ save_figure_bundle(fig, fig_file, png_file);
 close(fig);
 end
 
-function [fig_file, png_file] = plot_population_wavelet_summary(voltage_tf, calcium_tf, stim_windows, save_path)
+function [fig_file, png_file, roi_pair_dir] = plot_population_wavelet_summary(voltage_tf, calcium_tf, stim_windows, save_path)
 fig = figure('Color', 'w', 'Name', 'Population Wavelet Summary');
 nrois = size(voltage_tf.trace_matrix, 2);
+voltage_windows = resolve_channel_stim_windows(stim_windows, 'voltage');
+calcium_windows = resolve_channel_stim_windows(stim_windows, 'calcium');
 tiledlayout(fig, nrois, 4, 'Padding', 'compact', 'TileSpacing', 'compact');
 
 for roi_idx = 1:nrois
     nexttile;
     plot_roi_trace_with_stim( ...
-        gca, voltage_tf, roi_idx, resolve_channel_stim_windows(stim_windows, 'voltage'), 'r', 'Voltage Trace');
+        gca, voltage_tf, roi_idx, voltage_windows, 'r', 'Voltage Trace');
 
     nexttile;
     plot_roi_wavelet_scalogram( ...
-        gca, voltage_tf, roi_idx, resolve_channel_stim_windows(stim_windows, 'voltage'), 'Voltage Wavelet');
+        gca, voltage_tf, roi_idx, voltage_windows, 'Voltage Wavelet');
 
     nexttile;
     plot_roi_trace_with_stim( ...
-        gca, calcium_tf, roi_idx, resolve_channel_stim_windows(stim_windows, 'calcium'), 'g', 'Calcium Trace');
+        gca, calcium_tf, roi_idx, calcium_windows, 'g', 'Calcium Trace');
 
     nexttile;
     plot_roi_wavelet_scalogram( ...
-        gca, calcium_tf, roi_idx, resolve_channel_stim_windows(stim_windows, 'calcium'), 'Calcium Wavelet');
+        gca, calcium_tf, roi_idx, calcium_windows, 'Calcium Wavelet');
 end
 
 fig_file = fullfile(save_path, '8_wavelet_summary.fig');
 png_file = fullfile(save_path, '8_wavelet_summary.png');
 save_figure_bundle(fig, fig_file, png_file);
 close(fig);
+
+roi_pair_dir = "";
+if nrois > 5
+    roi_pair_dir = fullfile(save_path, '8_wavelet_roi_pairs');
+    save_wavelet_pair_per_roi(voltage_tf, calcium_tf, voltage_windows, calcium_windows, roi_pair_dir);
+end
+end
+
+function save_wavelet_pair_per_roi(voltage_tf, calcium_tf, voltage_windows, calcium_windows, roi_pair_dir)
+% Save each ROI as its own voltage/calcium trace-plus-wavelet pair. This
+% keeps the original population wavelet overview while making large ROI
+% sets easier to inspect one matched ROI at a time.
+if ~exist(roi_pair_dir, 'dir')
+    mkdir(roi_pair_dir);
+end
+
+nrois = size(voltage_tf.trace_matrix, 2);
+for roi_idx = 1:nrois
+    fig = figure('Color', 'w', 'Name', sprintf('Wavelet ROI Pair %03d', roi_idx), ...
+        'Position', [120, 80, 1400, 760]);
+    layout = tiledlayout(fig, 2, 2, 'Padding', 'compact', 'TileSpacing', 'compact');
+
+    nexttile(layout);
+    plot_roi_trace_with_stim(gca, voltage_tf, roi_idx, voltage_windows, 'r', 'Voltage Trace');
+    title(sprintf('ROI %d | Voltage Trace', roi_idx), 'FontSize', 10, 'FontWeight', 'normal');
+
+    nexttile(layout);
+    plot_roi_wavelet_scalogram(gca, voltage_tf, roi_idx, voltage_windows, 'Voltage Wavelet');
+
+    nexttile(layout);
+    plot_roi_trace_with_stim(gca, calcium_tf, roi_idx, calcium_windows, 'g', 'Calcium Trace');
+    title(sprintf('ROI %d | Calcium Trace', roi_idx), 'FontSize', 10, 'FontWeight', 'normal');
+
+    nexttile(layout);
+    plot_roi_wavelet_scalogram(gca, calcium_tf, roi_idx, calcium_windows, 'Calcium Wavelet');
+
+    fig_file = fullfile(roi_pair_dir, sprintf('ROI_%03d.fig', roi_idx));
+    png_file = fullfile(roi_pair_dir, sprintf('ROI_%03d.png', roi_idx));
+    save_figure_bundle_preserve_layout(fig, fig_file, png_file);
+    close(fig);
+end
+fprintf('Wavelet per-ROI pair figures saved to: %s\n', roi_pair_dir);
 end
 
 function plot_channel_fft_summary(channel_result, trace_color, title_text, display_band_hz, annotate_peak)
