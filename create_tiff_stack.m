@@ -48,7 +48,16 @@ if ~isempty(save_path)
     save_list = dir(fullfile(save_path, '*.tif'));
     save_names = {save_list.name};
     frames = 0;
-    [~, useParallelStack] = ensure_local_parallel_pool([], 'create_tiff_stack');
+    % Reuse a pool opened by the caller. Do not start a pool inside this
+    % helper; top-level analysis scripts own parallel setup.
+    useParallelStack = false;
+    if exist('gcp', 'file') == 2
+        try
+            useParallelStack = ~isempty(gcp('nocreate'));
+        catch
+            useParallelStack = false;
+        end
+    end
     if useParallelStack
         parfor i = 1: length(save_list)
             t = Tiff(fullfile(save_path,save_names{i}));
@@ -241,15 +250,21 @@ stack_nframes(1:(stack_num-1)) = stack_tiff_max_count;
 stack_nframes(stack_num) = num_files - (stack_tiff_max_count * (stack_num-1));
 
 % 进度跟踪：worker -> 客户端
+pool = [];
+if exist('gcp', 'file') == 2
+    try
+        pool = gcp('nocreate');
+    catch
+        pool = [];
+    end
+end
+useParallelStack = ~isempty(pool) && contains(class(pool), 'ProcessPool');
+if useParallelStack
 q        = parallel.pool.DataQueue;
 nDone    = 0;    % 累计已完成数
 print_text = 0;
 prevPcnt = 0;    % 上一次已打印的百分比
 afterEach(q, @updateProgress);  % 嵌套函数，能直接用 nframes/t0/nDone/prevPcnt
-
-pool = gcp('nocreate');
-useParallelStack = ~isempty(pool) && contains(class(pool), 'ProcessPool');
-if useParallelStack
 parfor i = 1:stack_num
     
     tiff_file_name = fullfile(save_path, sprintf('%s%02d.tif', stack_base, i));
@@ -281,6 +296,9 @@ parfor i = 1:stack_num
     t.close();
 end
 else
+nDone = 0;
+print_text = 0;
+prevPcnt = 0;
 for i = 1:stack_num
     
     tiff_file_name = fullfile(save_path, sprintf('%s%02d.tif', stack_base, i));
@@ -306,7 +324,7 @@ for i = 1:stack_num
             t.writeDirectory();
         end
 
-        send(q, 1);  % 每完成一个发一个通知（内容可忽略）
+        updateProgress([]);  % 每完成一个发一个通知（内容可忽略）
 
     end
     t.close();

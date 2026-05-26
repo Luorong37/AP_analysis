@@ -180,11 +180,25 @@ if ~exist('save_path', 'var') || isempty(save_path)
 end
 mkdir(save_path);
 
-% Load image file
-if gpu && analysis_backend ~= "volpy"
-    [~, poolReady] = ensure_local_parallel_pool([], 'AP_analysis3');
-    gpu = poolReady;
+% Parallel pool setup happens once, before any movie loading. Downstream
+% helpers only reuse an existing pool and fall back to serial work when no
+% pool is available.
+parallel_pool_info = struct( ...
+    'requested', logical(gpu && analysis_backend ~= "volpy"), ...
+    'ready', false, ...
+    'num_workers', 0, ...
+    'message', "", ...
+    'initialized_before_movie_load', true);
+if parallel_pool_info.requested
+    fprintf('\n===== Parallel Pool Setup =====\n');
+    [~, parallel_pool_ready, parallel_pool_info] = initialize_ap_parallel_pool(parallel_pool_info);
+    parallel_pool_info.ready = parallel_pool_ready;
+    gpu = parallel_pool_ready;
+else
+    parallel_pool_info.message = "Parallel pool not requested for this backend.";
 end
+
+% Load image file
 
 if analysis_backend == "volpy"
     movie = [];
@@ -249,6 +263,7 @@ movie_info = struct( ...
     'original_frame_size', [ncols, nrows], ...
     'analysis_frame_size', [ncols, nrows], ...
     'transpose_before_analysis', transpose_before_analysis, ...
+    'parallel_pool_info', parallel_pool_info, ...
     'motion', struct( ...
         'applied', false, ...
         'method', '', ...
@@ -266,6 +281,7 @@ analysis_info = struct( ...
     'frame_rate', freq, ...
     'bin', bin, ...
     'gpu', gpu, ...
+    'parallel_pool_info', parallel_pool_info, ...
     'transpose_before_analysis', transpose_before_analysis, ...
     'created_at', datetime("now"));
 
@@ -2861,6 +2877,46 @@ save(save_filename, 'results_summary', '-v7.3');
 
 
 %%
+
+function [poolObj, poolReady, poolInfo] = initialize_ap_parallel_pool(poolInfo)
+poolObj = [];
+poolReady = false;
+
+if exist('gcp', 'file') ~= 2
+    poolInfo.message = "Parallel Computing Toolbox is not available.";
+    warning('AP_analysis3:ParallelUnavailable', '%s Continuing in serial mode.', poolInfo.message);
+    return;
+end
+
+try
+    poolObj = gcp('nocreate');
+    if isempty(poolObj)
+        fprintf('Opening parallel pool before movie loading...\n');
+        poolObj = gcp;
+    else
+        fprintf('Reusing existing parallel pool before movie loading.\n');
+    end
+
+    poolReady = ~isempty(poolObj);
+    poolInfo.ready = poolReady;
+    if poolReady && isprop(poolObj, 'NumWorkers')
+        poolInfo.num_workers = poolObj.NumWorkers;
+        poolInfo.message = sprintf('Parallel pool ready with %d workers.', poolObj.NumWorkers);
+    elseif poolReady
+        poolInfo.message = "Parallel pool ready.";
+    else
+        poolInfo.message = "Parallel pool was requested but is empty.";
+    end
+    fprintf('%s\n', poolInfo.message);
+catch ME
+    poolInfo.ready = false;
+    poolInfo.num_workers = 0;
+    poolInfo.message = string(ME.message);
+    warning('AP_analysis3:ParpoolUnavailable', ...
+        ['Parallel pool could not be started (%s). ' ...
+        'Continuing in serial mode.'], ME.message);
+end
+end
 
 function results = store_trace_stage(results, stage_name, data, parent_results, roi_file, movie_info, method, parameters)
 % Save one named trace stage together with the minimum provenance needed
