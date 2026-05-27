@@ -3084,18 +3084,19 @@ voltage_ds_path = fullfile(save_path, sprintf('voltage_motion_corrected_ds%d.tif
 calcium_ds_path = fullfile(save_path, sprintf('calcium_motion_corrected_ds%d.tif', downsample_factor));
 save_downsampled_motion_tif(voltage_corrected, downsample_factor, voltage_ds_path);
 save_downsampled_motion_tif(calcium_corrected, downsample_factor, calcium_ds_path);
-clear calcium_single;
 
-% Quantify motion-correction quality on a temporally downsampled voltage
-% reference movie. Running NoRMCorre motion_metrics on the full dual-camera
-% movie allocates large cropped copies and can exceed memory on long runs.
+% Quantify motion-correction quality on the voltage reference movie,
+% because the shared shift field is estimated from voltage and then reused
+% by calcium.
+voltage_corrected_for_estimation = apply_shifts(movie_for_estimation, shifts_r, options_r);
 motion_metrics_file = fullfile(save_path, 'shared_motion_metrics.mat');
 motion_metrics_fig = fullfile(save_path, 'shared_motion_metrics.fig');
 motion_metrics_png = fullfile(save_path, 'shared_motion_metrics.png');
 save_shared_motion_metrics( ...
+    movie_for_estimation, voltage_corrected_for_estimation, ...
     voltage_single, voltage_corrected, ...
     shifts_r, options_r.max_shift, ...
-    motion_metrics_file, motion_metrics_fig, motion_metrics_png, downsample_factor);
+    motion_metrics_file, motion_metrics_fig, motion_metrics_png);
 
 voltage_motion_info.applied = true;
 voltage_motion_info.method = 'NoRMCorre_rigid_shared_voltage_reference';
@@ -3122,38 +3123,15 @@ calcium_motion_info.auto_reused_previous_shift = auto_reused_previous_shift;
 end
 
 function save_downsampled_motion_tif(movie_3d, downsample_factor, save_path_tif)
+if exist('downsample_data', 'file') ~= 2
+    error('NoRMCorre helper downsample_data is required to save downsampled motion-corrected TIFFs.');
+end
 if exist('array2tif', 'file') ~= 2
     error('array2tif helper is required to save downsampled motion-corrected TIFFs.');
 end
-movie_ds = downsample_movie_time_mean(movie_3d, downsample_factor);
+movie_ds = downsample_data(movie_3d, 'time', downsample_factor);
 movie_ds = scale_movie_to_uint16_display(movie_ds);
 array2tif(uint16(movie_ds), save_path_tif);
-end
-
-function movie_ds = downsample_movie_time_mean(movie_3d, downsample_factor)
-% Downsample by averaging contiguous temporal blocks without reshaping the
-% full movie. NoRMCorre's downsample_data is convenient but can allocate a
-% very large temporary array for long dual-camera movies.
-movie_size = size(movie_3d);
-if numel(movie_size) < 3
-    movie_size(3) = 1;
-end
-ncols = movie_size(1);
-nrows = movie_size(2);
-nframes = movie_size(3);
-downsample_factor = max(1, round(double(downsample_factor)));
-ndownsampled = floor(nframes / downsample_factor);
-if ndownsampled < 1
-    movie_ds = single(movie_3d);
-    return;
-end
-
-movie_ds = zeros(ncols, nrows, ndownsampled, 'single');
-for idx = 1:ndownsampled
-    frame_start = (idx - 1) * downsample_factor + 1;
-    frame_stop = idx * downsample_factor;
-    movie_ds(:, :, idx) = mean(single(movie_3d(:, :, frame_start:frame_stop)), 3, 'omitnan');
-end
 end
 
 function movie_scaled = scale_movie_to_uint16_display(movie_3d)
@@ -3168,30 +3146,24 @@ movie_scaled(movie_scaled < 0) = 0;
 movie_scaled(movie_scaled > 65535) = 65535;
 end
 
-function save_shared_motion_metrics(full_raw, full_corrected, shifts_r, max_shift, mat_file, fig_file, png_file, metric_downsample_factor)
+function save_shared_motion_metrics(filtered_raw, filtered_corrected, full_raw, full_corrected, shifts_r, max_shift, mat_file, fig_file, png_file)
 if exist('motion_metrics', 'file') ~= 2
     error('NoRMCorre helper motion_metrics is required for motion-correction QC metrics.');
 end
-if nargin < 8 || isempty(metric_downsample_factor)
-    metric_downsample_factor = 40;
-end
-metric_downsample_factor = max(1, round(double(metric_downsample_factor)));
-
-full_raw_ds = downsample_movie_time_mean(full_raw, metric_downsample_factor);
-[c_full_raw, m_full_raw, v_full_raw] = motion_metrics(full_raw_ds, max_shift);
-clear full_raw_ds;
-
-full_corrected_ds = downsample_movie_time_mean(full_corrected, metric_downsample_factor);
-[c_full_corrected, m_full_corrected, v_full_corrected] = motion_metrics(full_corrected_ds, max_shift);
-clear full_corrected_ds;
-
+[c_filtered_raw, m_filtered_raw, v_filtered_raw] = motion_metrics(filtered_raw, max_shift);
+[c_filtered_corrected, m_filtered_corrected, v_filtered_corrected] = motion_metrics(filtered_corrected, max_shift);
+[c_full_raw, m_full_raw, v_full_raw] = motion_metrics(full_raw, max_shift);
+[c_full_corrected, m_full_corrected, v_full_corrected] = motion_metrics(full_corrected, max_shift);
 shifts_plot = squeeze(cat(3, shifts_r(:).shifts));
 metrics_data = struct( ...
     'rigid_shifts', shifts_plot, ...
-    'metric_downsample_factor', metric_downsample_factor, ...
     'filtered', struct( ...
-        'status', 'skipped', ...
-        'reason', 'High-pass filtered metrics are skipped to avoid an extra full-movie apply_shifts and motion_metrics memory peak.'), ...
+        'correlation_raw', c_filtered_raw, ...
+        'correlation_corrected', c_filtered_corrected, ...
+        'mean_raw', m_filtered_raw, ...
+        'mean_corrected', m_filtered_corrected, ...
+        'variance_raw', v_filtered_raw, ...
+        'variance_corrected', v_filtered_corrected), ...
     'full', struct( ...
         'correlation_raw', c_full_raw, ...
         'correlation_corrected', c_full_corrected, ...
@@ -3209,9 +3181,13 @@ legend('y-shifts', 'x-shifts');
 grid on;
 
 subplot(3, 1, 2);
-text(0.5, 0.5, sprintf('High-pass filtered metrics skipped\nFull-voltage metrics use time downsample x%d', metric_downsample_factor), ...
-    'Units', 'normalized', 'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle');
-axis off;
+plot(c_filtered_raw, 'Color', [0.45 0.45 0.45], 'LineWidth', 1);
+hold on;
+plot(c_filtered_corrected, 'r', 'LineWidth', 1.2);
+title('Correlation Coefficients On Filtered Voltage Movie');
+legend('raw', 'corrected');
+ylim([0.8, 1]);
+grid on;
 
 subplot(3, 1, 3);
 plot(c_full_raw, 'Color', [0.45 0.45 0.45], 'LineWidth', 1);
@@ -3221,7 +3197,7 @@ title('Correlation Coefficients On Full Voltage Movie');
 legend('raw', 'corrected');
 ylim([0.8, 1]);
 grid on;
-xlabel(sprintf('Downsampled frame (x%d)', metric_downsample_factor));
+xlabel('Frame');
 
 save_figure_bundle(fig, fig_file, png_file);
 close(fig);
@@ -3252,33 +3228,15 @@ end
 function shift_file = find_latest_previous_motion_shift(cycle_path, current_save_path)
 shift_file = "";
 dual_root = fullfile(cycle_path, 'Dual_analysis3');
-if isfolder(dual_root)
-    listing = dir(fullfile(dual_root, '**', 'shared_motion_shifts_result.mat'));
-    shift_file = select_latest_shift_candidate(listing, current_save_path);
-    if strlength(shift_file) > 0
-        return;
-    end
-end
-
-% Fall back to legacy single-channel Cam*_Analysis outputs when no modern
-% Dual_analysis3 shared shift file exists yet. In rebuilt dual-color data,
-% Cam2 is the voltage channel by convention, so it is checked before other
-% camera analysis folders.
-legacy_voltage_listing = dir(fullfile(cycle_path, 'Cam2*_Analysis', '**', 'motion_shifts_result.mat'));
-shift_file = select_latest_shift_candidate(legacy_voltage_listing, current_save_path);
-if strlength(shift_file) > 0
+if ~isfolder(dual_root)
     return;
 end
 
-legacy_listing = dir(fullfile(cycle_path, 'Cam*_Analysis', '**', 'motion_shifts_result.mat'));
-shift_file = select_latest_shift_candidate(legacy_listing, current_save_path);
-end
-
-function shift_file = select_latest_shift_candidate(listing, current_save_path)
-shift_file = "";
+listing = dir(fullfile(dual_root, '**', 'shared_motion_shifts_result.mat'));
 if isempty(listing)
     return;
 end
+
 current_save_path = string(current_save_path);
 candidate_paths = strings(0, 1);
 candidate_times = zeros(0, 1);
@@ -5592,57 +5550,16 @@ function save_figure_bundle(fig_handle, fig_file, png_file)
 % after maximizing the figure so saved images match the on-screen layout
 % more closely than the MATLAB default small window capture.
 prepare_figure_for_png_export(fig_handle);
-save_figure_outputs_resilient(fig_handle, fig_file, png_file, true);
+saveas(fig_handle, fig_file, 'fig');
+exportgraphics(fig_handle, png_file, 'Resolution', 150);
 end
 
 function save_figure_bundle_preserve_layout(fig_handle, fig_file, png_file)
 if ~isgraphics(fig_handle, 'figure')
     return;
 end
-save_figure_outputs_resilient(fig_handle, fig_file, png_file, false);
-end
-
-function save_figure_outputs_resilient(fig_handle, fig_file, png_file, prepared_for_export)
-if nargin < 4
-    prepared_for_export = false;
-end
-if ~isgraphics(fig_handle, 'figure')
-    warning('Dual_analysis3:InvalidFigureHandle', ...
-        'Figure output skipped because the figure handle is invalid: %s', png_file);
-    return;
-end
-
-try
-    saveas(fig_handle, fig_file, 'fig');
-catch ME
-    warning('Dual_analysis3:SaveFigFailed', ...
-        'Failed to save FIG file %s: %s', fig_file, ME.message);
-end
-
-if ~isgraphics(fig_handle, 'figure')
-    warning('Dual_analysis3:FigureClosedBeforePng', ...
-        'PNG export skipped because the figure closed before export: %s', png_file);
-    return;
-end
-
-try
-    drawnow;
-    exportgraphics(fig_handle, png_file, 'Resolution', 150);
-catch ME
-    warning('Dual_analysis3:ExportGraphicsFailed', ...
-        'exportgraphics failed for %s: %s. Trying saveas PNG fallback.', png_file, ME.message);
-    if isgraphics(fig_handle, 'figure')
-        try
-            if ~prepared_for_export
-                drawnow;
-            end
-            saveas(fig_handle, png_file, 'png');
-        catch ME2
-            warning('Dual_analysis3:SavePngFallbackFailed', ...
-                'PNG fallback also failed for %s: %s', png_file, ME2.message);
-        end
-    end
-end
+saveas(fig_handle, fig_file, 'fig');
+exportgraphics(fig_handle, png_file, 'Resolution', 150);
 end
 
 function prepare_figure_for_png_export(fig_handle)

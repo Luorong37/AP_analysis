@@ -14,8 +14,6 @@
 %
 % This script keeps Dual_analysis3 as a normal runnable script.
 % It passes parameters in from an outer scope by calling run(...).
-clear all
-clc;
 
 %% Input Setup
 % Point this to one rebuilt record folder that contains Cycle* subfolders.
@@ -30,7 +28,7 @@ if ~exist('analysis_backend', 'var') || isempty(analysis_backend)
     analysis_backend = 'default';   % 'default' | 'volpy_voltage_reanalysis'
 end
 if ~exist('analysis_mode', 'var') || isempty(analysis_mode)
-    analysis_mode = 'full';         % 'full' | 'analysis_only'
+    analysis_mode = 'analysis_only';         % 'full' | 'analysis_only'
 end
 analysis_only_rec_mode = strcmpi(string(analysis_mode), "analysis_only");
 source_result_root_dir = resolve_result_root_dir_rec(analysis_backend);
@@ -39,8 +37,8 @@ average_output_dir_name = resolve_average_output_dir_name_rec(analysis_backend);
 batch_summary_file_name = resolve_batch_summary_filename_rec(analysis_backend);
 if analysis_only_rec_mode
     result_root_dir = resolve_analysis_only_output_root_dir_rec();
-    average_output_dir_name = 'Dual_analysis3_rec_average_analysis_only';
-    batch_summary_file_name = 'Dual_analysis3_rec_batch_summary_analysis_only.mat';
+    average_output_dir_name = 'Dual_analysis3_average';
+    batch_summary_file_name = 'Dual_analysis3_batch.mat';
 end
 if ~exist('analysis_only_output_root_dir', 'var') || isempty(analysis_only_output_root_dir)
     analysis_only_output_root_dir = resolve_analysis_only_output_root_dir_rec();
@@ -68,7 +66,7 @@ end
 
 % When true, rerun the reference cycle first to create a fresh ROI file.
 if ~exist('rerun_reference_cycle_for_roi', 'var') || isempty(rerun_reference_cycle_for_roi)
-    rerun_reference_cycle_for_roi = true;
+    rerun_reference_cycle_for_roi = false;
 end
 
 % Whether the reference cycle should enter manual inter-camera ROI offset
@@ -82,7 +80,7 @@ if ~exist('reference_correct_offset_mode', 'var') || isempty(reference_correct_o
     if exist('reference_correct_offset', 'var') && ~isempty(reference_correct_offset)
         reference_correct_offset_mode = reference_correct_offset;
     else
-        reference_correct_offset_mode = false;
+        reference_correct_offset_mode = 'none' ;
     end
 end
 reference_correct_offset_mode = normalize_correct_offset_mode_rec(reference_correct_offset_mode);
@@ -111,6 +109,16 @@ end
 % outputs. This is the fast path once all cycles have already been run.
 if ~exist('run_record_average_only', 'var') || isempty(run_record_average_only)
     run_record_average_only = false;
+end
+% Build the cross-cycle record average only when explicitly requested. This
+% keeps routine per-cycle batch runs from failing just because no completed
+% cycle is available yet, or because the user only wanted per-cycle outputs.
+if ~exist('run_record_average', 'var') || isempty(run_record_average)
+    run_record_average = false;
+end
+run_record_average = logical(run_record_average) || logical(run_record_average_only);
+if ~exist('stop_on_cycle_error', 'var') || isempty(stop_on_cycle_error)
+    stop_on_cycle_error = true;
 end
 
 % -------------------------------------------------------------------------
@@ -187,10 +195,13 @@ if ~exist('calcium_polarity', 'var') || isempty(calcium_polarity)
     calcium_polarity = 1;
 end
 if ~exist('reuse_offset', 'var') || isempty(reuse_offset)
-    reuse_offset = [];
+    reuse_offset = [0,0];
 end
 if ~exist('gpu', 'var') || isempty(gpu)
     gpu = true;
+end
+if ~exist('enable_batch_diary', 'var') || isempty(enable_batch_diary)
+    enable_batch_diary = true;
 end
 if ~exist('motion_cfg', 'var') || isempty(motion_cfg)
     motion_cfg = struct( ...
@@ -213,6 +224,12 @@ if ~isfolder(rec_path)
     error('Record path does not exist: %s', rec_path);
 end
 batch_summary_file = fullfile(rec_path, batch_summary_file_name);
+if enable_batch_diary
+    diary_file = fullfile(rec_path, sprintf('Dual_analysis3_rec_%s.log', char(datetime('now', 'Format', 'yyyy-MM-dd HH-mm-ss'))));
+    diary(diary_file);
+    diary_cleanup = onCleanup(@() diary('off'));
+    fprintf('[Batch] Command-window log is being written to:\n  %s\n', diary_file);
+end
 
 if run_record_average_only
     cycle_dirs = dir(fullfile(rec_path, 'Cycle*'));
@@ -310,7 +327,7 @@ else
         cycle_path_i = fullfile(cycle_dirs(i).folder, cycle_dirs(i).name);
         existing_run_i = find_latest_explicit_result(cycle_path_i, analysis_backend);
         if strlength(existing_run_i) > 0
-            fprintf('%s | existing processed run detected:\n  %s\n', cycle_dirs(i).name, existing_run_i);
+            fprintf('%s | existing result marker detected:\n  %s\n', cycle_dirs(i).name, existing_run_i);
         else
             fprintf('%s | no processed %s run detected.\n', cycle_dirs(i).name, source_result_root_dir);
         end
@@ -385,14 +402,20 @@ else
                     'roi_file', string(run_result.roi_file), ...
                     'message', string(run_result.source_save_path));
             catch ME
+                error_report = getReport(ME, 'extended', 'hyperlinks', 'off');
+                error_log_file = save_cycle_error_report_rec(rec_path, current_cycle_name, error_report);
                 batch_results(end+1, 1) = struct( ...
                     'cycle_name', current_cycle_name, ...
                     'cycle_path', string(current_cycle_path), ...
                     'status', "failed", ...
                     'save_path', "", ...
                     'roi_file', "", ...
-                    'message', string(ME.message));
-                fprintf(2, '[Batch] %s analysis-only fork failed: %s\n', current_cycle_name, ME.message);
+                    'message', string(error_report));
+                fprintf(2, '[Batch] %s analysis-only fork failed:\n%s\n', current_cycle_name, error_report);
+                fprintf(2, '[Batch] Error report saved to:\n  %s\n', error_log_file);
+                if stop_on_cycle_error
+                    rethrow(ME);
+                end
             end
         end
 
@@ -419,7 +442,7 @@ else
         fprintf('Reference cycle: %s\n', reference_cycle_name);
         reference_existing_run = find_latest_explicit_result(reference_cycle_path, analysis_backend);
         if strlength(reference_existing_run) > 0
-            fprintf('Reference cycle already has processed data:\n  %s\n', reference_existing_run);
+            fprintf('Reference cycle already has a result marker:\n  %s\n', reference_existing_run);
         end
 
         if strlength(string(reference_roi_file)) == 0
@@ -512,14 +535,20 @@ else
                     'roi_file', string(run_result.roi_file), ...
                     'message', "");
             catch ME
+                error_report = getReport(ME, 'extended', 'hyperlinks', 'off');
+                error_log_file = save_cycle_error_report_rec(rec_path, current_cycle_name, error_report);
                 batch_results(end+1, 1) = struct( ...
                     'cycle_name', current_cycle_name, ...
                     'cycle_path', string(current_cycle_path), ...
                     'status', "failed", ...
                     'save_path', "", ...
                     'roi_file', reference_roi_file, ...
-                    'message', string(ME.message));
-                fprintf(2, '[Batch] %s failed: %s\n', current_cycle_name, ME.message);
+                    'message', string(error_report));
+                fprintf(2, '[Batch] %s failed:\n%s\n', current_cycle_name, error_report);
+                fprintf(2, '[Batch] Error report saved to:\n  %s\n', error_log_file);
+                if stop_on_cycle_error
+                    rethrow(ME);
+                end
             end
         end
     end
@@ -533,14 +562,18 @@ end
 % and build one record-level average trace per ROI. This keeps the
 % expensive movie-based sections untouched while still letting the user see
 % how stable each ROI is across cycles.
-fprintf('\n============================================================\n');
-fprintf('[Batch] Record-Level Average Trace Summary\n');
-fprintf('============================================================\n');
-record_average_output = build_record_average_summary( ...
-    rec_path, batch_results, reference_roi_file, ...
-    voltage_polarity, calcium_polarity, calcium_smoothing_window, average_output_dir_name);
-fprintf('Record-average summary folder:\n  %s\n', record_average_output.output_dir);
-fprintf('Record-average result bundle:\n  %s\n', record_average_output.results_file);
+if run_record_average
+    fprintf('\n============================================================\n');
+    fprintf('[Batch] Record-Level Average Trace Summary\n');
+    fprintf('============================================================\n');
+    record_average_output = build_record_average_summary( ...
+        rec_path, batch_results, reference_roi_file, ...
+        voltage_polarity, calcium_polarity, calcium_smoothing_window, average_output_dir_name);
+    fprintf('Record-average summary folder:\n  %s\n', record_average_output.output_dir);
+    fprintf('Record-average result bundle:\n  %s\n', record_average_output.results_file);
+else
+    fprintf('\n[Batch] Record-level average skipped. Set run_record_average = true when cross-cycle averaging is needed.\n');
+end
 
 %% Local Functions
 function result = run_dual_cycle_with_overrides( ...
@@ -686,22 +719,55 @@ if nargin < 2 || isempty(analysis_backend)
     analysis_backend = 'default';
 end
 result_root_dir = resolve_result_root_dir_rec(analysis_backend);
-listing = dir(fullfile(cycle_path, result_root_dir, '**', '-1_explicit_dual_results.mat'));
+
+% Prefer the final explicit bundle when a cycle completed all Dual_analysis3
+% sections. If a run stopped after ROI creation, fall back to the ROI marker
+% so rec-level workflows can still discover that partial result folder.
+explicit_listing = dir(fullfile(cycle_path, result_root_dir, '**', '-1_explicit_dual_results.mat'));
+explicit_result = select_latest_file_from_listing_rec(explicit_listing);
+if strlength(explicit_result) > 0
+    return;
+end
+
+roi_listing = dir(fullfile(cycle_path, result_root_dir, '**', '1_dual_roi_results.mat'));
+explicit_result = select_latest_file_from_listing_rec(roi_listing);
+end
+
+function file_path = select_latest_file_from_listing_rec(listing)
+file_path = "";
 if isempty(listing)
     return;
 end
 [~, newest_idx] = max([listing.datenum]);
-explicit_result = string(fullfile(listing(newest_idx).folder, listing(newest_idx).name));
+file_path = string(fullfile(listing(newest_idx).folder, listing(newest_idx).name));
 end
 
 function explicit_result = find_latest_analysis_only_fork_result(cycle_path, output_root_dir)
 explicit_result = "";
-listing = dir(fullfile(cycle_path, char(string(output_root_dir)), '**', '-1_explicit_dual_results.mat'));
-if isempty(listing)
+explicit_listing = dir(fullfile(cycle_path, char(string(output_root_dir)), '**', '-1_explicit_dual_results.mat'));
+explicit_result = select_latest_file_from_listing_rec(explicit_listing);
+if strlength(explicit_result) > 0
     return;
 end
-[~, newest_idx] = max([listing.datenum]);
-explicit_result = string(fullfile(listing(newest_idx).folder, listing(newest_idx).name));
+roi_listing = dir(fullfile(cycle_path, char(string(output_root_dir)), '**', '1_dual_roi_results.mat'));
+explicit_result = select_latest_file_from_listing_rec(roi_listing);
+end
+
+function error_log_file = save_cycle_error_report_rec(rec_path, cycle_name, error_report)
+error_dir = fullfile(rec_path, 'Dual_analysis3_rec_error_logs');
+if ~isfolder(error_dir)
+    mkdir(error_dir);
+end
+time_tag = char(datetime('now', 'Format', 'yyyy-MM-dd HH-mm-ss'));
+safe_cycle_name = sanitize_path_component_rec(cycle_name);
+error_log_file = fullfile(error_dir, sprintf('%s_%s_error.txt', safe_cycle_name, time_tag));
+fid = fopen(error_log_file, 'w');
+if fid < 0
+    warning('Dual_analysis3_rec:ErrorLogOpenFailed', 'Could not write cycle error report to %s', error_log_file);
+    return;
+end
+cleanup_obj = onCleanup(@() fclose(fid));
+fprintf(fid, '%s\n', char(string(error_report)));
 end
 
 function path_component = sanitize_path_component_rec(path_component)
