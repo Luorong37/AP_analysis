@@ -16,25 +16,30 @@ clc;
 %% 1. Input / Output Paths
 % Point to one rebuilt Rec*/Cycle* folder, or to one folder from a raw
 % two-folder pair if using the raw dual compatibility block below.
-cycle_path = 'I:\1_Data\3b. Dual-color imaging in SCN\2024.09.05_P2A-G8s\20240905-153142POA';
+cycle_path = 'V:\Luorong\Invivo\26.01.29_invivo dual color\Methods2\Rec1_2026-01-29 19-39-03\Cycle1';
 
 % Optional name for this run. Leave empty to let Dual_analysis3 build a
 % name from record, cycle, and timestamp.
 analysis_run_name = '';
 
-% Optional output folder. Leave empty for the default:
-% <cycle or raw-pair base>\Dual_analysis3\<analysis_run_name>
+% Optional output folder.
+%   - Leave empty in analysis_only mode to write back into reuse_results_path.
+%   - Set this to a new folder to reuse old traces while saving all rerun
+%     figures/results into the new folder instead of overwriting the source.
+%   - In full mode, leave empty for:
+%     <cycle or raw-pair base>\Dual_analysis3\<analysis_run_name>
 save_path = '';
 
 %% 2. Analysis Mode
 % 'full'          -> load movies, run ROI / processing / summaries
 % 'analysis_only' -> reuse an existing Dual_analysis3 output folder and
 %                    rerun ROI-after analysis sections from saved results
-analysis_mode = 'full';
+analysis_mode = 'analysis_only';
 
-% Existing Dual_analysis3 output folder for analysis_only reruns, and also
-% the preferred source for ROI reuse when provided.
-reuse_results_path = '';
+% Existing Dual_analysis3 output folder for analysis_only reruns. This must
+% be a Dual_analysis3 result folder containing dual_info.mat,
+% voltage_results.mat, calcium_results.mat, and dual_results.mat.
+reuse_results_path = 'V:\Luorong\Invivo\26.01.29_invivo dual color\Methods2\Rec1_2026-01-29 19-39-03\Cycle1\Cam2_Red5%simo_Analysis\2026-01-31 22-00-48';
 
 % Backend:
 % 'default'                  -> standard dual analysis
@@ -49,10 +54,10 @@ analysis_backend = 'default';
 %   Cam1 -> calcium, transposed
 %   Cam2 -> voltage, not transposed
 voltage_frame_rate = 400;
-calcium_frame_rate = 10;
+calcium_frame_rate = 400;
 
 voltage_transpose_movie = false;
-calcium_transpose_movie = false;
+calcium_transpose_movie = true;
 
 camera_cfg(1) = struct( ...
     'camera_index', 1, ...
@@ -95,7 +100,7 @@ camera_source_override = [];
 %% 6. Motion Correction
 % Motion is estimated on voltage and applied to calcium to keep channels
 % spatially locked.
-run_motion_correction = false;
+run_motion_correction = true;
 
 motion_cfg = struct( ...
     'enabled', run_motion_correction, ...
@@ -113,12 +118,12 @@ reuse_roi_file = '';
 % 'none'            -> use reuse_offset or [0 0]
 % 'manual_points'   -> manually click one matching voltage/calcium point
 % 'matlab_register' -> estimate translation with MATLAB registration
-correct_offset_mode = 'manual_points';
+correct_offset_mode = 'none';
 
 % Offset convention:
 %   voltage_position = calcium_position + offset
 % Leave [] unless manually forcing a known [x y] offset.
-reuse_offset = offset;
+reuse_offset = [];
 
 %% 8. Trace Processing
 map_bin = 4;
@@ -132,7 +137,7 @@ bleach_mode_voltage = 'linear';
 bleach_mode_calcium = 'exp2';
 
 % Background removal can be slow and interactive depending on ROI state.
-run_background_removal = false;
+run_background_removal = true;
 
 % Display / analysis polarity.
 voltage_polarity = -1;

@@ -5,9 +5,16 @@
 % 2. Create or reuse one ROI file from that reference cycle.
 % 3. Reuse the same ROI file for every other Cycle* under the same record.
 %
+% Analysis-only fork workflow:
+%   Set analysis_mode = 'analysis_only' before running this script. The
+%   script will find each Cycle*/Dual_analysis3 source result, reuse its
+%   saved traces/ROI/info, and write the new analysis outputs under
+%   Cycle*/Dual_analysis3_analysis_only/<run_name>. The source folder is
+%   read as input and is not used as save_path.
+%
 % This script keeps Dual_analysis3 as a normal runnable script.
 % It passes parameters in from an outer scope by calling run(...).
-clear var
+clear all
 clc;
 
 %% Input Setup
@@ -22,9 +29,25 @@ end
 if ~exist('analysis_backend', 'var') || isempty(analysis_backend)
     analysis_backend = 'default';   % 'default' | 'volpy_voltage_reanalysis'
 end
-result_root_dir = resolve_result_root_dir_rec(analysis_backend);
+if ~exist('analysis_mode', 'var') || isempty(analysis_mode)
+    analysis_mode = 'full';         % 'full' | 'analysis_only'
+end
+analysis_only_rec_mode = strcmpi(string(analysis_mode), "analysis_only");
+source_result_root_dir = resolve_result_root_dir_rec(analysis_backend);
+result_root_dir = source_result_root_dir;
 average_output_dir_name = resolve_average_output_dir_name_rec(analysis_backend);
 batch_summary_file_name = resolve_batch_summary_filename_rec(analysis_backend);
+if analysis_only_rec_mode
+    result_root_dir = resolve_analysis_only_output_root_dir_rec();
+    average_output_dir_name = 'Dual_analysis3_rec_average_analysis_only';
+    batch_summary_file_name = 'Dual_analysis3_rec_batch_summary_analysis_only.mat';
+end
+if ~exist('analysis_only_output_root_dir', 'var') || isempty(analysis_only_output_root_dir)
+    analysis_only_output_root_dir = resolve_analysis_only_output_root_dir_rec();
+end
+if ~exist('analysis_only_run_tag', 'var') || isempty(analysis_only_run_tag)
+    analysis_only_run_tag = string(datetime('now', 'Format', 'yyyy-MM-dd HH-mm-ss'));
+end
 
 % Choose one cycle as the ROI reference.
 if ~exist('reference_cycle_name', 'var') || isempty(reference_cycle_name)
@@ -34,7 +57,7 @@ end
 % If you already have a good ROI file, fill it here and the script will
 % skip the reference ROI selection step.
 if ~exist('reference_roi_file', 'var') || isempty(reference_roi_file)
-    reference_roi_file = '';
+    reference_roi_file = 'V:\Luorong\Invivo\26.01.29_invivo dual color\Methods2\Rec1_2026-01-29 19-39-03\Cycle1\Cam2_Red5%simo_Analysis\2026-01-31 22-00-48\1_raw_ROI.mat';
 end
 
 % Reuse the latest ROI result already present in the reference cycle when
@@ -45,7 +68,7 @@ end
 
 % When true, rerun the reference cycle first to create a fresh ROI file.
 if ~exist('rerun_reference_cycle_for_roi', 'var') || isempty(rerun_reference_cycle_for_roi)
-    rerun_reference_cycle_for_roi = false;
+    rerun_reference_cycle_for_roi = true;
 end
 
 % Whether the reference cycle should enter manual inter-camera ROI offset
@@ -80,7 +103,7 @@ end
 % Leave this on for normal Rec-level reruns so the script can jump straight
 % to the final record-average summary without recomputing every cycle.
 if ~exist('skip_cycles_with_existing_results', 'var') || isempty(skip_cycles_with_existing_results)
-    skip_cycles_with_existing_results = true;
+    skip_cycles_with_existing_results = false;
 end
 
 % When true, do not revisit the per-cycle workflow. Instead, reopen the
@@ -289,128 +312,219 @@ else
         if strlength(existing_run_i) > 0
             fprintf('%s | existing processed run detected:\n  %s\n', cycle_dirs(i).name, existing_run_i);
         else
-            fprintf('%s | no processed %s run detected.\n', cycle_dirs(i).name, result_root_dir);
+            fprintf('%s | no processed %s run detected.\n', cycle_dirs(i).name, source_result_root_dir);
         end
     end
 
-    reference_cycle_path = fullfile(rec_path, reference_cycle_name);
-    if ~isfolder(reference_cycle_path)
-        error('Reference cycle folder does not exist: %s', reference_cycle_path);
-    end
+    if analysis_only_rec_mode
+        %% Run Analysis-Only Forks From Existing Cycle Results
+        fprintf('\n============================================================\n');
+        fprintf('[Batch] Run Analysis-Only Forks\n');
+        fprintf('============================================================\n');
+        fprintf('Source root: %s\n', resolve_result_root_dir_rec(analysis_backend));
+        fprintf('Output root: %s\n', analysis_only_output_root_dir);
+        fprintf('Run tag: %s\n', analysis_only_run_tag);
 
-    %% Resolve Or Create Reference ROI
-    fprintf('\n============================================================\n');
-    fprintf('[Batch] Resolve Reference ROI\n');
-    fprintf('============================================================\n');
-    fprintf('Record path: %s\n', rec_path);
-    fprintf('Reference cycle: %s\n', reference_cycle_name);
-    reference_existing_run = find_latest_explicit_result(reference_cycle_path, analysis_backend);
-    if strlength(reference_existing_run) > 0
-        fprintf('Reference cycle already has processed data:\n  %s\n', reference_existing_run);
-    end
+        batch_results = repmat(struct( ...
+            'cycle_name', "", ...
+            'cycle_path', "", ...
+            'status', "", ...
+            'save_path', "", ...
+            'roi_file', "", ...
+            'message', ""), 0, 1);
 
-    if strlength(string(reference_roi_file)) == 0
-        reference_roi_file = "";
-    else
-        reference_roi_file = string(reference_roi_file);
-    end
+        for i = 1:numel(cycle_dirs)
+            current_cycle_name = string(cycle_dirs(i).name);
+            current_cycle_path = fullfile(cycle_dirs(i).folder, cycle_dirs(i).name);
+            source_result = find_latest_explicit_result(current_cycle_path, analysis_backend);
 
-    if strlength(reference_roi_file) == 0 && reuse_existing_reference_roi && ~rerun_reference_cycle_for_roi
-        reference_roi_file = string(find_latest_dual_roi_file(reference_cycle_path));
-        if strlength(reference_roi_file) > 0
-            fprintf('Reusing latest ROI file already present in reference cycle:\n  %s\n', reference_roi_file);
-        end
-    end
-
-    if strlength(reference_roi_file) == 0 || rerun_reference_cycle_for_roi
-        fprintf('Running reference cycle to create/recreate ROI...\n');
-        reference_result = run_dual_cycle_with_overrides( ...
-            dual_script_path, reference_cycle_path, "", reference_correct_offset_mode, ...
-            camera_cfg, map_bin, calcium_smoothing_window, ...
-            bleach_mode_voltage, bleach_mode_calcium, run_background_removal, ...
-            voltage_polarity, calcium_polarity, ...
-            reuse_offset, gpu, motion_cfg, analysis_backend);
-        reference_roi_file = string(reference_result.roi_file);
-        fprintf('Reference ROI file created:\n  %s\n', reference_roi_file);
-    end
-
-    if strlength(reference_roi_file) == 0 || ~isfile(reference_roi_file)
-        error('Reference ROI file could not be resolved.');
-    end
-
-    %% Run All Cycles
-    fprintf('\n============================================================\n');
-    fprintf('[Batch] Run Record Cycles\n');
-    fprintf('============================================================\n');
-
-    batch_results = repmat(struct( ...
-        'cycle_name', "", ...
-        'cycle_path', "", ...
-        'status', "", ...
-        'save_path', "", ...
-        'roi_file', "", ...
-        'message', ""), 0, 1);
-
-    for i = 1:numel(cycle_dirs)
-        current_cycle_name = string(cycle_dirs(i).name);
-        current_cycle_path = fullfile(cycle_dirs(i).folder, cycle_dirs(i).name);
-
-        if strcmpi(current_cycle_name, string(reference_cycle_name)) && ~run_reference_cycle_in_batch
-            batch_results(end+1, 1) = struct( ...
-                'cycle_name', current_cycle_name, ...
-                'cycle_path', string(current_cycle_path), ...
-                'status', "skipped_reference_already_used_for_roi", ...
-                'save_path', "", ...
-                'roi_file', reference_roi_file, ...
-                'message', "Reference cycle already used to create/reuse ROI.");
-            fprintf('Skipping %s in batch loop because it already served as the ROI reference.\n', current_cycle_name);
-            continue;
-        end
-
-        if skip_cycles_with_existing_results
-            existing_result = find_latest_explicit_result(current_cycle_path, analysis_backend);
-            if strlength(existing_result) > 0
+            if strlength(source_result) == 0
                 batch_results(end+1, 1) = struct( ...
                     'cycle_name', current_cycle_name, ...
                     'cycle_path', string(current_cycle_path), ...
-                    'status', "skipped_existing_result", ...
-                    'save_path', fileparts(existing_result), ...
-                    'roi_file', reference_roi_file, ...
-                    'message', existing_result);
-                fprintf('Skipping %s because the final output already exists:\n  %s\n', current_cycle_name, existing_result);
+                    'status', "missing_source_result", ...
+                    'save_path', "", ...
+                    'roi_file', "", ...
+                    'message', "No existing Dual_analysis3 source result was found for analysis_only reuse.");
+                fprintf('%s | missing source result; skipped.\n', current_cycle_name);
                 continue;
+            end
+
+            if skip_cycles_with_existing_results
+                existing_fork = find_latest_analysis_only_fork_result(current_cycle_path, analysis_only_output_root_dir);
+                if strlength(existing_fork) > 0
+                    existing_fork_dir = string(fileparts(existing_fork));
+                    batch_results(end+1, 1) = struct( ...
+                        'cycle_name', current_cycle_name, ...
+                        'cycle_path', string(current_cycle_path), ...
+                        'status', "skipped_existing_analysis_only_result", ...
+                        'save_path', existing_fork_dir, ...
+                        'roi_file', string(fullfile(existing_fork_dir, '1_dual_roi_results.mat')), ...
+                        'message', existing_fork);
+                    fprintf('Skipping %s because an analysis-only fork already exists:\n  %s\n', current_cycle_name, existing_fork);
+                    continue;
+                end
+            end
+
+            fprintf('\n[Batch] Analysis-only fork for %s ...\n', current_cycle_name);
+            fprintf('  source: %s\n', fileparts(source_result));
+            try
+                run_result = run_dual_cycle_analysis_only_fork( ...
+                    dual_script_path, current_cycle_path, fileparts(source_result), ...
+                    analysis_only_output_root_dir, analysis_only_run_tag, ...
+                    camera_cfg, map_bin, calcium_smoothing_window, ...
+                    bleach_mode_voltage, bleach_mode_calcium, run_background_removal, ...
+                    voltage_polarity, calcium_polarity, ...
+                    reuse_offset, gpu, motion_cfg);
+
+                batch_results(end+1, 1) = struct( ...
+                    'cycle_name', current_cycle_name, ...
+                    'cycle_path', string(current_cycle_path), ...
+                    'status', "completed", ...
+                    'save_path', string(run_result.save_path), ...
+                    'roi_file', string(run_result.roi_file), ...
+                    'message', string(run_result.source_save_path));
+            catch ME
+                batch_results(end+1, 1) = struct( ...
+                    'cycle_name', current_cycle_name, ...
+                    'cycle_path', string(current_cycle_path), ...
+                    'status', "failed", ...
+                    'save_path', "", ...
+                    'roi_file', "", ...
+                    'message', string(ME.message));
+                fprintf(2, '[Batch] %s analysis-only fork failed: %s\n', current_cycle_name, ME.message);
             end
         end
 
-        fprintf('\n[Batch] Running %s ...\n', current_cycle_name);
-        try
-            run_result = run_dual_cycle_with_overrides( ...
-                dual_script_path, current_cycle_path, reference_roi_file, correct_offset_mode, ...
+        if strlength(string(reference_roi_file)) == 0
+            completed_idx = find(strcmpi(string({batch_results.status}), "completed") ...
+                & strlength(string({batch_results.roi_file})) > 0, 1, 'first');
+            if ~isempty(completed_idx)
+                reference_roi_file = string(batch_results(completed_idx).roi_file);
+            else
+                reference_roi_file = "";
+            end
+        end
+    else
+        reference_cycle_path = fullfile(rec_path, reference_cycle_name);
+        if ~isfolder(reference_cycle_path)
+            error('Reference cycle folder does not exist: %s', reference_cycle_path);
+        end
+
+        %% Resolve Or Create Reference ROI
+        fprintf('\n============================================================\n');
+        fprintf('[Batch] Resolve Reference ROI\n');
+        fprintf('============================================================\n');
+        fprintf('Record path: %s\n', rec_path);
+        fprintf('Reference cycle: %s\n', reference_cycle_name);
+        reference_existing_run = find_latest_explicit_result(reference_cycle_path, analysis_backend);
+        if strlength(reference_existing_run) > 0
+            fprintf('Reference cycle already has processed data:\n  %s\n', reference_existing_run);
+        end
+
+        if strlength(string(reference_roi_file)) == 0
+            reference_roi_file = "";
+        else
+            reference_roi_file = string(reference_roi_file);
+        end
+
+        if strlength(reference_roi_file) == 0 && reuse_existing_reference_roi && ~rerun_reference_cycle_for_roi
+            reference_roi_file = string(find_latest_dual_roi_file(reference_cycle_path));
+            if strlength(reference_roi_file) > 0
+                fprintf('Reusing latest ROI file already present in reference cycle:\n  %s\n', reference_roi_file);
+            end
+        end
+
+        if strlength(reference_roi_file) == 0 || rerun_reference_cycle_for_roi
+            fprintf('Running reference cycle to create/recreate ROI...\n');
+            reference_result = run_dual_cycle_with_overrides( ...
+                dual_script_path, reference_cycle_path, "", reference_correct_offset_mode, ...
                 camera_cfg, map_bin, calcium_smoothing_window, ...
                 bleach_mode_voltage, bleach_mode_calcium, run_background_removal, ...
                 voltage_polarity, calcium_polarity, ...
                 reuse_offset, gpu, motion_cfg, analysis_backend);
+            reference_roi_file = string(reference_result.roi_file);
+            fprintf('Reference ROI file created:\n  %s\n', reference_roi_file);
+        end
 
-            batch_results(end+1, 1) = struct( ...
-                'cycle_name', current_cycle_name, ...
-                'cycle_path', string(current_cycle_path), ...
-                'status', "completed", ...
-                'save_path', string(run_result.save_path), ...
-                'roi_file', string(run_result.roi_file), ...
-                'message', "");
-        catch ME
-            batch_results(end+1, 1) = struct( ...
-                'cycle_name', current_cycle_name, ...
-                'cycle_path', string(current_cycle_path), ...
-                'status', "failed", ...
-                'save_path', "", ...
-                'roi_file', reference_roi_file, ...
-                'message', string(ME.message));
-            fprintf(2, '[Batch] %s failed: %s\n', current_cycle_name, ME.message);
+        if strlength(reference_roi_file) == 0 || ~isfile(reference_roi_file)
+            error('Reference ROI file could not be resolved.');
+        end
+
+        %% Run All Cycles
+        fprintf('\n============================================================\n');
+        fprintf('[Batch] Run Record Cycles\n');
+        fprintf('============================================================\n');
+
+        batch_results = repmat(struct( ...
+            'cycle_name', "", ...
+            'cycle_path', "", ...
+            'status', "", ...
+            'save_path', "", ...
+            'roi_file', "", ...
+            'message', ""), 0, 1);
+
+        for i = 1:numel(cycle_dirs)
+            current_cycle_name = string(cycle_dirs(i).name);
+            current_cycle_path = fullfile(cycle_dirs(i).folder, cycle_dirs(i).name);
+
+            if strcmpi(current_cycle_name, string(reference_cycle_name)) && ~run_reference_cycle_in_batch
+                batch_results(end+1, 1) = struct( ...
+                    'cycle_name', current_cycle_name, ...
+                    'cycle_path', string(current_cycle_path), ...
+                    'status', "skipped_reference_already_used_for_roi", ...
+                    'save_path', "", ...
+                    'roi_file', reference_roi_file, ...
+                    'message', "Reference cycle already used to create/reuse ROI.");
+                fprintf('Skipping %s in batch loop because it already served as the ROI reference.\n', current_cycle_name);
+                continue;
+            end
+
+            if skip_cycles_with_existing_results
+                existing_result = find_latest_explicit_result(current_cycle_path, analysis_backend);
+                if strlength(existing_result) > 0
+                    batch_results(end+1, 1) = struct( ...
+                        'cycle_name', current_cycle_name, ...
+                        'cycle_path', string(current_cycle_path), ...
+                        'status', "skipped_existing_result", ...
+                        'save_path', fileparts(existing_result), ...
+                        'roi_file', reference_roi_file, ...
+                        'message', existing_result);
+                    fprintf('Skipping %s because the final output already exists:\n  %s\n', current_cycle_name, existing_result);
+                    continue;
+                end
+            end
+
+            fprintf('\n[Batch] Running %s ...\n', current_cycle_name);
+            try
+                run_result = run_dual_cycle_with_overrides( ...
+                    dual_script_path, current_cycle_path, reference_roi_file, correct_offset_mode, ...
+                    camera_cfg, map_bin, calcium_smoothing_window, ...
+                    bleach_mode_voltage, bleach_mode_calcium, run_background_removal, ...
+                    voltage_polarity, calcium_polarity, ...
+                    reuse_offset, gpu, motion_cfg, analysis_backend);
+
+                batch_results(end+1, 1) = struct( ...
+                    'cycle_name', current_cycle_name, ...
+                    'cycle_path', string(current_cycle_path), ...
+                    'status', "completed", ...
+                    'save_path', string(run_result.save_path), ...
+                    'roi_file', string(run_result.roi_file), ...
+                    'message', "");
+            catch ME
+                batch_results(end+1, 1) = struct( ...
+                    'cycle_name', current_cycle_name, ...
+                    'cycle_path', string(current_cycle_path), ...
+                    'status', "failed", ...
+                    'save_path', "", ...
+                    'roi_file', reference_roi_file, ...
+                    'message', string(ME.message));
+                fprintf(2, '[Batch] %s failed: %s\n', current_cycle_name, ME.message);
+            end
         end
     end
 
-    save(batch_summary_file, 'batch_results', 'reference_roi_file');
+    save(batch_summary_file, 'batch_results', 'reference_roi_file', 'analysis_mode', 'analysis_only_output_root_dir', 'analysis_only_run_tag');
     fprintf('\nBatch summary saved to:\n  %s\n', batch_summary_file);
 end
 
@@ -456,6 +570,35 @@ run(dual_script_path);
 result = struct( ...
     'save_path', save_path, ...
     'roi_file', fullfile(save_path, '1_dual_roi_results.mat'));
+end
+
+function result = run_dual_cycle_analysis_only_fork( ...
+    dual_script_path, cycle_path, source_results_path, output_root_dir, run_tag, ...
+    camera_cfg, map_bin, calcium_smoothing_window, ...
+    bleach_mode_voltage, bleach_mode_calcium, run_background_removal, ...
+    voltage_polarity, calcium_polarity, ...
+    reuse_offset, gpu, motion_cfg)
+
+% Reuse saved ROI/trace/stim context from an existing Dual_analysis3 folder,
+% but write the rerun products to a new folder under output_root_dir.
+[record_path_for_name, cycle_name_for_name] = fileparts(cycle_path);
+[~, record_name_for_name] = fileparts(record_path_for_name);
+analysis_mode = 'analysis_only';
+analysis_backend = 'default';
+analysis_run_name = sprintf('%s_%s_analysis_only_%s', ...
+    record_name_for_name, cycle_name_for_name, char(string(run_tag)));
+analysis_run_name = sanitize_path_component_rec(analysis_run_name);
+reuse_results_path = char(string(source_results_path));
+save_path = fullfile(cycle_path, char(string(output_root_dir)), analysis_run_name);
+reuse_roi_file = '';
+correct_offset_mode = 'none';
+
+run(dual_script_path);
+
+result = struct( ...
+    'save_path', save_path, ...
+    'roi_file', fullfile(save_path, '1_dual_roi_results.mat'), ...
+    'source_save_path', string(source_results_path));
 end
 
 function correct_offset_mode = normalize_correct_offset_mode_rec(correct_offset_mode)
@@ -507,6 +650,10 @@ else
 end
 end
 
+function result_root_dir = resolve_analysis_only_output_root_dir_rec()
+result_root_dir = 'Dual_analysis3_analysis_only';
+end
+
 function average_output_dir_name = resolve_average_output_dir_name_rec(analysis_backend)
 if strcmpi(string(analysis_backend), "volpy_voltage_reanalysis")
     average_output_dir_name = 'Dual_analysis3_rec_average_volpy_voltage';
@@ -545,6 +692,23 @@ if isempty(listing)
 end
 [~, newest_idx] = max([listing.datenum]);
 explicit_result = string(fullfile(listing(newest_idx).folder, listing(newest_idx).name));
+end
+
+function explicit_result = find_latest_analysis_only_fork_result(cycle_path, output_root_dir)
+explicit_result = "";
+listing = dir(fullfile(cycle_path, char(string(output_root_dir)), '**', '-1_explicit_dual_results.mat'));
+if isempty(listing)
+    return;
+end
+[~, newest_idx] = max([listing.datenum]);
+explicit_result = string(fullfile(listing(newest_idx).folder, listing(newest_idx).name));
+end
+
+function path_component = sanitize_path_component_rec(path_component)
+path_component = char(string(path_component));
+path_component = regexprep(path_component, '[:*?"<>|]', '-');
+path_component = strrep(path_component, filesep, '-');
+path_component = strrep(path_component, '/', '-');
 end
 
 function output = build_record_average_summary(rec_path, batch_results, reference_roi_file, voltage_polarity, calcium_polarity, calcium_smoothing_window, average_output_dir_name)
