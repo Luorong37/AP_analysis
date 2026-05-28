@@ -1174,170 +1174,9 @@ trace_filename = fullfile(save_path, '4_SNR.mat');
 
 saveas(gcf, fig_filename, 'fig');
 saveas(gcf, png_filename, 'png');
-%% Peak Detection
-% Run automatic peak finding and persist the initial peak set in peak_results.detected.
-
-parts = 1;
-MinPeakProminence_factor = 0;
-MinPeakDistance_factor = 0;
-MinPeakHeight =40;
-
-findmode = 'cr';% find via bleach corrected traces
-%findmode = 'dn';% find via denoised traces
-
-% Peak finding
-switch findmode
-    case 'cr'
-        [peaks_index, peaks_amplitude, peaks_polarity, parts_results] = peak_finding_auto(traces_bleaching_removed , save_path,'parts',parts, ...
-            'MinPeakProminence_factor',MinPeakProminence_factor,'MinPeakHeight', MinPeakHeight, 'MinPeakDistance_factor' , MinPeakDistance_factor);
-        peak_trace_result = 'bleach_removed';
-    case 'dn'
-        [peaks_index, peaks_amplitude, peaks_polarity, parts_results] = peak_finding_auto(traces_denoised , save_path,'parts',parts, ...
-            'MinPeakProminence_factor',MinPeakProminence_factor,'RawTraces',traces_bleaching_removed,'MinPeakHeight', 0, 'MinPeakDistance_factor' , MinPeakDistance_factor);
-        peak_trace_result = 'denoised';
-end
-
-peak_results.detected.data = struct( ...
-    'index', {peaks_index}, ...
-    'amplitude', {peaks_amplitude}, ...
-    'polarity', {peaks_polarity}, ...
-    'parts', parts_results);
-peak_results.detected.info = struct( ...
-    'result_name', 'detected', ...
-    'parent_results', {{}}, ...
-    'trace_result', peak_trace_result, ...
-    'method', 'peak_finding_auto', ...
-    'parameters', struct( ...
-        'findmode', findmode, ...
-        'parts', parts, ...
-        'min_peak_prominence_factor', MinPeakProminence_factor, ...
-        'min_peak_distance_factor', MinPeakDistance_factor, ...
-        'min_peak_height', MinPeakHeight), ...
-    'created_at', datetime("now"));
-peak_results.current_result = 'detected';
-peak_detect_record = build_section_record( ...
-    'Peak Detection', ...
-    'Run automatic peak finding on the selected trace stage and save peak indices, amplitudes, polarities, and segment-wise intermediate results.', ...
-    struct( ...
-        'trace_stage', string(peak_trace_result), ...
-        'input_trace', ternary(strcmp(peak_trace_result, 'denoised'), traces_denoised, traces_bleaching_removed)), ...
-    struct( ...
-        'findmode', findmode, ...
-        'parts', parts, ...
-        'min_peak_prominence_factor', MinPeakProminence_factor, ...
-        'min_peak_distance_factor', MinPeakDistance_factor, ...
-        'min_peak_height', MinPeakHeight), ...
-    struct( ...
-        'peaks_index', {peaks_index}, ...
-        'peaks_amplitude', {peaks_amplitude}, ...
-        'peaks_polarity', {peaks_polarity}, ...
-        'parts_results', parts_results), ...
-    struct(), ...
-    'To rerun this section, load the saved input trace stage and call peak_finding_auto with the saved parameters.');
-save(fullfile(save_path, '4_peak_detect_results.mat'), 'peaks_index', 'peaks_amplitude', 'peaks_polarity', 'parts_results', 'peak_detect_record');
-save(peak_results_path, 'peak_results', '-v7.3');
-%% Manual Peak Refinement
-% Optionally re-pick peaks per ROI and save the refined set in peak_results.manually_refined.
-MinPeakProminence_factor = 0.25;
-pr = 1;
-rr = nrois;
-allr = true; % manually select all trace
-if run_manual_peak_refinement
-    if allr
-        r0 = 1;
-        p0 = 1;
-    else
-        r0 = rr;
-        p0 = pr;
-    end
-    for pr = p0:pr
-        for rr = r0:rr
-            switch findmode
-                case 'cr'
-                    current_traces = traces_bleaching_removed(parts_results.index{pr},rr);
-                case 'dn'
-                    current_traces = traces_denoised(parts_results.index{pr},rr);
-            end
-
-            [peaks_polarity_re, ~, peaks_index_re, peaks_amplitude_re, ~] = ...
-                peak_finding(current_traces,MinPeakProminence_factor,save_path);
-            % saveas(gcf,fullfile(save_path,sprintf('repeakfinding of roi %d, p = %d.png',roi_re,part_re)));
-            % saveas(gcf,fullfile(save_path,sprintf('repeakfinding of roi %d, p = %d.fig',roi_re,part_re)));
-
-            parts_results.peaks_amplitude(pr,rr) = peaks_amplitude_re;
-            parts_results.peaks_index(pr,rr) = {peaks_index_re{1} + parts_results.index{pr}(1)-1};
-            parts_results.peaks_polarity(pr,rr) = peaks_polarity_re;
-
-            peaks_index= cell(1,nrois);
-            for i = 1:parts
-                for j = 1:nrois
-                    peaks_index{j} = [peaks_index{j} ;parts_results.peaks_index{i,j}];
-                end
-            end
-
-            peaks_amplitude = cell(1,nrois);
-            for i = 1:parts
-                for j = 1:nrois
-                    peaks_amplitude{j} = [peaks_amplitude{j} ;parts_results.peaks_amplitude{i,j}];
-                end
-            end
-            %
-            % peaks_sensitivity= cell(1,nrois);
-            % for i = 1:parts
-            %     for j = 1:nrois
-            %         peaks_sensitivity{j} = [peaks_sensitivity{j} ;peaks_amplitude_part{i,j}];
-            %     end
-            % end
-
-            peaks_polarity = cell(1,nrois);
-            for i = 1:nrois
-                polarity_index = find(abs(parts_results.peaks_polarity(:,i)) == max(abs(parts_results.peaks_polarity(:,i))));
-                peaks_polarity{i} =parts_results.peaks_polarity(polarity_index(1),i);
-            end
-        end
-    end
-    manual_refine_method = 'manual_peak_refinement';
-    manual_refine_parents = {'detected'};
-else
-    manual_refine_method = 'manual_peak_refinement_skipped';
-    manual_refine_parents = {'detected'};
-end
-
-peak_results.manually_refined.data = struct( ...
-    'index', {peaks_index}, ...
-    'amplitude', {peaks_amplitude}, ...
-    'polarity', {peaks_polarity}, ...
-    'parts', parts_results);
-peak_results.manually_refined.info = struct( ...
-    'result_name', 'manually_refined', ...
-    'parent_results', manual_refine_parents, ...
-    'trace_result', peak_trace_result, ...
-    'method', manual_refine_method, ...
-    'parameters', struct( ...
-        'min_peak_prominence_factor', MinPeakProminence_factor, ...
-        'allr', allr, ...
-        'enabled', logical(run_manual_peak_refinement)), ...
-    'created_at', datetime("now"));
-peak_results.current_result = 'manually_refined';
-peak_refine_record = build_section_record( ...
-    'Manual Peak Refinement', ...
-    'Optionally repick peaks ROI by ROI and merge the refined per-part results back into one peak set.', ...
-    struct( ...
-        'parent_peak_stage', "detected", ...
-        'trace_stage', string(peak_trace_result), ...
-        'parts_results_input', parts_results), ...
-    struct( ...
-        'min_peak_prominence_factor', MinPeakProminence_factor, ...
-        'allr', allr), ...
-    struct( ...
-        'peaks_index', {peaks_index}, ...
-        'peaks_amplitude', {peaks_amplitude}, ...
-        'peaks_polarity', {peaks_polarity}, ...
-        'parts_results', parts_results), ...
-    struct(), ...
-    'To rerun this section, load the saved part-wise peak results and repeat the interactive/manual peak_finding refinement.');
-save(fullfile(save_path, '4_peak_refine_results.mat'), 'peaks_index', 'peaks_amplitude', 'peaks_polarity', 'parts_results', 'peak_refine_record');
-save(peak_results_path, 'peak_results', '-v7.3');
+%% Backend-Specific Peak Detection
+% The unified sensitivity peak workflow below runs after both backends have
+% produced trace_results.sensitivity.
 
 else
 fprintf('Initializing VolPy backend...\n');
@@ -1452,7 +1291,6 @@ ap_qc_trace = volpy_data.qc_event_trace;
 ap_qc_sensitivity = volpy_data.qc_event_sensitivity;
 ap_qc_SNR = volpy_data.qc_snr_trace;
 ap_qc_baseline_subtract = true;
-enable_peak_redirection = false;
 peak_trace_result = 'volpy_event_trace';
 
 peaks_index = volpy_data.spikes;
@@ -1483,6 +1321,136 @@ save_volpy_backend_compat_outputs( ...
     traces_sensitivity, traces_SNR, t, peaks_index);
 end
 
+%% Sensitivity Peak Detection And Manual Editing
+% Adjustable detection/edit parameters. All thresholds are interpreted in
+% trace_results.sensitivity units.
+if analysis_backend ~= "volpy"
+if ~exist('peak_polarity_mode', 'var') || isempty(peak_polarity_mode)
+    peak_polarity_mode = "auto"; % "auto", "positive", or "negative"
+else
+    peak_polarity_mode = string(peak_polarity_mode);
+end
+if ~exist('peak_min_prominence', 'var') || isempty(peak_min_prominence)
+    peak_min_prominence = 0.005;
+end
+if ~exist('peak_min_distance_frames', 'var') || isempty(peak_min_distance_frames)
+    peak_min_distance_frames = max(1, round(0.003 * freq));
+end
+if ~exist('peak_min_height', 'var') || isempty(peak_min_height)
+    peak_min_height = 0;
+end
+if ~exist('run_manual_peak_edit', 'var') || isempty(run_manual_peak_edit)
+    run_manual_peak_edit = run_manual_peak_refinement;
+end
+if ~exist('manual_add_snap_radius_frames', 'var') || isempty(manual_add_snap_radius_frames)
+    manual_add_snap_radius_frames = 3;
+end
+if ~exist('manual_delete_radius_frames', 'var') || isempty(manual_delete_radius_frames)
+    manual_delete_radius_frames = manual_add_snap_radius_frames;
+end
+
+peak_trace_result = 'sensitivity';
+peak_detect_params = struct( ...
+    'polarity_mode', peak_polarity_mode, ...
+    'min_peak_prominence', peak_min_prominence, ...
+    'min_peak_distance_frames', peak_min_distance_frames, ...
+    'min_peak_height', peak_min_height);
+[peak_table_detected, peaks_index, peaks_amplitude, peaks_polarity] = ...
+    detect_sensitivity_peaks(traces_sensitivity, freq, peak_detect_params);
+
+peak_results.sensitivity_detected.data = struct( ...
+    'peak_table', peak_table_detected, ...
+    'index', {peaks_index}, ...
+    'amplitude', {peaks_amplitude}, ...
+    'polarity', {peaks_polarity});
+peak_results.sensitivity_detected.info = struct( ...
+    'result_name', 'sensitivity_detected', ...
+    'parent_results', {{}}, ...
+    'trace_result', peak_trace_result, ...
+    'method', 'detect_sensitivity_peaks', ...
+    'parameters', peak_detect_params, ...
+    'created_at', datetime("now"));
+peak_results.current_result = 'sensitivity_detected';
+peak_detect_record = build_section_record( ...
+    'Sensitivity Peak Detection', ...
+    'Run automatic peak finding directly on trace_results.sensitivity and save an event-level peak table.', ...
+    struct( ...
+        'trace_stage', "sensitivity", ...
+        'input_trace', traces_sensitivity), ...
+    peak_detect_params, ...
+    struct( ...
+        'peak_table', peak_table_detected, ...
+        'peaks_index', {peaks_index}, ...
+        'peaks_amplitude', {peaks_amplitude}, ...
+        'peaks_polarity', {peaks_polarity}), ...
+    struct(), ...
+    'To rerun this section, load trace_results.sensitivity and call detect_sensitivity_peaks with the saved parameters.');
+save(fullfile(save_path, '4_sensitivity_peak_detect_results.mat'), ...
+    'peak_table_detected', 'peaks_index', 'peaks_amplitude', 'peaks_polarity', ...
+    'peak_detect_params', 'peak_detect_record');
+save(peak_results_path, 'peak_results', '-v7.3');
+
+edit_history = struct('action', {}, 'roi', {}, 'peak_id', {}, 'index_before', {}, ...
+    'index_after', {}, 'mode', {}, 'created_at', {});
+manual_edit_params = struct( ...
+    'enabled', logical(run_manual_peak_edit), ...
+    'add_snap_radius_frames', manual_add_snap_radius_frames, ...
+    'delete_radius_frames', manual_delete_radius_frames, ...
+    'frame_rate_hz', freq, ...
+    'default_mode', "delete", ...
+    'keys', "A add, D delete, N/space next ROI, R reset ROI, Q finish");
+if run_manual_peak_edit
+    [peak_table_final, edit_history] = edit_sensitivity_peaks( ...
+        traces_sensitivity, peak_table_detected, peaks_polarity, manual_edit_params);
+    manual_edit_method = 'manual_add_delete_peak_edit';
+else
+    peak_table_final = peak_table_detected;
+    manual_edit_method = 'manual_add_delete_peak_edit_skipped';
+end
+[peaks_index, peaks_amplitude, peaks_polarity] = ...
+    peak_table_to_peak_cells(peak_table_final, nrois);
+
+peak_results.sensitivity_manually_edited.data = struct( ...
+    'peak_table', peak_table_final, ...
+    'edit_history', edit_history, ...
+    'index', {peaks_index}, ...
+    'amplitude', {peaks_amplitude}, ...
+    'polarity', {peaks_polarity});
+peak_results.sensitivity_manually_edited.info = struct( ...
+    'result_name', 'sensitivity_manually_edited', ...
+    'parent_results', {{'sensitivity_detected'}}, ...
+    'trace_result', peak_trace_result, ...
+    'method', manual_edit_method, ...
+    'parameters', manual_edit_params, ...
+    'created_at', datetime("now"));
+peak_results.current_result = 'sensitivity_manually_edited';
+peak_edit_record = build_section_record( ...
+    'Sensitivity Manual Peak Editing', ...
+    ternary(run_manual_peak_edit, ...
+        'Interactively add and delete peaks on sensitivity traces while preserving the automatic peak table and edit history.', ...
+        'Skip interactive editing and accept the automatically detected sensitivity peaks.'), ...
+    struct( ...
+        'parent_peak_stage', "sensitivity_detected", ...
+        'trace_stage', "sensitivity", ...
+        'peak_table_detected', peak_table_detected), ...
+    manual_edit_params, ...
+    struct( ...
+        'peak_table_final', peak_table_final, ...
+        'edit_history', edit_history, ...
+        'peaks_index', {peaks_index}, ...
+        'peaks_amplitude', {peaks_amplitude}, ...
+        'peaks_polarity', {peaks_polarity}), ...
+    struct(), ...
+    'To rerun this section, load the detected peak table and repeat manual add/delete editing on trace_results.sensitivity.');
+save(fullfile(save_path, '4_sensitivity_peak_edit_results.mat'), ...
+    'peak_table_final', 'edit_history', 'peaks_index', 'peaks_amplitude', ...
+    'peaks_polarity', 'manual_edit_params', 'peak_edit_record');
+save(peak_results_path, 'peak_results', '-v7.3');
+else
+    peak_trace_result = 'volpy_event_trace';
+    run_manual_peak_edit = false;
+end
+
 if isempty(ap_qc_trace)
     ap_qc_trace = traces_bleaching_removed;
 end
@@ -1494,10 +1462,14 @@ if isempty(ap_qc_SNR)
 end
 
 
-%% FWHM Filtering And AP Events
-% Filter detected peaks by AP-shape constraints and build event-level AP measurements.
-AP_window_width = 15; % number of frames to for AP window (defined = 40)
-offset_width = 3;
+%% AP Events From Accepted Peaks
+% Build event-level AP measurements. FWHM is measured, but does not gate or
+% redirect accepted peaks.
+if ~exist('AP_window_width', 'var') || isempty(AP_window_width)
+    AP_window_width = 15; % frames on each side of the peak
+end
+offset_width = 0;
+enable_peak_redirection = false;
 % AP_list = AP_statistic(nrois, peaks_index, peaks_amplitude, traces_corrected, traces_sensitivity, traces_SNR, AP_window_width, nframes, dt, peaks_polarity, save_path);
 
 % function [AP_list,peaks_index_corrected]  = AP_statistic(nrois, peaks_index, peaks_amplitude, traces_corrected, traces_sensitivity, traces_SNR, AP_window_width, nframes, dt, peaks_polarity, save_path)
@@ -1549,36 +1521,7 @@ for i = 1:nrois % i for trace
         Amplitude = abs(peak_amp_ij);
         Sensitivity = AP_sensitivity(AP_window_width+1)*100 ;
         SNR = abs(AP_SNR(AP_window_width+1));
-        f = false; % save each peak
-        offset = peak_offset(AP_amp(AP_window_width-offset_width + 1:AP_window_width + offset_width+ 1), peaks_polarity{i});
-        FWHM = calculate_FWHM(AP_amp, dt,  peaks_polarity{i},f);
-        % FWHM = calculate_FWHM2(AP_amp, dt, peaks_polarity{i});
-        if isempty(offset)
-            offset = 99;
-        end
-        if all(abs(offset) > 2) ||FWHM <= 2.5
-            FWHM = NaN;
-        end
-
-
-        if isnan(FWHM)
-            if save_failed_peak_debug
-                FWHM = calculate_FWHM(AP_amp, dt,  peaks_polarity{i},true);
-                title(sprintf('failed peak at noi %d, peaks %d',i,j))
-                if ~isfolder(fullfile(save_path,'failed peaks',sprintf('roi %d',i)))
-                    mkdir(fullfile(save_path,'failed peaks',sprintf('roi %d',i)));
-                end
-                saveas(gcf,fullfile(save_path,'failed peaks',sprintf('roi %d',i),sprintf('false peak at noi %d, peaks %d.png',i,j)))
-                close(gcf)
-            end
-        elseif f
-            title(sprintf('finded peak at noi %d, peaks %d',i,j))
-            if ~isfolder(fullfile(save_path,'finded peaks',sprintf('roi %d',i)))
-                mkdir(fullfile(save_path,'finded peaks',sprintf('roi %d',i)));
-            end
-            saveas(gcf,fullfile(save_path,'finded peaks',sprintf('roi %d',i),sprintf('finded  peak at noi %d, peaks %d.png',i,j)))
-            close(gcf)
-        end
+        FWHM = calculate_FWHM(AP_amp, dt, peaks_polarity{i}, false);
         % sprintf('roi % d peaks %d FWHM:%d',i,j,FWHM);
 
         % save AP data
@@ -1587,185 +1530,74 @@ for i = 1:nrois % i for trace
             'AP_sensitivity',AP_sensitivity,'Sensitivity',Sensitivity, ...
             'AP_SNR', AP_SNR, 'SNR', SNR);
         AP_list{i}{j} = each_AP;
-        if enable_peak_redirection && offset ~= 0
-            peaks_index{i}(j) = peaks_index{i}(j) + offset;
-            fprintf('peaksindex %d in roi %d redirection\n',peaks_index{i}(j),i)
-            j = j -1;
-        end
         j = j + 1;
     end
 
 
 end
 
-save(fullfile(save_path,'FWHM gated peaks.mat'),'peaks_index','peaks_polarity','peaks_amplitude')
-fwhm_parent_peak_result = string(peak_results.current_result);
-peak_results.fwhm_filtered.data = struct( ...
+save(fullfile(save_path,'5_accepted_peaks.mat'),'peaks_index','peaks_polarity','peaks_amplitude')
+event_parent_peak_result = string(peak_results.current_result);
+peak_results.accepted_for_events.data = struct( ...
     'index', {peaks_index}, ...
     'amplitude', {peaks_amplitude}, ...
     'polarity', {peaks_polarity});
-peak_results.fwhm_filtered.info = struct( ...
-    'result_name', 'fwhm_filtered', ...
-    'parent_results', {{char(fwhm_parent_peak_result)}}, ...
+peak_results.accepted_for_events.info = struct( ...
+    'result_name', 'accepted_for_events', ...
+    'parent_results', {{char(event_parent_peak_result)}}, ...
     'trace_result', peak_trace_result, ...
-    'method', 'fwhm_filtering', ...
+    'method', 'accepted_peaks_no_fwhm_gate', ...
     'parameters', struct( ...
         'ap_window_width', AP_window_width, ...
-        'offset_width', offset_width), ...
+        'fwhm_used_for_gating', false, ...
+        'peak_redirection_enabled', false), ...
     'created_at', datetime("now"));
-peak_results.current_result = 'fwhm_filtered';
+peak_results.current_result = 'accepted_for_events';
 save(peak_results_path, 'peak_results', '-v7.3');
 
 ap_results.events.data = AP_list;
 ap_results.events.info = struct( ...
     'result_name', 'events', ...
-    'parent_peak_result', 'fwhm_filtered', ...
+    'parent_peak_result', 'accepted_for_events', ...
     'parent_trace_results', {{'bleach_removed', 'sensitivity', 'snr'}}, ...
-    'method', 'ap_window_statistics', ...
+    'method', 'ap_window_statistics_without_fwhm_gate', ...
     'parameters', struct( ...
         'ap_window_width', AP_window_width, ...
-        'offset_width', offset_width, ...
         'qc_trace_source', ternary(ap_qc_baseline_subtract, 'volpy_qc_event_trace', 'bleach_removed'), ...
         'baseline_subtracted', logical(ap_qc_baseline_subtract), ...
-        'peak_redirection_enabled', logical(enable_peak_redirection)), ...
+        'fwhm_used_for_gating', false, ...
+        'peak_redirection_enabled', false), ...
     'created_at', datetime("now"));
 ap_results.current_result = 'events';
-peak_fwhm_record = build_section_record( ...
-    'FWHM Filtering And AP Events', ...
-    'Filter peaks by AP-shape constraints, redirect peak centers when needed, and build event-level AP windows with amplitude, sensitivity, and SNR measurements.', ...
+ap_event_record = build_section_record( ...
+    'AP Events From Accepted Peaks', ...
+    'Build event-level AP windows from accepted peaks without FWHM gating or peak redirection.', ...
     struct( ...
-        'parent_peak_stage', fwhm_parent_peak_result, ...
+        'parent_peak_stage', event_parent_peak_result, ...
         'trace_stage', string(peak_trace_result), ...
         'traces_bleach_removed', traces_bleaching_removed, ...
         'traces_sensitivity', traces_sensitivity, ...
         'traces_snr', traces_SNR), ...
     struct( ...
         'ap_window_width', AP_window_width, ...
-        'offset_width', offset_width, ...
         'frame_dt', dt, ...
-        'peak_redirection_enabled', logical(enable_peak_redirection)), ...
+        'fwhm_used_for_gating', false, ...
+        'peak_redirection_enabled', false), ...
     struct( ...
         'peaks_index', {peaks_index}, ...
         'peaks_amplitude', {peaks_amplitude}, ...
         'peaks_polarity', {peaks_polarity}, ...
         'AP_list', AP_list), ...
     struct(), ...
-    'To rerun this section, load the saved peak stage and trace stages, then rerun the AP window extraction and FWHM gating logic.');
-save(fullfile(save_path, '5_fwhm_ap_event_results.mat'), 'peaks_index', 'peaks_amplitude', 'peaks_polarity', 'AP_list', 'peak_fwhm_record');
+    'To rerun this section, load the accepted peak stage and trace stages, then rerun AP window extraction.');
+save(fullfile(save_path, '5_sensitivity_ap_event_results.mat'), 'peaks_index', 'peaks_amplitude', 'peaks_polarity', 'AP_list', 'ap_event_record');
 save(ap_results_path, 'ap_results', '-v7.3');
 
-peaks_index_manually_gated = [];
-% AP_window_width = 15; % number of frames to for AP window (defined = 40)
-% offset_width = MinPeakDistance_factor;
-% % AP_list = AP_statistic(nrois, peaks_index, peaks_amplitude, traces_corrected, traces_sensitivity, traces_SNR, AP_window_width, nframes, dt, peaks_polarity, save_path);
-%
-% % function [AP_list,peaks_index_corrected]  = AP_statistic(nrois, peaks_index, peaks_amplitude, traces_corrected, traces_sensitivity, traces_SNR, AP_window_width, nframes, dt, peaks_polarity, save_path)
-% AP_list = cell(1, nrois);
-%
-% % each trace
-% for i = 1:nrois % i for trace
-%     peaks_num = length(peaks_index{i});
-%     each_trace_amp = traces_corrected(:,i);
-%     each_trace_sensitivity = traces_sensitivity(:,i);
-%     each_trace_SNR = traces_SNR(:,i);
-%     AP_list{i} = cell(1, length(peaks_index{i}));
-%
-%     j = 1;
-%     % each peak
-%     while j <= peaks_num % j for peak
-%
-%         peak_index_ij = peaks_index{i}(j);
-%         peak_amp_ij = peaks_amplitude{i}(j);
-%
-%         % keep in board
-%         AP_start_index = max(1, peak_index_ij - AP_window_width);
-%         AP_end_index = min(nframes, peak_index_ij + AP_window_width);
-%         AP_index = AP_start_index : AP_end_index;
-%
-%         % search
-%         AP_amp = each_trace_amp(AP_start_index:AP_end_index)';
-%         AP_sensitivity = each_trace_sensitivity(AP_start_index:AP_end_index)';
-%         AP_SNR = each_trace_SNR(AP_start_index:AP_end_index)';
-%
-%         % fill NaN
-%         if 1 > peak_index_ij - AP_window_width
-%             AP_amp = [NaN(1,0 - (peak_index_ij - AP_window_width)+1), AP_amp];
-%             AP_sensitivity = [NaN(1,0 - (peak_index_ij - AP_window_width)+1),AP_sensitivity];
-%             AP_SNR = [NaN(1,0 - (peak_index_ij - AP_window_width)+1),AP_SNR];
-%         elseif nframes < peak_index_ij + AP_window_width
-%             AP_amp = [AP_amp, NaN(1,peak_index_ij + AP_window_width - nframes)];
-%             AP_sensitivity = [AP_sensitivity, NaN(1,peak_index_ij + AP_window_width - nframes)];
-%             AP_SNR = [AP_SNR, NaN(1,peak_index_ij + AP_window_width - nframes)];
-%         end
-%
-%         % Calculate;
-%         Amplitude = abs(peak_amp_ij);
-%         Sensitivity = AP_sensitivity(AP_window_width+1)*100 ;
-%         SNR = abs(AP_SNR(AP_window_width+1));
-%         f = false; % save each peak
-%         AP_amp_cut = AP_amp(AP_window_width-offset_width + 1:AP_window_width + offset_width+ 1);
-%         if AP_amp(AP_window_width + 1)*peaks_polarity{i} < AP_amp(AP_window_width) *peaks_polarity{i}...
-%             || AP_amp(AP_window_width + 1)*peaks_polarity{i} < AP_amp(AP_window_width+2)*peaks_polarity{i}
-%             offset = peak_offset(AP_amp_cut, peaks_polarity{i});
-%             FWHM = calculate_FWHM(AP_amp, dt,  peaks_polarity{i},f);
-%         % FWHM = calculate_FWHM2(AP_amp, dt, peaks_polarity{i});
-%         else
-%             offset = 99;
-%             FWHM = NaN;
-%         end
-%
-%         if isempty(offset) || abs(offset) > 2 || FWHM <= 2.5
-%             FWHM = NaN;
-%         end
-%
-%         if isnan(FWHM)
-%             try
-%             FWHM = calculate_FWHM(AP_amp, dt,  peaks_polarity{i},true);
-%             catch
-%                 figure()
-%                 plot(AP_amp); hold on;
-%             end
-%             title(sprintf('failed peak at noi %d, peaks %d',i,j))
-%             if ~isfolder(fullfile(save_path,'failed peaks',sprintf('roi %d',i)))
-%             mkdir(fullfile(save_path,'failed peaks',sprintf('roi %d',i)));
-%             end
-%             saveas(gcf,fullfile(save_path,'failed peaks',sprintf('roi %d',i),sprintf('false peak at noi %d, peaks %d.png',i,j)))
-%             close(gcf)
-%         elseif f
-%             title(sprintf('finded peak at noi %d, peaks %d',i,j))
-%             if ~isfolder(fullfile(save_path,'finded peaks',sprintf('roi %d',i)))
-%             mkdir(fullfile(save_path,'finded peaks',sprintf('roi %d',i)));
-%             end
-%             saveas(gcf,fullfile(save_path,'finded peaks',sprintf('roi %d',i),sprintf('finded  peak at noi %d, peaks %d.png',i,j)))
-%             close(gcf)
-%         end
-%         % sprintf('roi % d peaks %d FWHM:%d',i,j,FWHM);
-%
-%         % save AP data
-%         each_AP = struct('Trace', i, 'AP_number', j, 'AP_index',AP_index, ...
-%             'AP_amp',AP_amp,'Amplitude', Amplitude,'FWHM',FWHM, ...
-%             'AP_sensitivity',AP_sensitivity,'Sensitivity',Sensitivity, ...
-%             'AP_SNR', AP_SNR, 'SNR', SNR);
-%         AP_list{i}{j} = each_AP;
-%         if ~isempty(offset)  && offset ~= 0
-%             peaks_index{i}(j) = peaks_index{i}(j) + offset;
-%             fprintf('peaksindex %d in roi %d redirection\n',peaks_index{i}(j),i)
-%             j = j -1;
-%         end
-%         j = j + 1;
-%     end
-%
-%
-% end
-% % end
-% save(fullfile(save_path,'FWHM gated peaks.mat'),'peaks_index','peaks_polarity','peaks_amplitude')
-% peaks_index_manually_gated = [];
+%% Manual Peak Gate Compatibility
+% Manual add/delete editing above is the active curation step. Keep a full
+% acceptance mask here so legacy AP summary code can run unchanged.
 
-
-
-%% Manual Peak Gating
-% Interactively remove unwanted peaks on the SNR traces and save the gate mask.
-
+run_manual_peak_gating = exist('legacy_manual_peak_gating', 'var') == 1 && logical(legacy_manual_peak_gating);
 if run_manual_peak_gating
 peaks_index_manually_gated = peaks_index;
 
@@ -1859,30 +1691,28 @@ peak_results.manually_gated.data = struct( ...
     'polarity', {peaks_polarity});
 peak_results.manually_gated.info = struct( ...
     'result_name', 'manually_gated', ...
-    'parent_results', {{'fwhm_filtered'}}, ...
-    'trace_result', 'snr', ...
-    'method', ternary(run_manual_peak_gating, 'manual_polygon_gate', 'manual_polygon_gate_skipped'), ...
-    'parameters', struct('skipped', ~run_manual_peak_gating), ...
+    'parent_results', {{'accepted_for_events'}}, ...
+    'trace_result', 'sensitivity', ...
+    'method', 'legacy_full_acceptance_mask', ...
+    'parameters', struct('skipped', true), ...
     'created_at', datetime("now"));
 peak_results.current_result = 'manually_gated';
 peak_gate_record = build_section_record( ...
-    'Manual Peak Gating', ...
-    ternary(run_manual_peak_gating, ...
-        'Interactively gate unwanted peaks on the SNR traces and save the final accepted peak mask.', ...
-        'Skip interactive manual peak gating and accept all FWHM-filtered peaks.'), ...
+    'Manual Peak Gate Compatibility', ...
+    'Skip the legacy polygon gate and accept all peaks from the add/delete editing workflow.', ...
     struct( ...
-        'parent_peak_stage', "fwhm_filtered", ...
-        'trace_stage', "snr", ...
-        'traces_snr', traces_SNR, ...
+        'parent_peak_stage', "accepted_for_events", ...
+        'trace_stage', "sensitivity", ...
+        'traces_sensitivity', traces_sensitivity, ...
         'peaks_index_before_gate', {peaks_index}, ...
         'peaks_polarity', {peaks_polarity}), ...
-    struct('skipped', ~run_manual_peak_gating), ...
+    struct('skipped', true), ...
     struct( ...
         'peaks_index_manually_gated', {peaks_index_manually_gated}, ...
         'peaks_index_gated', {peaks_index_gated}, ...
         'peaks_amplitude_gated', {peaks_amplitude_gated}), ...
     struct(), ...
-    'To rerun this section, load the saved SNR traces and peak stage, then repeat the interactive polygon gating.');
+    'No rerun is needed; manual peak curation is recorded in sensitivity_manually_edited.');
 save(fullfile(save_path, '5_manual_peak_gate_results.mat'), 'peaks_index_manually_gated', 'peaks_index_gated', 'peaks_amplitude_gated', 'peak_gate_record');
 save(peak_results_path, 'peak_results', '-v7.3');
 %% AP Summary Statistics
@@ -1907,7 +1737,7 @@ AP_data.index = {};
 table_name = fullfile(save_path,'AP_data.xlsx');
 for i = 1:length(AP_list)
 
-    if cellfun('isempty',AP_list{i}) == 0
+    if ~isempty(AP_list{i}) && any(~cellfun('isempty', AP_list{i}))
         AP_i = AP_list{i}; % 当前trace的所有APs
 
         % 初始化每个trace的数据向量
@@ -1939,7 +1769,7 @@ for i = 1:length(AP_list)
         end
 
         % 为当前trace创建一个表格
-        T = table(number_i, amp_i(:,2*AP_window_width+1), FWHM_i, sensitivity_i, SNR_i, peaks_index{i}, ...
+        T = table(number_i, amp_i(:,2*AP_window_width+1), FWHM_i, sensitivity_i, SNR_i, index_i, ...
             'VariableNames', {'Number', 'Amplitude', 'FWHM (ms)', 'Sensitivity', 'SNR', 'Index'});
 
         % 将表格写入Excel的一个新工作表
@@ -2860,13 +2690,33 @@ min_peak_height_summary = NaN;
 if exist('MinPeakHeight', 'var') == 1
     min_peak_height_summary = MinPeakHeight;
 end
+peak_polarity_mode_summary = "";
+if exist('peak_polarity_mode', 'var') == 1
+    peak_polarity_mode_summary = string(peak_polarity_mode);
+end
+peak_min_prominence_summary = NaN;
+if exist('peak_min_prominence', 'var') == 1
+    peak_min_prominence_summary = peak_min_prominence;
+end
+peak_min_distance_frames_summary = NaN;
+if exist('peak_min_distance_frames', 'var') == 1
+    peak_min_distance_frames_summary = peak_min_distance_frames;
+end
+peak_min_height_sensitivity_summary = NaN;
+if exist('peak_min_height', 'var') == 1
+    peak_min_height_sensitivity_summary = peak_min_height;
+end
 results_summary.parameters = struct( ...
     'findmode', findmode_summary, ...
     'bleachmode', bleachmode_summary, ...
     'parts', parts_summary, ...
     'min_peak_prominence_factor', min_peak_prominence_factor_summary, ...
     'min_peak_distance_factor', min_peak_distance_factor_summary, ...
-    'min_peak_height', min_peak_height_summary);
+    'min_peak_height', min_peak_height_summary, ...
+    'sensitivity_peak_polarity_mode', peak_polarity_mode_summary, ...
+    'sensitivity_peak_min_prominence', peak_min_prominence_summary, ...
+    'sensitivity_peak_min_distance_frames', peak_min_distance_frames_summary, ...
+    'sensitivity_peak_min_height', peak_min_height_sensitivity_summary);
 
 save(movie_info_path, 'movie_info');
 save(trace_results_path, 'trace_results', '-v7.3');
@@ -2877,6 +2727,241 @@ save(save_filename, 'results_summary', '-v7.3');
 
 
 %%
+
+function [peak_table, peaks_index, peaks_amplitude, peaks_polarity] = detect_sensitivity_peaks(traces_sensitivity, freq, params)
+nrois = size(traces_sensitivity, 2);
+peaks_polarity = cell(1, nrois);
+peak_table = empty_peak_table();
+next_peak_id = 1;
+min_distance = max(1, round(params.min_peak_distance_frames));
+created_at = datetime("now");
+
+for roi_idx = 1:nrois
+    trace_i = traces_sensitivity(:, roi_idx);
+    polarity = choose_peak_polarity(trace_i, params.polarity_mode);
+    peaks_polarity{roi_idx} = polarity;
+    plot_trace = trace_i * polarity;
+
+    [~, peak_x] = findpeaks(plot_trace, ...
+        'MinPeakProminence', params.min_peak_prominence, ...
+        'MinPeakDistance', min_distance, ...
+        'MinPeakHeight', params.min_peak_height);
+
+    if isempty(peak_x)
+        continue;
+    end
+
+    peak_count = numel(peak_x);
+    new_rows = table( ...
+        (next_peak_id:next_peak_id+peak_count-1)', ...
+        repmat(roi_idx, peak_count, 1), ...
+        peak_x(:), ...
+        peak_x(:) ./ freq, ...
+        repmat(polarity, peak_count, 1), ...
+        trace_i(peak_x(:)), ...
+        repmat("accepted", peak_count, 1), ...
+        repmat("auto", peak_count, 1), ...
+        NaN(peak_count, 1), ...
+        repmat("sensitivity_detected", peak_count, 1), ...
+        repmat(created_at, peak_count, 1), ...
+        'VariableNames', peak_table.Properties.VariableNames);
+    peak_table = [peak_table; new_rows];
+    next_peak_id = next_peak_id + peak_count;
+end
+
+[peaks_index, peaks_amplitude, peaks_polarity] = peak_table_to_peak_cells(peak_table, nrois, peaks_polarity);
+end
+
+function [peak_table, edit_history] = edit_sensitivity_peaks(traces_sensitivity, peak_table, peaks_polarity, params)
+nrois = size(traces_sensitivity, 2);
+edit_history = struct('action', {}, 'roi', {}, 'peak_id', {}, 'index_before', {}, ...
+    'index_after', {}, 'mode', {}, 'created_at', {});
+max_peak_id = 0;
+if height(peak_table) > 0
+    max_peak_id = max(peak_table.peak_id);
+end
+next_peak_id = max_peak_id + 1;
+quit_editor = false;
+
+for roi_idx = 1:nrois
+    if quit_editor
+        break;
+    end
+
+    mode = string(params.default_mode);
+    reset_table = peak_table;
+    fig = figure('Name', sprintf('ROI %d sensitivity peak editor', roi_idx));
+    set(fig, 'Position', get(0, 'Screensize'));
+
+    while ishandle(fig)
+        draw_peak_editor(fig, traces_sensitivity(:, roi_idx), peak_table, peaks_polarity{roi_idx}, roi_idx, mode);
+        was_key = waitforbuttonpress;
+
+        if was_key
+            key = string(get(fig, 'CurrentCharacter'));
+            switch lower(char(key))
+                case 'a'
+                    mode = "add";
+                case 'd'
+                    mode = "delete";
+                case {'n', ' '}
+                    close(fig);
+                case 'r'
+                    peak_table = reset_roi_peak_table(peak_table, reset_table, roi_idx);
+                    edit_history(end+1) = make_edit_history("reset", roi_idx, NaN, NaN, NaN, mode); %#ok<SAGROW>
+                case 'q'
+                    quit_editor = true;
+                    close(fig);
+            end
+            continue;
+        end
+
+        clicked_point = get(gca, 'CurrentPoint');
+        clicked_index = round(clicked_point(1, 1));
+        if clicked_index < 1 || clicked_index > size(traces_sensitivity, 1)
+            continue;
+        end
+
+        switch mode
+            case "add"
+                polarity = peaks_polarity{roi_idx};
+                snapped_index = snap_to_local_peak(traces_sensitivity(:, roi_idx), clicked_index, polarity, params.add_snap_radius_frames);
+                peak_table = add_manual_peak_row(peak_table, next_peak_id, roi_idx, snapped_index, traces_sensitivity(snapped_index, roi_idx), polarity, params.frame_rate_hz);
+                edit_history(end+1) = make_edit_history("add", roi_idx, next_peak_id, NaN, snapped_index, mode); %#ok<SAGROW>
+                next_peak_id = next_peak_id + 1;
+            case "delete"
+                [peak_table, deleted_peak_id, deleted_index] = delete_nearest_peak( ...
+                    peak_table, roi_idx, clicked_index, params.delete_radius_frames);
+                if ~isnan(deleted_peak_id)
+                    edit_history(end+1) = make_edit_history("delete", roi_idx, deleted_peak_id, deleted_index, NaN, mode); %#ok<SAGROW>
+                end
+        end
+    end
+end
+end
+
+function draw_peak_editor(fig, trace_i, peak_table, polarity, roi_idx, mode)
+figure(fig);
+clf(fig);
+plot(trace_i * polarity, 'k'); hold on;
+accepted = peak_table.roi == roi_idx & peak_table.status == "accepted";
+deleted = peak_table.roi == roi_idx & peak_table.status == "deleted";
+accepted_idx = peak_table.index(accepted);
+deleted_idx = peak_table.index(deleted);
+if ~isempty(accepted_idx)
+    plot(accepted_idx, trace_i(accepted_idx) * polarity, 'rv', 'MarkerFaceColor', 'r');
+end
+if ~isempty(deleted_idx)
+    plot(deleted_idx, trace_i(deleted_idx) * polarity, 'x', 'Color', [0.5 0.5 0.5], 'LineWidth', 1.5);
+end
+title(sprintf('ROI %d | Mode: %s | A add, D delete, N/Space next, R reset, Q quit', roi_idx, upper(mode)));
+xlabel('Frame');
+ylabel('Sensitivity x polarity');
+grid on;
+hold off;
+end
+
+function peak_table = empty_peak_table()
+peak_table = table( ...
+    zeros(0,1), zeros(0,1), zeros(0,1), zeros(0,1), zeros(0,1), zeros(0,1), ...
+    strings(0,1), strings(0,1), zeros(0,1), strings(0,1), NaT(0,1), ...
+    'VariableNames', {'peak_id', 'roi', 'index', 'time_s', 'polarity', ...
+    'amplitude_sensitivity', 'status', 'source', 'parent_peak_id', ...
+    'created_stage', 'created_at'});
+end
+
+function polarity = choose_peak_polarity(trace_i, mode)
+mode = lower(string(mode));
+switch mode
+    case "positive"
+        polarity = 1;
+    case "negative"
+        polarity = -1;
+    otherwise
+        if abs(max(trace_i) - mean(trace_i, 'omitnan')) >= abs(min(trace_i) - mean(trace_i, 'omitnan'))
+            polarity = 1;
+        else
+            polarity = -1;
+        end
+end
+end
+
+function [peaks_index, peaks_amplitude, peaks_polarity] = peak_table_to_peak_cells(peak_table, nrois, fallback_polarity)
+if nargin < 3
+    fallback_polarity = cell(1, nrois);
+end
+peaks_index = cell(1, nrois);
+peaks_amplitude = cell(1, nrois);
+peaks_polarity = cell(1, nrois);
+
+for roi_idx = 1:nrois
+    accepted = peak_table.roi == roi_idx & peak_table.status == "accepted";
+    rows_i = peak_table(accepted, :);
+    if height(rows_i) > 0
+        [~, order] = sort(rows_i.index);
+        rows_i = rows_i(order, :);
+        peaks_index{roi_idx} = rows_i.index;
+        peaks_amplitude{roi_idx} = rows_i.amplitude_sensitivity;
+        peaks_polarity{roi_idx} = rows_i.polarity(1);
+    else
+        peaks_index{roi_idx} = [];
+        peaks_amplitude{roi_idx} = [];
+        if numel(fallback_polarity) >= roi_idx && ~isempty(fallback_polarity{roi_idx})
+            peaks_polarity{roi_idx} = fallback_polarity{roi_idx};
+        else
+            peaks_polarity{roi_idx} = 1;
+        end
+    end
+end
+end
+
+function snapped_index = snap_to_local_peak(trace_i, clicked_index, polarity, radius)
+radius = max(0, round(radius));
+start_idx = max(1, clicked_index - radius);
+end_idx = min(numel(trace_i), clicked_index + radius);
+[~, local_idx] = max(trace_i(start_idx:end_idx) * polarity);
+snapped_index = start_idx + local_idx - 1;
+end
+
+function peak_table = add_manual_peak_row(peak_table, peak_id, roi_idx, index, amplitude, polarity, freq)
+new_row = table(peak_id, roi_idx, index, index / freq, polarity, amplitude, "accepted", ...
+    "manual_add", NaN, "sensitivity_manually_edited", datetime("now"), ...
+    'VariableNames', peak_table.Properties.VariableNames);
+peak_table = [peak_table; new_row];
+end
+
+function [peak_table, deleted_peak_id, deleted_index] = delete_nearest_peak(peak_table, roi_idx, clicked_index, radius)
+deleted_peak_id = NaN;
+deleted_index = NaN;
+accepted = find(peak_table.roi == roi_idx & peak_table.status == "accepted");
+if isempty(accepted)
+    return;
+end
+[distance, nearest_rel] = min(abs(peak_table.index(accepted) - clicked_index));
+if distance > radius
+    return;
+end
+row_idx = accepted(nearest_rel);
+deleted_peak_id = peak_table.peak_id(row_idx);
+deleted_index = peak_table.index(row_idx);
+peak_table.status(row_idx) = "deleted";
+end
+
+function peak_table = reset_roi_peak_table(peak_table, reset_table, roi_idx)
+peak_table(peak_table.roi == roi_idx, :) = [];
+peak_table = [peak_table; reset_table(reset_table.roi == roi_idx, :)];
+end
+
+function entry = make_edit_history(action, roi_idx, peak_id, index_before, index_after, mode)
+entry = struct( ...
+    'action', string(action), ...
+    'roi', roi_idx, ...
+    'peak_id', peak_id, ...
+    'index_before', index_before, ...
+    'index_after', index_after, ...
+    'mode', string(mode), ...
+    'created_at', datetime("now"));
+end
 
 function [poolObj, poolReady, poolInfo] = initialize_ap_parallel_pool(poolInfo)
 poolObj = [];

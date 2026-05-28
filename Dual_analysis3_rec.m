@@ -14,7 +14,7 @@
 %
 % This script keeps Dual_analysis3 as a normal runnable script.
 % It passes parameters in from an outer scope by calling run(...).
-
+clear all
 %% Input Setup
 % Point this to one rebuilt record folder that contains Cycle* subfolders.
 
@@ -22,13 +22,13 @@
 % A. Main batch scope
 % -------------------------------------------------------------------------
 if ~exist('rec_path', 'var') || isempty(rec_path)
-    rec_path = 'V:\Luorong\Invivo\26.01.29_invivo dual color\Methods2\Rec1_2026-01-29 19-39-03';
+    rec_path = 'V:\Luorong\Invivo\26.01.29_invivo dual color\Methods2\Rec4_2026-01-29 21-05-04\';
 end
 if ~exist('analysis_backend', 'var') || isempty(analysis_backend)
     analysis_backend = 'default';   % 'default' | 'volpy_voltage_reanalysis'
 end
 if ~exist('analysis_mode', 'var') || isempty(analysis_mode)
-    analysis_mode = 'analysis_only';         % 'full' | 'analysis_only'
+    analysis_mode = 'full';         % 'full' | 'analysis_only'
 end
 analysis_only_rec_mode = strcmpi(string(analysis_mode), "analysis_only");
 source_result_root_dir = resolve_result_root_dir_rec(analysis_backend);
@@ -55,7 +55,7 @@ end
 % If you already have a good ROI file, fill it here and the script will
 % skip the reference ROI selection step.
 if ~exist('reference_roi_file', 'var') || isempty(reference_roi_file)
-    reference_roi_file = 'V:\Luorong\Invivo\26.01.29_invivo dual color\Methods2\Rec1_2026-01-29 19-39-03\Cycle1\Cam2_Red5%simo_Analysis\2026-01-31 22-00-48\1_raw_ROI.mat';
+    reference_roi_file = 'V:\Luorong\Invivo\26.01.29_invivo dual color\Methods2\Rec4_2026-01-29 21-05-04\Cycle1\Cam1_Cyan5%simo_Analysis\2026-02-04 20-36-03\1_raw_ROI.mat';
 end
 
 % Reuse the latest ROI result already present in the reference cycle when
