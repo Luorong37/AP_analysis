@@ -3036,14 +3036,6 @@ shift_res_path = fullfile(save_path, 'shared_motion_shifts_result.mat');
 params_save_path = fullfile(save_path, 'shared_motion_correction_para.mat');
 voltage_single = single(voltage_movie);
 calcium_single = single(calcium_movie);
-if cfg.highpass
-    % Use the same high-pass-preprocessed voltage movie for motion-quality
-    % metrics so the raw-vs-corrected comparison matches the shift
-    % estimation target used by NoRMCorre.
-    movie_for_estimation = create_temp_highpass(voltage_single);
-else
-    movie_for_estimation = voltage_single;
-end
 
 shift_source_file = string(cfg.saved_shift_file);
 auto_reused_previous_shift = false;
@@ -3068,7 +3060,17 @@ if (cfg.use_saved_shift && strlength(shift_source_file) > 0) || auto_reused_prev
         copyfile(char(shift_source_file), shift_res_path);
     end
 else
+    % Only build the high-pass temporary movie when NoRMCorre actually has
+    % to estimate shifts. When reusing a saved shift field, this full-size
+    % temporary copy is unnecessary and can add tens of GB to the memory
+    % peak before apply_shifts.
+    if cfg.highpass
+        movie_for_estimation = create_temp_highpass(voltage_single);
+    else
+        movie_for_estimation = voltage_single;
+    end
     [~, shifts_r, ~] = normcorre_batch(movie_for_estimation, options_r);
+    clear movie_for_estimation;
     save(shift_res_path, 'shifts_r', 'options_r', '-v7.3');
 end
 

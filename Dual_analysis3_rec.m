@@ -92,9 +92,9 @@ if ~exist('run_reference_cycle_in_batch', 'var') || isempty(run_reference_cycle_
 end
 
 % Leave empty to run every Cycle*. Otherwise provide a string array like:
-% ["Cycle1","Cycle3","Cycle5"]
+% ["Cycle1","Cycle3","Cycle5"] %strings(0, 1)
 if ~exist('cycle_name_filter', 'var') || isempty(cycle_name_filter)
-    cycle_name_filter = strings(0, 1);
+    cycle_name_filter = "Cycle3"; %strings(0, 1)
 end
 
 % Skip a cycle if it already contains any previous Dual_analysis3 result.
