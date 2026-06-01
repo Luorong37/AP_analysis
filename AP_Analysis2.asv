@@ -38,8 +38,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\CC\20260523_CC_slice_AcemNeon2_9\slice3\Methods1_default\Rec1_2026-05-23_17-31-09\Cycle1';
-file = 'Cam1_Cyan5%';  % must add format.do not add '\' at last
+folder_path = 'E:\1_Data\CRY\zsy20250113 Solaris_Dark_mOrange2_Kv2.1_JF549slice1field3\';
+file = '';  % must add format.do not add '\' at last
 bin = 4;
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
@@ -1442,7 +1442,7 @@ save(fullfile(save_path,'Trend Analysis.mat'),'all_avgdff', 'all_avgFR', 'all_av
 %% 可配置时间窗口的ROI分析（SNR和灵敏度趋势）
 
 % ==================== 参数设置 ====================
-window_size_seconds =10;  % 时间窗口大小（秒）- 可以修改这个值
+window_size_seconds =60;  % 时间窗口大小（秒）- 可以修改这个值
 freq = 400;                % 采样频率（Hz）
 nrois = length(AP_data.FWHM); % ROI数量
 
