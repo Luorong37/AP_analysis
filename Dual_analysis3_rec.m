@@ -22,7 +22,7 @@ clear all
 % A. Main batch scope
 % -------------------------------------------------------------------------
 if ~exist('rec_path', 'var') || isempty(rec_path)
-    rec_path = 'V:\Luorong\Invivo\26.01.29_invivo dual color\Methods2\Rec4_2026-01-29 21-05-04\';
+    rec_path = 'V:\Luorong\Invivo\26.06.02_dual_color_WT\Methods3_drifting_grating\Rec1_2026-06-02_21-29-09';
 end
 if ~exist('analysis_backend', 'var') || isempty(analysis_backend)
     analysis_backend = 'default';   % 'default' | 'volpy_voltage_reanalysis'
@@ -55,13 +55,13 @@ end
 % If you already have a good ROI file, fill it here and the script will
 % skip the reference ROI selection step.
 if ~exist('reference_roi_file', 'var') || isempty(reference_roi_file)
-    reference_roi_file = 'V:\Luorong\Invivo\26.01.29_invivo dual color\Methods2\Rec4_2026-01-29 21-05-04\Cycle1\Cam1_Cyan5%simo_Analysis\2026-02-04 20-36-03\1_raw_ROI.mat';
+    reference_roi_file = '';
 end
 
 % Reuse the latest ROI result already present in the reference cycle when
 % possible. If false, the reference cycle will be rerun to generate ROI.
 if ~exist('reuse_existing_reference_roi', 'var') || isempty(reuse_existing_reference_roi)
-    reuse_existing_reference_roi = true;
+    reuse_existing_reference_roi = false;
 end
 
 % When true, rerun the reference cycle first to create a fresh ROI file.
@@ -94,7 +94,7 @@ end
 % Leave empty to run every Cycle*. Otherwise provide a string array like:
 % ["Cycle1","Cycle3","Cycle5"] %strings(0, 1)
 if ~exist('cycle_name_filter', 'var') || isempty(cycle_name_filter)
-    cycle_name_filter = "Cycle3"; %strings(0, 1)
+    cycle_name_filter = strings(0, 1); %strings(0, 1)
 end
 
 % Skip a cycle if it already contains any previous Dual_analysis3 result.

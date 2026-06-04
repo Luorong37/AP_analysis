@@ -37,10 +37,10 @@ fprintf('Loading...\n')
 
 % support for folder, .tif, .tiff, .bin.
 if ~exist('folder_path', 'var') || isempty(folder_path)
-    folder_path = 'I:\1_Data\4e. Duplex imaging\25.10.29_DUPLEX_SCN\';
+    folder_path = 'I:\1_Data\2b. Single color recording in slice\COT-Cy3\';
 end
 if ~exist('file', 'var') || isempty(file)
-    file = 'R5';  % must add format.do not add '\' at last
+    file = '20230810-170126recordPVH';  % must add format.do not add '\' at last
 end
 if ~exist('bin', 'var') || isempty(bin)
     bin = 1;
@@ -54,7 +54,7 @@ if ~exist('gpu', 'var') || isempty(gpu)
 end
 
 if ~exist('analysis_mode', 'var') || isempty(analysis_mode)
-    analysis_mode = "full"; % "full" | "analysis_only"
+    analysis_mode = "analysis_only"; % "full" | "analysis_only"
 else
     analysis_mode = string(analysis_mode);
 end
@@ -73,7 +73,7 @@ else
 end
 analysis_backend = lower(strtrim(string(analysis_backend)));
 if ~exist('reuse_results_path', 'var') || isempty(reuse_results_path)
-    reuse_results_path = "";
+    reuse_results_path = "I:\1_Data\2b. Single color recording in slice\COT-Cy3\20230810-170126recordPVH_Analysis\2026-06-01 08-53-25";
 else
     reuse_results_path = string(reuse_results_path);
 end
@@ -2205,8 +2205,7 @@ saveas(gcf,fullfile(save_path,'Trend Analysis.png'))
 saveas(gcf,fullfile(save_path,'Trend Analysis.fig'))
 
 save(fullfile(save_path,'Trend Analysis.mat'),'all_avgdff', 'all_avgFR', 'all_avgFWHM', 'all_avgSNR', ...
-    'trend_avgdff', 'trend_avgFR', 'trend_avgFWHM', 'trend_avgSNR', 'trend_avgSNR', 'trend_stddff', 'trend_stdFR', 'trend_stdFWHM', 'trend_stdSNR', ...
-    'trendx', 'trendbin', 'trendpart')
+    'trend_avgdff', 'trend_avgFR', 'trend_avgFWHM', 'trend_avgSNR', 'trend_avgSNR', 'trend_stddff', 'trend_stdFR', 'trend_stdFWHM', 'trend_stdSNR')
 
 %% Average AP Plots
 % Plot average AP waveforms using sensitivity and SNR aligned to detected events.
@@ -2531,136 +2530,413 @@ fprintf('  - %s\n', fullfile(save_path, '8_AP_Sequence.png'));
 fprintf('  - %s\n', fullfile(save_path, '9_AP_Density.png'));
 
 %% ISI Statistic Phenotype QC
-% Integrated revised ISI / burst / firing phenotype QC.
-% This AP3-native section uses variables already present in the workspace.
-% It does not reload movie_info, trace_results, or peak_results from disk.
-if ~exist('isi_stat_params_override', 'var') || isempty(isi_stat_params_override)
-    isi_stat_params_override = struct();
+% Plot-only first pass based on already accepted spike timestamps.
+% Algorithm overview:
+%   1. Use the final accepted spike indices as spike timestamps in seconds.
+%   2. Compute basic firing and ISI metrics for each ROI.
+%   3. Estimate firing-rate drift from binned FR and first/second-half FR.
+%   4. Detect bursts as continuous runs of short ISIs.
+%   5. Compute burst burden, burst periodicity, and non-burst local ISI regularity.
+%   6. Assign a tentative phenotype label from the combined metrics.
+% These labels are only QC-level rules; they are not fixed biological classes.
+if ~exist('run_isi_stat_qc', 'var') || isempty(run_isi_stat_qc)
+    run_isi_stat_qc = true;
 end
-params_override = isi_stat_params_override;
-params = default_isi_stat_params_revised();
-params = merge_struct_fields(params, params_override);
-params = finalize_isi_stat_params(params);
 
-% Prepare current AP3 context
-recording_duration_s = nframes / freq;
-frame_dt_ms = 1000 / freq;
+if run_isi_stat_qc
+isi_stat_params = struct();
+isi_stat_params.window_s = 10;                         % FR window length for time-varying rate check.
+isi_stat_params.window_step_s = isi_stat_params.window_s; % FR window step; equal to window_s gives non-overlap bins.
+isi_stat_params.reuse_existing_trend_FR = true;        % Reuse Trend Analysis all_avgFR/trendx when available.
+isi_stat_params.min_spike_count = 30;                  % Below this count, label is insufficient_data.
+% burst_isi_threshold_ms means the maximum allowed interval between two
+% neighboring spikes inside one burst. With min_spikes_per_burst = 3, a
+% burst needs at least two consecutive ISIs below this value.
+isi_stat_params.burst_isi_threshold_ms = 1;            % ISI cutoff for burst detection; adjust for sensitivity checks.
+isi_stat_params.min_spikes_per_burst = 3;              % Minimum consecutive spikes required for one burst event.
+isi_stat_params.min_burst_count_for_periodicity = 5;   % Minimum burst count before CV_IBI is interpreted.
+isi_stat_params.isi_histogram_num_bins = 30;           % Number of bins in log10(ISI_ms) histogram.
+isi_stat_params.ibi_histogram_num_bins = 20;           % Number of bins in burst IBI_s histogram.
+isi_stat_params.isi_histogram_xlim_log10_ms = [];      % Optional log10(ISI_ms) x limit, [] uses auto.
+isi_stat_params.ibi_histogram_xlim_s = [];             % Optional IBI histogram x limit in seconds, [] uses auto.
+isi_stat_params.rate_drift_slope_threshold_hz_per_min = 0.05; % Absolute FR slope threshold for drift label.
+isi_stat_params.rate_drift_half_diff_fraction = 0.5;   % First/second half FR fractional difference threshold.
+isi_stat_params.high_burst_fraction_threshold = 0.30;  % Burst-like burden threshold.
+isi_stat_params.low_burst_fraction_threshold = 0.10;   % Low burst burden reference threshold.
+isi_stat_params.low_CV_IBI_threshold = 0.50;           % Low IBI variability reference for periodic bursting.
+isi_stat_params.high_CV_IBI_threshold = 1.00;          % High IBI variability reference for irregular bursting.
+isi_stat_params.low_LvR_threshold = 0.80;              % Low non-burst local variability reference.
+isi_stat_params.high_LvR_threshold = 1.20;             % High non-burst local variability reference.
+isi_stat_params.LvR_refractory_R_s = 0.005;            % Refractory constant used in LvR.
 
 if exist('peaks_index_gated', 'var') == 1 && ~isempty(peaks_index_gated)
-    peak_indices = peaks_index_gated;
-    peak_source = 'workspace.peaks_index_gated';
-elseif exist('peaks_index', 'var') == 1 && ~isempty(peaks_index)
-    peak_indices = peaks_index;
-    peak_source = 'workspace.peaks_index';
+    isi_stat_peak_indices = peaks_index_gated;
 else
-    error('AP_analysis3:MissingIsiPeakIndices', ...
-        'ISI statistic QC requires peaks_index_gated or peaks_index in the current workspace.');
+    isi_stat_peak_indices = peaks_index;
+end
+
+% Convert accepted spike frames into seconds. Non-finite and non-positive
+% indices are removed, and duplicate frame indices are collapsed with unique.
+spike_times_s = cell(1, nrois);
+for roi_idx = 1:nrois
+    idx = isi_stat_peak_indices{roi_idx};
+    idx = idx(isfinite(idx) & idx > 0);
+    spike_times_s{roi_idx} = unique(idx(:)') ./ freq;
 end
 
 if exist('traces_sensitivity', 'var') == 1 && ~isempty(traces_sensitivity)
-    trace_for_qc = traces_sensitivity;
-    trace_source = 'workspace.traces_sensitivity';
-elseif exist('traces_SNR', 'var') == 1 && ~isempty(traces_SNR)
-    trace_for_qc = traces_SNR;
-    trace_source = 'workspace.traces_SNR';
+    isi_stat_trace_for_qc = traces_sensitivity;
 else
-    trace_for_qc = [];
-    trace_source = 'none';
+    isi_stat_trace_for_qc = traces_SNR;
 end
 
-nrois = max([numel(peak_indices), size(trace_for_qc, 2)]);
-if nrois == 0
-    error('AP_analysis3:NoIsiRois', ...
-        'No ROI traces or peak indices are available for ISI statistic QC.');
-end
-if numel(peak_indices) < nrois
-    peak_indices(numel(peak_indices)+1:nrois) = {[]};
+isi_stat_qc_output_dir = fullfile(save_path, '10_isi_stat_phenotype_qc');
+if ~isfolder(isi_stat_qc_output_dir)
+    mkdir(isi_stat_qc_output_dir);
 end
 
-% Convert accepted peak frames to spike timestamps
-spike_times_s = cell(1, nrois);
-for roi_idx = 1:nrois
-    idx = peak_indices{roi_idx};
-    idx = idx(isfinite(idx) & idx > 0);
-    idx = unique(idx(:)');
-    if params.frame_index_origin_is_zero_time
-        % MATLAB frame 1 corresponds to t = 0. This does not affect ISI, but
-        % it gives correct timing for FR windows and plot overlays.
-        t = (idx - 1) ./ freq;
-    else
-        t = idx ./ freq;
-    end
-    t = t(t >= 0 & t <= recording_duration_s);
-    spike_times_s{roi_idx} = sort(t);
-end
-
-output_dir = fullfile(save_path, '10_isi_stat_phenotype_qc_revised');
-if ~isfolder(output_dir)
-    mkdir(output_dir);
-end
-
-% Analyze all neurons
-neuron_rows = repmat(empty_neuron_row(), nrois, 1);
-burst_event_rows = empty_burst_event_row();
-burst_event_rows(1) = [];
-per_neuron_metrics = cell(nrois, 1);
-
-for roi_idx = 1:nrois
-    t_spikes = sort(spike_times_s{roi_idx}(:)');
-    metrics = analyze_one_spontaneous_neuron(t_spikes, recording_duration_s, params, roi_idx, frame_dt_ms);
-    per_neuron_metrics{roi_idx} = metrics;
-    neuron_rows(roi_idx) = metrics_to_neuron_row(metrics, roi_idx, peak_source, trace_source);
-
-    if ~isempty(metrics.bursts)
-        new_rows = bursts_to_event_rows(metrics.bursts, roi_idx);
-        burst_event_rows = [burst_event_rows; new_rows(:)]; %#ok<AGROW>
-    end
-
-    if params.make_per_neuron_figures
-        plot_one_neuron_qc(metrics, trace_for_qc, trace_source, freq, output_dir, params);
-    end
-end
-
-neuron_table = struct2table(neuron_rows);
-if isempty(burst_event_rows)
-    burst_event_table = struct2table(empty_burst_event_row());
-    burst_event_table(1,:) = [];
-else
-    burst_event_table = struct2table(burst_event_rows);
-end
-
-% Optional threshold sensitivity
-sensitivity_table = table();
-if params.run_threshold_sensitivity
-    sensitivity_table = run_burst_threshold_sensitivity(spike_times_s, recording_duration_s, params, frame_dt_ms);
-end
-
-% Save outputs
 isi_stat_qc_summary = struct();
-isi_stat_qc_summary.params = params;
-isi_stat_qc_summary.results_path = save_path;
-isi_stat_qc_summary.peak_source = peak_source;
-isi_stat_qc_summary.trace_source = trace_source;
-isi_stat_qc_summary.frame_rate_hz = freq;
-isi_stat_qc_summary.frame_dt_ms = frame_dt_ms;
-isi_stat_qc_summary.recording_duration_s = recording_duration_s;
-isi_stat_qc_summary.neuron_table = neuron_table;
-isi_stat_qc_summary.burst_event_table = burst_event_table;
-isi_stat_qc_summary.sensitivity_table = sensitivity_table;
-isi_stat_qc_summary.per_neuron_metrics = per_neuron_metrics;
+isi_stat_qc_summary.neuron_id = (1:nrois)';
+isi_stat_qc_summary.spike_count = zeros(nrois, 1);
+isi_stat_qc_summary.mean_firing_rate_hz = NaN(nrois, 1);
+isi_stat_qc_summary.burst_spike_fraction = NaN(nrois, 1);
+isi_stat_qc_summary.LvR_nonburst = NaN(nrois, 1);
+isi_stat_qc_summary.CV_IBI = NaN(nrois, 1);
+isi_stat_qc_summary.phenotype_label = strings(nrois, 1);
+can_reuse_trend_FR = isi_stat_params.reuse_existing_trend_FR && ...
+    exist('all_avgFR', 'var') == 1 && exist('trendx', 'var') == 1 && ...
+    size(all_avgFR, 1) >= nrois && size(all_avgFR, 2) == numel(trendx);
 
-save(fullfile(output_dir, 'isi_stat_qc_summary_revised.mat'), 'isi_stat_qc_summary');
-writetable(neuron_table, fullfile(output_dir, 'neuron_summary_revised.csv'));
-writetable(burst_event_table, fullfile(output_dir, 'burst_event_table_revised.csv'));
-if ~isempty(sensitivity_table)
-    writetable(sensitivity_table, fullfile(output_dir, 'threshold_sensitivity_revised.csv'));
+for roi_idx = 1:nrois
+    recording_duration_s = nframes / freq;
+    current_spike_times_s = sort(spike_times_s{roi_idx}(:)');
+    spike_count = numel(current_spike_times_s);
+    ISI_s = diff(current_spike_times_s);
+    ISI_ms = ISI_s * 1000;
+
+    % Basic metrics:
+    % spike_count counts accepted spikes.
+    % mean_firing_rate_hz is total spikes divided by full recording duration.
+    % ISI_s is the interval between adjacent accepted spike timestamps.
+    % median_ISI_ms summarizes the central adjacent-spike interval.
+    isi_metrics = struct();
+    isi_metrics.neuron_id = roi_idx;
+    isi_metrics.spike_times_s = current_spike_times_s;
+    isi_metrics.recording_duration_s = recording_duration_s;
+    isi_metrics.spike_count = spike_count;
+    isi_metrics.mean_firing_rate_hz = spike_count / recording_duration_s;
+    isi_metrics.ISI_s = ISI_s;
+    isi_metrics.median_ISI_ms = median(ISI_ms, 'omitnan');
+
+    % Firing-rate drift:
+    % Reuse the earlier Trend Analysis FR bins when dimensions match;
+    % otherwise compute fixed-width FR bins here. FR_slope is the linear
+    % slope of binned FR versus time in Hz/s. The first/second-half FR values
+    % are independent coarse checks for slow state changes.
+    if can_reuse_trend_FR
+        isi_metrics.window_centers_s = trendx(:)';
+        isi_metrics.window_FR_hz = all_avgFR(roi_idx, :);
+        isi_metrics.FR_source = "reused_trend_analysis_all_avgFR";
+    else
+        window_starts = 0:isi_stat_params.window_step_s:(recording_duration_s - isi_stat_params.window_s);
+        if isempty(window_starts)
+            window_starts = 0;
+        end
+        isi_metrics.window_centers_s = window_starts + isi_stat_params.window_s / 2;
+        isi_metrics.window_FR_hz = NaN(size(isi_metrics.window_centers_s));
+        for window_idx = 1:numel(window_starts)
+            in_window = current_spike_times_s >= window_starts(window_idx) & ...
+                current_spike_times_s < window_starts(window_idx) + isi_stat_params.window_s;
+            isi_metrics.window_FR_hz(window_idx) = sum(in_window) / isi_stat_params.window_s;
+        end
+        isi_metrics.FR_source = "computed_in_isi_stat_section";
+    end
+    if numel(isi_metrics.window_centers_s) >= 2 && sum(isfinite(isi_metrics.window_FR_hz)) >= 2
+        fit_idx = isfinite(isi_metrics.window_FR_hz);
+        p = polyfit(isi_metrics.window_centers_s(fit_idx), isi_metrics.window_FR_hz(fit_idx), 1);
+        isi_metrics.FR_slope = p(1);
+    else
+        isi_metrics.FR_slope = NaN;
+    end
+    first_half = current_spike_times_s(current_spike_times_s <= recording_duration_s / 2);
+    second_half = current_spike_times_s(current_spike_times_s > recording_duration_s / 2);
+    isi_metrics.first_half_FR = numel(first_half) / max(recording_duration_s / 2, eps);
+    isi_metrics.second_half_FR = numel(second_half) / max(recording_duration_s / 2, eps);
+    isi_metrics.second_minus_first_FR = isi_metrics.second_half_FR - isi_metrics.first_half_FR;
+
+    % Burst detection:
+    % Mark each ISI shorter than burst_isi_threshold_ms. A continuous run of
+    % short ISIs maps to one spike block: ISI k..m corresponds to spikes
+    % k..m+1. Keeping each continuous run as one event prevents splitting one
+    % burst into several smaller bursts.
+    isi_bursts = struct('burst_onset_s', {}, 'burst_offset_s', {}, 'burst_duration_ms', {}, ...
+        'spike_indices_in_burst', {}, 'spikes_per_burst', {}, 'intra_burst_ISI_ms', {});
+    if spike_count >= isi_stat_params.min_spikes_per_burst
+        short_isi = ISI_ms < isi_stat_params.burst_isi_threshold_ms;
+        run_start = 1;
+        burst_id = 0;
+        while run_start <= numel(short_isi)
+            if ~short_isi(run_start)
+                run_start = run_start + 1;
+                continue;
+            end
+            run_end = run_start;
+            while run_end < numel(short_isi) && short_isi(run_end + 1)
+                run_end = run_end + 1;
+            end
+            spike_indices = run_start:(run_end + 1);
+            if numel(spike_indices) >= isi_stat_params.min_spikes_per_burst
+                burst_id = burst_id + 1;
+                burst_isi_ms = ISI_ms(run_start:run_end);
+                isi_bursts(burst_id).burst_onset_s = current_spike_times_s(spike_indices(1)); %#ok<SAGROW>
+                isi_bursts(burst_id).burst_offset_s = current_spike_times_s(spike_indices(end));
+                isi_bursts(burst_id).burst_duration_ms = ...
+                    (isi_bursts(burst_id).burst_offset_s - isi_bursts(burst_id).burst_onset_s) * 1000;
+                isi_bursts(burst_id).spike_indices_in_burst = spike_indices;
+                isi_bursts(burst_id).spikes_per_burst = numel(spike_indices);
+                isi_bursts(burst_id).intra_burst_ISI_ms = burst_isi_ms;
+            end
+            run_start = run_end + 1;
+        end
+    end
+
+    % Burst burden and periodicity:
+    % burst_spike_fraction is the fraction of all spikes assigned to bursts.
+    % IBI_s is measured from burst onset to next burst onset. CV_IBI is only
+    % meaningful when several bursts exist; sparse bursts remain descriptive.
+    isi_metrics.burst_count = numel(isi_bursts);
+    isi_metrics.burst_rate_per_min = isi_metrics.burst_count / recording_duration_s * 60;
+    burst_spike_mask = false(1, spike_count);
+    for burst_idx = 1:numel(isi_bursts)
+        burst_spike_mask(isi_bursts(burst_idx).spike_indices_in_burst) = true;
+    end
+    isi_metrics.burst_spike_count = sum(burst_spike_mask);
+    if spike_count > 0
+        isi_metrics.burst_spike_fraction = isi_metrics.burst_spike_count / spike_count;
+    else
+        isi_metrics.burst_spike_fraction = NaN;
+    end
+    isi_metrics.median_spikes_per_burst = median([isi_bursts.spikes_per_burst], 'omitnan');
+    isi_metrics.median_burst_duration_ms = median([isi_bursts.burst_duration_ms], 'omitnan');
+    all_intra_burst_isi_ms = [isi_bursts.intra_burst_ISI_ms];
+    isi_metrics.median_intra_burst_ISI_ms = median(all_intra_burst_isi_ms, 'omitnan');
+    isi_metrics.median_intra_burst_frequency_hz = 1000 / isi_metrics.median_intra_burst_ISI_ms;
+    isi_metrics.burst_onsets_s = [isi_bursts.burst_onset_s];
+    isi_metrics.IBI_s = diff(isi_metrics.burst_onsets_s);
+    isi_metrics.median_IBI_s = median(isi_metrics.IBI_s, 'omitnan');
+    if numel(isi_metrics.IBI_s) >= 2 && mean(isi_metrics.IBI_s, 'omitnan') > 0
+        isi_metrics.CV_IBI = std(isi_metrics.IBI_s, 'omitnan') / mean(isi_metrics.IBI_s, 'omitnan');
+    else
+        isi_metrics.CV_IBI = NaN;
+    end
+
+    % Non-burst local regularity:
+    % Remove burst spikes first, then compute ISIs only within contiguous
+    % non-burst spike-index segments. This avoids creating artificial ISIs
+    % that jump across a removed burst. CV_ISI describes global non-burst ISI
+    % spread, while LV and LvR describe local adjacent-ISI variability.
+    nonburst_indices = find(~burst_spike_mask);
+    nonburst_ISI_s = [];
+    adjacent_isi_1 = [];
+    adjacent_isi_2 = [];
+    if numel(nonburst_indices) >= 3
+        segment_breaks = [0 find(diff(nonburst_indices) > 1) numel(nonburst_indices)];
+        for seg_idx = 1:(numel(segment_breaks) - 1)
+            segment_indices = nonburst_indices(segment_breaks(seg_idx)+1:segment_breaks(seg_idx+1));
+            segment_times = current_spike_times_s(segment_indices);
+            segment_isi = diff(segment_times);
+            nonburst_ISI_s = [nonburst_ISI_s segment_isi]; %#ok<AGROW>
+            if numel(segment_isi) >= 2
+                adjacent_isi_1 = [adjacent_isi_1 segment_isi(1:end-1)]; %#ok<AGROW>
+                adjacent_isi_2 = [adjacent_isi_2 segment_isi(2:end)]; %#ok<AGROW>
+            end
+        end
+    end
+    isi_metrics.nonburst_ISI_s = nonburst_ISI_s;
+    if numel(nonburst_ISI_s) >= 2 && mean(nonburst_ISI_s, 'omitnan') > 0
+        isi_metrics.CV_ISI_nonburst = std(nonburst_ISI_s, 'omitnan') / mean(nonburst_ISI_s, 'omitnan');
+    else
+        isi_metrics.CV_ISI_nonburst = NaN;
+    end
+    isi_metrics.LV_nonburst = NaN;
+    isi_metrics.LvR_nonburst = NaN;
+    if ~isempty(adjacent_isi_1)
+        isi_sum = adjacent_isi_1 + adjacent_isi_2;
+        valid = isi_sum > 0;
+        lv_terms = 3 * ((adjacent_isi_2(valid) - adjacent_isi_1(valid)) ./ isi_sum(valid)).^2;
+        isi_metrics.LV_nonburst = mean(lv_terms, 'omitnan');
+        R = isi_stat_params.LvR_refractory_R_s;
+        lvr_terms = 3 * (1 - 4 * R ./ isi_sum(valid)) .* ...
+            ((adjacent_isi_2(valid) - adjacent_isi_1(valid)) ./ isi_sum(valid)).^2;
+        isi_metrics.LvR_nonburst = mean(lvr_terms, 'omitnan');
+    end
+
+    % Tentative phenotype label:
+    % The label combines spike count, FR stationarity, burst burden, burst
+    % periodicity, and non-burst LvR. It should be read together with the
+    % continuous metrics and QC plots, especially before thresholds are tuned.
+    if isi_metrics.spike_count < isi_stat_params.min_spike_count
+        isi_metrics.phenotype_label = "insufficient_data";
+    else
+        slope_hz_per_min = isi_metrics.FR_slope * 60;
+        half_diff_fraction = abs(isi_metrics.second_minus_first_FR) / max(isi_metrics.mean_firing_rate_hz, eps);
+        is_rate_drifting = abs(slope_hz_per_min) >= isi_stat_params.rate_drift_slope_threshold_hz_per_min || ...
+            half_diff_fraction >= isi_stat_params.rate_drift_half_diff_fraction;
+        is_burst_like = isi_metrics.burst_spike_fraction >= isi_stat_params.high_burst_fraction_threshold;
+        if is_rate_drifting && is_burst_like
+            isi_metrics.phenotype_label = "state_changing_burst_like";
+        elseif is_rate_drifting
+            isi_metrics.phenotype_label = "rate_drifting_firing";
+        elseif is_burst_like
+            if isi_metrics.burst_count >= isi_stat_params.min_burst_count_for_periodicity && ...
+                    isfinite(isi_metrics.CV_IBI) && isi_metrics.CV_IBI <= isi_stat_params.low_CV_IBI_threshold
+                isi_metrics.phenotype_label = "periodic_bursting";
+            elseif isi_metrics.burst_count >= isi_stat_params.min_burst_count_for_periodicity && ...
+                    isfinite(isi_metrics.CV_IBI) && isi_metrics.CV_IBI >= isi_stat_params.high_CV_IBI_threshold
+                isi_metrics.phenotype_label = "irregular_bursting";
+            else
+                isi_metrics.phenotype_label = "burst_like_unclassified_periodicity";
+            end
+        elseif isfinite(isi_metrics.LvR_nonburst) && isi_metrics.LvR_nonburst <= isi_stat_params.low_LvR_threshold
+            isi_metrics.phenotype_label = "locally_regular_tonic";
+        elseif isfinite(isi_metrics.LvR_nonburst) && isi_metrics.LvR_nonburst >= isi_stat_params.high_LvR_threshold
+            isi_metrics.phenotype_label = "locally_irregular_tonic";
+        else
+            isi_metrics.phenotype_label = "tonic_unclassified_regularity";
+        end
+    end
+
+    isi_stat_qc_summary.spike_count(roi_idx) = isi_metrics.spike_count;
+    isi_stat_qc_summary.mean_firing_rate_hz(roi_idx) = isi_metrics.mean_firing_rate_hz;
+    isi_stat_qc_summary.burst_spike_fraction(roi_idx) = isi_metrics.burst_spike_fraction;
+    isi_stat_qc_summary.LvR_nonburst(roi_idx) = isi_metrics.LvR_nonburst;
+    isi_stat_qc_summary.CV_IBI(roi_idx) = isi_metrics.CV_IBI;
+    isi_stat_qc_summary.phenotype_label(roi_idx) = isi_metrics.phenotype_label;
+
+    % QC figure:
+    % 1. Trace with spike markers and burst shaded regions.
+    % 2. Binned firing rate over time.
+    % 3. log10(ISI_ms) histogram with the burst threshold marked.
+    % 4. IBI histogram for burst-onset intervals.
+    % 5. Spike timeline colored by burst membership.
+    fig = figure('Visible', 'on', 'Position', [100, 100, 1100, 1200], ...
+        'Color', 'w', 'Name', sprintf('Neuron %03d ISI statistic QC', roi_idx));
+    recording_duration_s = isi_metrics.recording_duration_s;
+
+    subplot(5,1,1); hold on;
+    if ~isempty(isi_stat_trace_for_qc) && size(isi_stat_trace_for_qc, 2) >= roi_idx
+        trace_i = isi_stat_trace_for_qc(:, roi_idx);
+        t_trace = (1:numel(trace_i)) ./ freq;
+        plot(t_trace, trace_i, 'k');
+        spike_frames = max(1, min(numel(trace_i), round(isi_metrics.spike_times_s * freq)));
+        if ~isempty(spike_frames)
+            plot(isi_metrics.spike_times_s, trace_i(spike_frames), 'rv', ...
+                'MarkerFaceColor', 'r', 'MarkerSize', 4);
+        end
+        y_lim = ylim;
+        for burst_idx = 1:numel(isi_bursts)
+            patch([isi_bursts(burst_idx).burst_onset_s isi_bursts(burst_idx).burst_offset_s ...
+                isi_bursts(burst_idx).burst_offset_s isi_bursts(burst_idx).burst_onset_s], ...
+                [y_lim(1) y_lim(1) y_lim(2) y_lim(2)], [1.0 0.80 0.70], ...
+                'EdgeColor', 'none', 'FaceAlpha', 0.30);
+        end
+        uistack(findobj(gca, 'Type', 'line'), 'top');
+    else
+        plot(isi_metrics.spike_times_s, ones(size(isi_metrics.spike_times_s)), 'k|');
+    end
+    xlim([0 recording_duration_s]);
+    title(sprintf('Neuron %03d | %s', roi_idx, char(isi_metrics.phenotype_label)), 'Interpreter', 'none');
+    ylabel('Trace');
+    box on;
+
+    subplot(5,1,2); hold on;
+    plot(isi_metrics.window_centers_s, isi_metrics.window_FR_hz, 'k-o', 'MarkerSize', 3);
+    xlim([0 recording_duration_s]);
+    xlabel('Time (s)');
+    ylabel('FR (Hz)');
+    title(sprintf('Sliding FR | slope %.4g Hz/s | first %.3g Hz | second %.3g Hz', ...
+        isi_metrics.FR_slope, isi_metrics.first_half_FR, isi_metrics.second_half_FR));
+    box on;
+
+    subplot(5,1,3); hold on;
+    ISI_ms = isi_metrics.ISI_s * 1000;
+    ISI_ms = ISI_ms(isfinite(ISI_ms) & ISI_ms > 0);
+    if ~isempty(ISI_ms)
+        histogram(log10(ISI_ms), isi_stat_params.isi_histogram_num_bins, ...
+            'FaceColor', [0.55 0.55 0.55], 'EdgeColor', 'none');
+    end
+    xline(log10(isi_stat_params.burst_isi_threshold_ms), 'r-', 'LineWidth', 1.5);
+    if ~isempty(isi_stat_params.isi_histogram_xlim_log10_ms)
+        xlim(isi_stat_params.isi_histogram_xlim_log10_ms);
+    end
+    xlabel('log10(ISI ms)');
+    ylabel('Count');
+    title('ISI distribution');
+    box on;
+
+    subplot(5,1,4); hold on;
+    if numel(isi_metrics.IBI_s) > 0
+        histogram(isi_metrics.IBI_s, isi_stat_params.ibi_histogram_num_bins, ...
+            'FaceColor', [0.45 0.65 0.85], 'EdgeColor', 'none');
+    end
+    if ~isempty(isi_stat_params.ibi_histogram_xlim_s)
+        xlim(isi_stat_params.ibi_histogram_xlim_s);
+    end
+    xlabel('IBI (s)');
+    ylabel('Count');
+    title(sprintf('Burst count %d | burst spike fraction %.3g | CV IBI %.3g', ...
+        isi_metrics.burst_count, isi_metrics.burst_spike_fraction, isi_metrics.CV_IBI));
+    box on;
+
+    subplot(5,1,5); hold on;
+    plot(isi_metrics.spike_times_s, ones(size(isi_metrics.spike_times_s)), 'k|', 'MarkerSize', 8);
+    for burst_idx = 1:numel(isi_bursts)
+        plot([isi_bursts(burst_idx).burst_onset_s isi_bursts(burst_idx).burst_offset_s], ...
+            [1.15 1.15], 'r-', 'LineWidth', 3);
+    end
+    xlim([0 recording_duration_s]);
+    ylim([0.5 1.5]);
+    xlabel('Time (s)');
+    yticks([]);
+    title(sprintf('CV ISI nonburst %.3g | LV %.3g | LvR %.3g', ...
+        isi_metrics.CV_ISI_nonburst, isi_metrics.LV_nonburst, isi_metrics.LvR_nonburst));
+    box on;
+
+    saveas(fig, fullfile(isi_stat_qc_output_dir, sprintf('neuron_%03d_isi_stat_qc.fig', roi_idx)), 'fig');
+    saveas(fig, fullfile(isi_stat_qc_output_dir, sprintf('neuron_%03d_isi_stat_qc.png', roi_idx)), 'png');
+    close(fig);
 end
 
-plot_population_summary(neuron_table, output_dir, params);
-plot_roi_isi_violin(per_neuron_metrics, output_dir, params);
+fig = figure('Visible', 'on', 'Position', [100, 100, 1100, 500], ...
+    'Color', 'w', 'Name', 'ISI statistic population summary');
+subplot(1,2,1); hold on;
+scatter(isi_stat_qc_summary.burst_spike_fraction, isi_stat_qc_summary.LvR_nonburst, ...
+    45, 'k', 'filled', 'MarkerFaceAlpha', 0.70);
+xline(isi_stat_params.high_burst_fraction_threshold, 'r--');
+yline(isi_stat_params.low_LvR_threshold, 'b--');
+yline(isi_stat_params.high_LvR_threshold, 'b--');
+xlabel('Burst spike fraction');
+ylabel('LvR nonburst');
+title('Burst burden vs local regularity');
+grid on;
 
-fprintf('Revised ISI statistic QC saved to %s\n', output_dir);
-fprintf('Using peaks from %s; using trace from %s.\n', peak_source, trace_source);
+subplot(1,2,2); hold on;
+burst_like = isi_stat_qc_summary.burst_spike_fraction >= isi_stat_params.high_burst_fraction_threshold;
+scatter(isi_stat_qc_summary.burst_spike_fraction(burst_like), isi_stat_qc_summary.CV_IBI(burst_like), ...
+    45, 'r', 'filled', 'MarkerFaceAlpha', 0.70);
+yline(isi_stat_params.low_CV_IBI_threshold, 'k--');
+yline(isi_stat_params.high_CV_IBI_threshold, 'k--');
+xlabel('Burst spike fraction');
+ylabel('CV IBI');
+title('Burst-like neuron periodicity');
+grid on;
+saveas(fig, fullfile(isi_stat_qc_output_dir, 'population_isi_stat_summary.fig'), 'fig');
+saveas(fig, fullfile(isi_stat_qc_output_dir, 'population_isi_stat_summary.png'), 'png');
+close(fig);
+
+fprintf('ISI statistic QC figures saved to %s\n', isi_stat_qc_output_dir);
+fprintf('ISI statistic QC neurons plotted: %d\n', numel(isi_stat_qc_summary.neuron_id));
+end
 
 %% Save Explicit Results
 % Comment removed after encoding repair.
@@ -2742,954 +3018,6 @@ save(save_filename, 'results_summary', '-v7.3');
 
 
 %%
-
-%% Per-neuron analysis
-function metrics = analyze_one_spontaneous_neuron(t_spikes, recording_duration_s, params, neuron_id, frame_dt_ms)
-spike_count = numel(t_spikes);
-ISI_s = diff(t_spikes);
-ISI_ms = ISI_s * 1000;
-
-metrics = struct();
-metrics.neuron_id = neuron_id;
-metrics.spike_times_s = t_spikes;
-metrics.recording_duration_s = recording_duration_s;
-metrics.spike_count = spike_count;
-metrics.mean_firing_rate_hz = spike_count / max(recording_duration_s, eps);
-metrics.ISI_s = ISI_s;
-metrics.ISI_ms = ISI_ms;
-metrics.median_ISI_ms = safe_median(ISI_ms);   % Q50
-metrics.min_ISI_ms = safe_min(ISI_ms);
-metrics.max_ISI_ms = safe_max(ISI_ms);
-metrics.frame_dt_ms = frame_dt_ms;
-
-% Basic spike-detection sanity checks.
-metrics.suspicious_short_ISI_count = sum(ISI_ms < params.suspicious_short_isi_ms);
-metrics.suspicious_short_ISI_fraction = safe_div(metrics.suspicious_short_ISI_count, max(numel(ISI_ms), 0));
-metrics.temporal_resolution_warning = frame_dt_ms > params.burst_start_isi_threshold_ms / params.min_frames_per_burst_interval;
-
-% Firing-rate stationarity.
-[centers_s, fr_hz, fit_slope, first_FR, second_FR] = compute_sliding_fr(t_spikes, recording_duration_s, params.window_s, params.window_step_s);
-metrics.window_centers_s = centers_s;
-metrics.window_FR_hz = fr_hz;
-metrics.FR_slope_hz_per_s = fit_slope;
-metrics.FR_slope_hz_per_min = fit_slope * 60;
-metrics.first_half_FR_hz = first_FR;
-metrics.second_half_FR_hz = second_FR;
-metrics.second_minus_first_FR_hz = second_FR - first_FR;
-metrics.half_diff_fraction = abs(metrics.second_minus_first_FR_hz) / max(metrics.mean_firing_rate_hz, eps);
-metrics.window_FR_CV = safe_div(nanstd_compat(fr_hz), nanmean_compat(fr_hz));
-metrics.is_rate_drifting = abs(metrics.FR_slope_hz_per_min) >= params.rate_drift_slope_threshold_hz_per_min || ...
-    metrics.half_diff_fraction >= params.rate_drift_half_diff_fraction;
-
-% ISI-based burst detection with start/end thresholds and boundary quiescence.
-[bursts, burst_spike_mask] = detect_bursts_from_isi_revised(t_spikes, params);
-metrics.bursts = bursts;
-metrics.burst_spike_mask = burst_spike_mask;
-metrics.burst_count = numel(bursts);
-metrics.burst_rate_per_min = metrics.burst_count / max(recording_duration_s, eps) * 60;
-metrics.burst_spike_count = sum(burst_spike_mask);
-metrics.burst_spike_fraction = safe_div(metrics.burst_spike_count, spike_count);
-
-if isempty(bursts)
-    metrics.median_spikes_per_burst = NaN;
-    metrics.median_burst_duration_ms = NaN;
-    metrics.median_intra_burst_ISI_ms = NaN;
-    metrics.median_intra_burst_frequency_hz = NaN;
-    metrics.burst_onsets_s = [];
-    metrics.IBI_s = [];
-    metrics.median_IBI_s = NaN;
-    metrics.CV_IBI = NaN;
-    metrics.edge_truncated_burst_count = 0;
-else
-    metrics.median_spikes_per_burst = safe_median([bursts.spikes_per_burst]);
-    metrics.median_burst_duration_ms = safe_median([bursts.burst_duration_ms]);
-    all_intra_ms = [bursts.intra_burst_ISI_ms];
-    metrics.median_intra_burst_ISI_ms = safe_median(all_intra_ms);
-    metrics.median_intra_burst_frequency_hz = 1000 / metrics.median_intra_burst_ISI_ms;
-    metrics.burst_onsets_s = [bursts.burst_onset_s];
-    metrics.IBI_s = diff(metrics.burst_onsets_s);
-    metrics.median_IBI_s = safe_median(metrics.IBI_s);
-    if numel(metrics.IBI_s) >= 2 && nanmean_compat(metrics.IBI_s) > 0
-        metrics.CV_IBI = nanstd_compat(metrics.IBI_s) / nanmean_compat(metrics.IBI_s);
-    else
-        metrics.CV_IBI = NaN;
-    end
-    metrics.edge_truncated_burst_count = sum([bursts.edge_truncated]);
-end
-
-% Non-burst tonic regularity.
-reg = compute_nonburst_regularity(t_spikes, burst_spike_mask, params);
-metrics.nonburst_ISI_s = reg.nonburst_ISI_s;
-metrics.nonburst_segment_count = reg.nonburst_segment_count;
-metrics.nonburst_ISI_count = numel(reg.nonburst_ISI_s);
-metrics.CV_ISI_nonburst = reg.CV_ISI_nonburst;
-metrics.LV_nonburst = reg.LV_nonburst;
-metrics.LvR_nonburst = reg.LvR_nonburst;
-metrics.LvR_negative_term_fraction = reg.LvR_negative_term_fraction;
-
-% Whole-train metrics for reference only. Do not use whole-train LvR to decide burst phenotype.
-metrics.CV_ISI_all = NaN;
-metrics.LV_all = NaN;
-metrics.LvR_all = NaN;
-if numel(ISI_s) >= 2 && nanmean_compat(ISI_s) > 0
-    metrics.CV_ISI_all = nanstd_compat(ISI_s) / nanmean_compat(ISI_s);
-    whole_reg = compute_local_variation_from_adjacent(ISI_s(1:end-1), ISI_s(2:end), params.LvR_refractory_R_s);
-    metrics.LV_all = whole_reg.LV;
-    metrics.LvR_all = whole_reg.LvR;
-end
-
-% High-frequency tonic guard: many short ISIs but no quiescence-defined bursts.
-metrics.short_ISI_fraction = safe_div(sum(ISI_ms <= params.burst_start_isi_threshold_ms), numel(ISI_ms));
-metrics.sustained_high_frequency_candidate = metrics.short_ISI_fraction >= params.high_short_isi_fraction_threshold && ...
-    metrics.burst_spike_fraction < params.high_burst_fraction_threshold;
-
-metrics.phenotype_label = assign_firing_phenotype_revised(metrics, params);
-end
-
-function [bursts, burst_spike_mask] = detect_bursts_from_isi_revised(t_spikes, params)
-% ISI burst detector using start/end thresholds.
-% A burst starts when an ISI <= burst_start_isi_threshold_ms and is bounded
-% by quiescence: previous and following ISIs should be >= burst_end_isi_threshold_ms
-% unless params.allow_edge_bursts is true. Once a burst starts, it continues
-% until the first ISI >= burst_end_isi_threshold_ms. Candidate bursts must
-% contain at least min_spikes_per_burst spikes and enough fast ISIs.
-
-bursts = struct('burst_onset_s', {}, 'burst_offset_s', {}, 'burst_duration_ms', {}, ...
-    'spike_indices_in_burst', {}, 'spikes_per_burst', {}, 'intra_burst_ISI_ms', {}, ...
-    'pre_burst_ISI_ms', {}, 'post_burst_ISI_ms', {}, 'fast_ISI_count', {}, ...
-    'edge_truncated', {});
-
-spike_count = numel(t_spikes);
-burst_spike_mask = false(1, spike_count);
-if spike_count < params.min_spikes_per_burst
-    return;
-end
-
-ISI_ms = diff(t_spikes) * 1000;
-start_thr = params.burst_start_isi_threshold_ms;
-end_thr = params.burst_end_isi_threshold_ms;
-min_spikes = params.min_spikes_per_burst;
-min_fast_isi_count = max(params.min_fast_isi_count_per_burst, min_spikes - 1);
-
-k = 1;
-burst_id = 0;
-while k <= numel(ISI_ms)
-    if ISI_ms(k) > start_thr
-        k = k + 1;
-        continue;
-    end
-
-    % Candidate starts at spike k. Require quiescence before the burst unless
-    % the burst starts at the recording edge and edge bursts are allowed.
-    if k == 1
-        pre_isi = NaN;
-        pre_ok = params.allow_edge_bursts;
-        edge_start = true;
-    else
-        pre_isi = ISI_ms(k - 1);
-        pre_ok = pre_isi >= end_thr;
-        edge_start = false;
-    end
-    if params.require_quiescence_boundaries && ~pre_ok
-        k = k + 1;
-        continue;
-    end
-
-    run_start = k;
-    run_end = k;
-    % Continue burst until a clear long interval appears. The long interval
-    % itself is not included inside the burst.
-    while run_end < numel(ISI_ms) && ISI_ms(run_end + 1) < end_thr
-        run_end = run_end + 1;
-    end
-
-    spike_indices = run_start:(run_end + 1);
-    intra_ms = ISI_ms(run_start:run_end);
-
-    if run_end < numel(ISI_ms)
-        post_isi = ISI_ms(run_end + 1);
-        post_ok = post_isi >= end_thr;
-        edge_end = false;
-    else
-        post_isi = NaN;
-        post_ok = params.allow_edge_bursts;
-        edge_end = true;
-    end
-
-    fast_isi_count = sum(intra_ms <= start_thr);
-    duration_ms = (t_spikes(spike_indices(end)) - t_spikes(spike_indices(1))) * 1000;
-
-    candidate_ok = numel(spike_indices) >= min_spikes && ...
-        fast_isi_count >= min_fast_isi_count && ...
-        duration_ms <= params.max_burst_duration_ms;
-    if params.require_quiescence_boundaries
-        candidate_ok = candidate_ok && post_ok;
-    end
-
-    if candidate_ok
-        burst_id = burst_id + 1;
-        bursts(burst_id).burst_onset_s = t_spikes(spike_indices(1)); %#ok<AGROW>
-        bursts(burst_id).burst_offset_s = t_spikes(spike_indices(end));
-        bursts(burst_id).burst_duration_ms = duration_ms;
-        bursts(burst_id).spike_indices_in_burst = spike_indices;
-        bursts(burst_id).spikes_per_burst = numel(spike_indices);
-        bursts(burst_id).intra_burst_ISI_ms = intra_ms;
-        bursts(burst_id).pre_burst_ISI_ms = pre_isi;
-        bursts(burst_id).post_burst_ISI_ms = post_isi;
-        bursts(burst_id).fast_ISI_count = fast_isi_count;
-        bursts(burst_id).edge_truncated = edge_start || edge_end;
-        burst_spike_mask(spike_indices) = true;
-    end
-
-    k = run_end + 1;
-end
-end
-
-function reg = compute_nonburst_regularity(t_spikes, burst_spike_mask, params)
-reg = struct();
-reg.nonburst_ISI_s = [];
-reg.nonburst_segment_count = 0;
-reg.CV_ISI_nonburst = NaN;
-reg.LV_nonburst = NaN;
-reg.LvR_nonburst = NaN;
-reg.LvR_negative_term_fraction = NaN;
-
-nonburst_indices = find(~burst_spike_mask);
-if numel(nonburst_indices) < 3
-    return;
-end
-
-adjacent_isi_1 = [];
-adjacent_isi_2 = [];
-segment_breaks = [0 find(diff(nonburst_indices) > 1) numel(nonburst_indices)];
-for seg_idx = 1:(numel(segment_breaks) - 1)
-    segment_indices = nonburst_indices(segment_breaks(seg_idx)+1:segment_breaks(seg_idx+1));
-    if numel(segment_indices) < 2
-        continue;
-    end
-    reg.nonburst_segment_count = reg.nonburst_segment_count + 1;
-    segment_times = t_spikes(segment_indices);
-    segment_isi = diff(segment_times);
-    reg.nonburst_ISI_s = [reg.nonburst_ISI_s segment_isi]; %#ok<AGROW>
-    if numel(segment_isi) >= 2
-        adjacent_isi_1 = [adjacent_isi_1 segment_isi(1:end-1)]; %#ok<AGROW>
-        adjacent_isi_2 = [adjacent_isi_2 segment_isi(2:end)]; %#ok<AGROW>
-    end
-end
-
-if numel(reg.nonburst_ISI_s) >= 2 && nanmean_compat(reg.nonburst_ISI_s) > 0
-    reg.CV_ISI_nonburst = nanstd_compat(reg.nonburst_ISI_s) / nanmean_compat(reg.nonburst_ISI_s);
-end
-if ~isempty(adjacent_isi_1)
-    lv = compute_local_variation_from_adjacent(adjacent_isi_1, adjacent_isi_2, params.LvR_refractory_R_s);
-    reg.LV_nonburst = lv.LV;
-    reg.LvR_nonburst = lv.LvR;
-    reg.LvR_negative_term_fraction = lv.negative_term_fraction;
-end
-end
-
-function lv = compute_local_variation_from_adjacent(isi1_s, isi2_s, R_s)
-isi_sum = isi1_s + isi2_s;
-valid = isfinite(isi_sum) & isi_sum > 0 & isfinite(isi1_s) & isfinite(isi2_s);
-isi1_s = isi1_s(valid);
-isi2_s = isi2_s(valid);
-isi_sum = isi_sum(valid);
-
-lv = struct('LV', NaN, 'LvR', NaN, 'negative_term_fraction', NaN);
-if isempty(isi_sum)
-    return;
-end
-ratio_sq = ((isi2_s - isi1_s) ./ isi_sum).^2;
-LV_terms = 3 * ratio_sq;
-lv.LV = nanmean_compat(LV_terms);
-
-% Revised local variation with refractory correction. Shinomoto et al.
-% compensate for a refractory period R by subtracting R from adjacent ISIs;
-% the first-order expansion gives a multiplicative factor (1 + 4R/(ISI_i+ISI_{i+1})).
-% R should not be interpreted as a burst threshold; it is only a correction
-% term for local ISI irregularity metrics.
-refractory_factor = 1 + 4 * R_s ./ isi_sum;
-LvR_terms = 3 * refractory_factor .* ratio_sq;
-lv.LvR = nanmean_compat(LvR_terms);
-% This field is kept for compatibility. With the correct first-order LvR
-% factor it should be zero unless invalid inputs were already filtered out.
-lv.LvR_negative_term_fraction = 0;
-lv.negative_term_fraction = 0;
-end
-
-function label = assign_firing_phenotype_revised(metrics, params)
-if metrics.spike_count < params.min_spike_count
-    label = "insufficient_data";
-    return;
-end
-if metrics.suspicious_short_ISI_fraction >= params.suspicious_short_isi_fraction_threshold
-    label = "check_peak_detection_short_ISI";
-    return;
-end
-
-is_burst_like = metrics.burst_spike_fraction >= params.high_burst_fraction_threshold;
-is_mixed = metrics.burst_spike_fraction >= params.low_burst_fraction_threshold && ...
-    metrics.burst_spike_fraction < params.high_burst_fraction_threshold;
-
-if metrics.is_rate_drifting && is_burst_like
-    label = "rate_drifting_burst_like";
-elseif metrics.is_rate_drifting
-    label = "rate_drifting_firing";
-elseif metrics.sustained_high_frequency_candidate
-    label = "sustained_high_frequency_tonic_candidate";
-elseif is_burst_like
-    if metrics.burst_count >= params.min_burst_count_for_periodicity && isfinite(metrics.CV_IBI)
-        if metrics.CV_IBI <= params.low_CV_IBI_threshold
-            label = "periodic_bursting";
-        elseif metrics.CV_IBI >= params.high_CV_IBI_threshold
-            label = "irregular_bursting";
-        else
-            label = "bursting_intermediate_IBI_variability";
-        end
-    else
-        label = "burst_like_unclassified_periodicity";
-    end
-elseif is_mixed
-    label = "mixed_tonic_burst";
-elseif isfinite(metrics.LvR_nonburst) && metrics.LvR_nonburst <= params.low_LvR_threshold
-    label = "locally_regular_tonic";
-elseif isfinite(metrics.LvR_nonburst) && metrics.LvR_nonburst >= params.high_LvR_threshold
-    label = "locally_irregular_tonic";
-else
-    label = "tonic_unclassified_regularity";
-end
-end
-
-%% FR and sensitivity helpers
-function [centers_s, fr_hz, fit_slope, first_FR, second_FR] = compute_sliding_fr(t_spikes, duration_s, window_s, step_s)
-if duration_s <= 0
-    centers_s = [];
-    fr_hz = [];
-    fit_slope = NaN;
-    first_FR = NaN;
-    second_FR = NaN;
-    return;
-end
-window_s = min(window_s, duration_s);
-step_s = min(step_s, window_s);
-starts = 0:step_s:max(duration_s - window_s, 0);
-if isempty(starts)
-    starts = 0;
-end
-centers_s = starts + window_s / 2;
-fr_hz = NaN(size(centers_s));
-for i = 1:numel(starts)
-    t0 = starts(i);
-    t1 = min(t0 + window_s, duration_s);
-    in_window = t_spikes >= t0 & t_spikes < t1;
-    fr_hz(i) = sum(in_window) / max(t1 - t0, eps);
-end
-
-if numel(centers_s) >= 2 && sum(isfinite(fr_hz)) >= 2
-    idx = isfinite(fr_hz);
-    p = polyfit(centers_s(idx), fr_hz(idx), 1);
-    fit_slope = p(1);
-else
-    fit_slope = NaN;
-end
-first_FR = sum(t_spikes <= duration_s / 2) / max(duration_s / 2, eps);
-second_FR = sum(t_spikes > duration_s / 2) / max(duration_s / 2, eps);
-end
-
-function sensitivity_table = run_burst_threshold_sensitivity(spike_times_s, recording_duration_s, params, frame_dt_ms)
-rows = [];
-row_idx = 0;
-thresholds = params.sensitivity_burst_start_thresholds_ms(:)';
-for neuron_id = 1:numel(spike_times_s)
-    for thr = thresholds
-        params_i = params;
-        params_i.burst_start_isi_threshold_ms = thr;
-        if params.sensitivity_scale_end_threshold
-            params_i.burst_end_isi_threshold_ms = max(params.min_burst_end_isi_threshold_ms, params.burst_end_to_start_ratio * thr);
-        end
-        metrics_i = analyze_one_spontaneous_neuron(spike_times_s{neuron_id}, recording_duration_s, params_i, neuron_id, frame_dt_ms);
-        row_idx = row_idx + 1;
-        rows(row_idx).neuron_id = neuron_id; %#ok<AGROW>
-        rows(row_idx).burst_start_isi_threshold_ms = thr;
-        rows(row_idx).burst_end_isi_threshold_ms = params_i.burst_end_isi_threshold_ms;
-        rows(row_idx).burst_count = metrics_i.burst_count;
-        rows(row_idx).burst_spike_fraction = metrics_i.burst_spike_fraction;
-        rows(row_idx).CV_IBI = metrics_i.CV_IBI;
-        rows(row_idx).phenotype_label = string(metrics_i.phenotype_label);
-    end
-end
-if isempty(rows)
-    sensitivity_table = table();
-else
-    sensitivity_table = struct2table(rows);
-end
-end
-
-%% Row conversion
-function row = empty_neuron_row()
-row = struct();
-row.neuron_id = NaN;
-row.recording_duration_s = NaN;
-row.spike_count = NaN;
-row.mean_firing_rate_hz = NaN;
-row.median_ISI_ms = NaN;
-row.min_ISI_ms = NaN;
-row.max_ISI_ms = NaN;
-row.frame_dt_ms = NaN;
-row.temporal_resolution_warning = false;
-row.suspicious_short_ISI_count = NaN;
-row.suspicious_short_ISI_fraction = NaN;
-row.FR_slope_hz_per_min = NaN;
-row.first_half_FR_hz = NaN;
-row.second_half_FR_hz = NaN;
-row.second_minus_first_FR_hz = NaN;
-row.half_diff_fraction = NaN;
-row.window_FR_CV = NaN;
-row.is_rate_drifting = false;
-row.short_ISI_fraction = NaN;
-row.burst_count = NaN;
-row.burst_rate_per_min = NaN;
-row.burst_spike_count = NaN;
-row.burst_spike_fraction = NaN;
-row.edge_truncated_burst_count = NaN;
-row.median_spikes_per_burst = NaN;
-row.median_burst_duration_ms = NaN;
-row.median_intra_burst_ISI_ms = NaN;
-row.median_intra_burst_frequency_hz = NaN;
-row.median_IBI_s = NaN;
-row.CV_IBI = NaN;
-row.nonburst_segment_count = NaN;
-row.nonburst_ISI_count = NaN;
-row.CV_ISI_nonburst = NaN;
-row.LV_nonburst = NaN;
-row.LvR_nonburst = NaN;
-row.LvR_negative_term_fraction = NaN;
-row.CV_ISI_all = NaN;
-row.LV_all = NaN;
-row.LvR_all = NaN;
-row.sustained_high_frequency_candidate = false;
-row.phenotype_label = "";
-row.peak_source = "";
-row.trace_source = "";
-end
-
-function row = metrics_to_neuron_row(m, neuron_id, peak_source, trace_source)
-row = empty_neuron_row();
-row.neuron_id = neuron_id;
-row.recording_duration_s = m.recording_duration_s;
-row.spike_count = m.spike_count;
-row.mean_firing_rate_hz = m.mean_firing_rate_hz;
-row.median_ISI_ms = m.median_ISI_ms;
-row.min_ISI_ms = m.min_ISI_ms;
-row.max_ISI_ms = m.max_ISI_ms;
-row.frame_dt_ms = m.frame_dt_ms;
-row.temporal_resolution_warning = m.temporal_resolution_warning;
-row.suspicious_short_ISI_count = m.suspicious_short_ISI_count;
-row.suspicious_short_ISI_fraction = m.suspicious_short_ISI_fraction;
-row.FR_slope_hz_per_min = m.FR_slope_hz_per_min;
-row.first_half_FR_hz = m.first_half_FR_hz;
-row.second_half_FR_hz = m.second_half_FR_hz;
-row.second_minus_first_FR_hz = m.second_minus_first_FR_hz;
-row.half_diff_fraction = m.half_diff_fraction;
-row.window_FR_CV = m.window_FR_CV;
-row.is_rate_drifting = m.is_rate_drifting;
-row.short_ISI_fraction = m.short_ISI_fraction;
-row.burst_count = m.burst_count;
-row.burst_rate_per_min = m.burst_rate_per_min;
-row.burst_spike_count = m.burst_spike_count;
-row.burst_spike_fraction = m.burst_spike_fraction;
-row.edge_truncated_burst_count = m.edge_truncated_burst_count;
-row.median_spikes_per_burst = m.median_spikes_per_burst;
-row.median_burst_duration_ms = m.median_burst_duration_ms;
-row.median_intra_burst_ISI_ms = m.median_intra_burst_ISI_ms;
-row.median_intra_burst_frequency_hz = m.median_intra_burst_frequency_hz;
-row.median_IBI_s = m.median_IBI_s;
-row.CV_IBI = m.CV_IBI;
-row.nonburst_segment_count = m.nonburst_segment_count;
-row.nonburst_ISI_count = m.nonburst_ISI_count;
-row.CV_ISI_nonburst = m.CV_ISI_nonburst;
-row.LV_nonburst = m.LV_nonburst;
-row.LvR_nonburst = m.LvR_nonburst;
-row.LvR_negative_term_fraction = m.LvR_negative_term_fraction;
-row.CV_ISI_all = m.CV_ISI_all;
-row.LV_all = m.LV_all;
-row.LvR_all = m.LvR_all;
-row.sustained_high_frequency_candidate = m.sustained_high_frequency_candidate;
-row.phenotype_label = string(m.phenotype_label);
-row.peak_source = string(peak_source);
-row.trace_source = string(trace_source);
-end
-
-function row = empty_burst_event_row()
-row = struct();
-row.neuron_id = NaN;
-row.burst_id = NaN;
-row.burst_onset_s = NaN;
-row.burst_offset_s = NaN;
-row.burst_duration_ms = NaN;
-row.spikes_per_burst = NaN;
-row.median_intra_burst_ISI_ms = NaN;
-row.pre_burst_ISI_ms = NaN;
-row.post_burst_ISI_ms = NaN;
-row.fast_ISI_count = NaN;
-row.edge_truncated = false;
-end
-
-function rows = bursts_to_event_rows(bursts, neuron_id)
-rows = repmat(empty_burst_event_row(), numel(bursts), 1);
-for i = 1:numel(bursts)
-    rows(i).neuron_id = neuron_id;
-    rows(i).burst_id = i;
-    rows(i).burst_onset_s = bursts(i).burst_onset_s;
-    rows(i).burst_offset_s = bursts(i).burst_offset_s;
-    rows(i).burst_duration_ms = bursts(i).burst_duration_ms;
-    rows(i).spikes_per_burst = bursts(i).spikes_per_burst;
-    rows(i).median_intra_burst_ISI_ms = safe_median(bursts(i).intra_burst_ISI_ms);
-    rows(i).pre_burst_ISI_ms = bursts(i).pre_burst_ISI_ms;
-    rows(i).post_burst_ISI_ms = bursts(i).post_burst_ISI_ms;
-    rows(i).fast_ISI_count = bursts(i).fast_ISI_count;
-    rows(i).edge_truncated = bursts(i).edge_truncated;
-end
-end
-
-%% Plotting
-function plot_one_neuron_qc(m, trace_for_qc, trace_source, freq, output_dir, params)
-if params.figures_visible
-    visible_mode = 'on';
-else
-    visible_mode = 'off';
-end
-fig = figure('Visible', visible_mode, 'Position', [100, 100, 1150, 1250], ...
-    'Color', 'w', 'Name', sprintf('Neuron %03d revised ISI QC', m.neuron_id));
-
-subplot(6,1,1); hold on;
-if ~isempty(trace_for_qc) && size(trace_for_qc, 2) >= m.neuron_id
-    trace_i = trace_for_qc(:, m.neuron_id);
-    if params.frame_index_origin_is_zero_time
-        t_trace = (0:(numel(trace_i)-1)) ./ freq;
-    else
-        t_trace = (1:numel(trace_i)) ./ freq;
-    end
-    plot(t_trace, trace_i, 'k');
-    spike_frames = round(m.spike_times_s * freq) + double(params.frame_index_origin_is_zero_time);
-    spike_frames = max(1, min(numel(trace_i), spike_frames));
-    if ~isempty(spike_frames)
-        plot(m.spike_times_s, trace_i(spike_frames), 'rv', 'MarkerFaceColor', 'r', 'MarkerSize', 4);
-    end
-    y_lim = ylim;
-    for b = 1:numel(m.bursts)
-        patch([m.bursts(b).burst_onset_s, m.bursts(b).burst_offset_s, ...
-            m.bursts(b).burst_offset_s, m.bursts(b).burst_onset_s], ...
-            [y_lim(1), y_lim(1), y_lim(2), y_lim(2)], [1.0, 0.80, 0.45], ...
-            'FaceAlpha', 0.35, 'EdgeColor', 'none');
-    end
-    uistack(findobj(gca, 'Type', 'line'), 'top');
-end
-xlim([0, m.recording_duration_s]);
-title(sprintf('Neuron %03d: %s', m.neuron_id, char(m.phenotype_label)), 'Interpreter', 'none');
-ylabel(trace_source, 'Interpreter', 'none');
-box off;
-
-subplot(6,1,2); hold on;
-plot(m.window_centers_s, m.window_FR_hz, '-o', 'Color', [0.10, 0.35, 0.75], ...
-    'MarkerFaceColor', [0.10, 0.35, 0.75]);
-if numel(m.window_centers_s) >= 2 && isfinite(m.FR_slope_hz_per_s)
-    intercept = nanmean_compat(m.window_FR_hz) - m.FR_slope_hz_per_s * nanmean_compat(m.window_centers_s);
-    plot(m.window_centers_s, m.FR_slope_hz_per_s * m.window_centers_s + intercept, '--', ...
-        'Color', [0.85, 0.20, 0.20], 'LineWidth', 1.2);
-end
-xlim([0, m.recording_duration_s]);
-ylabel('FR (Hz)');
-title(sprintf('Sliding FR: slope %.3g Hz/min, half diff %.3g', m.FR_slope_hz_per_min, m.half_diff_fraction));
-box off;
-
-subplot(6,1,3); hold on;
-valid_isi_ms = m.ISI_ms(isfinite(m.ISI_ms) & m.ISI_ms > 0);
-if ~isempty(valid_isi_ms)
-    histogram(log10(valid_isi_ms), params.isi_histogram_num_bins, ...
-        'FaceColor', [0.30, 0.30, 0.30], 'EdgeColor', 'none');
-end
-xline(log10(params.burst_start_isi_threshold_ms), 'r-', 'LineWidth', 1.5);
-xline(log10(params.burst_end_isi_threshold_ms), 'b--', 'LineWidth', 1.2);
-if ~isempty(params.isi_histogram_xlim_log10_ms)
-    xlim(params.isi_histogram_xlim_log10_ms);
-end
-ylabel('Count');
-title(sprintf('log10(ISI ms): start <= %.3g ms, end/quiescence >= %.3g ms', ...
-    params.burst_start_isi_threshold_ms, params.burst_end_isi_threshold_ms));
-box off;
-
-subplot(6,1,4); hold on;
-if numel(m.ISI_ms) >= 2
-    plot(log10(m.ISI_ms(1:end-1)), log10(m.ISI_ms(2:end)), 'k.', 'MarkerSize', 8);
-    xline(log10(params.burst_start_isi_threshold_ms), 'r-');
-    yline(log10(params.burst_start_isi_threshold_ms), 'r-');
-end
-xlabel('log10(ISI_i ms)');
-ylabel('log10(ISI_{i+1} ms)');
-title('ISI return map');
-box off;
-
-subplot(6,1,5); hold on;
-if ~isempty(m.IBI_s)
-    histogram(m.IBI_s, params.ibi_histogram_num_bins, 'FaceColor', [0.35, 0.55, 0.80], 'EdgeColor', 'none');
-end
-if ~isempty(params.ibi_histogram_xlim_s)
-    xlim(params.ibi_histogram_xlim_s);
-end
-xlabel('IBI (s)');
-ylabel('Count');
-title(sprintf('Burst IBI: burst count %d, CV_IBI %.3g', m.burst_count, m.CV_IBI));
-box off;
-
-subplot(6,1,6); hold on;
-if ~isempty(m.spike_times_s)
-    plot(m.spike_times_s(~m.burst_spike_mask), zeros(1, sum(~m.burst_spike_mask)), 'k|', 'MarkerSize', 10);
-    plot(m.spike_times_s(m.burst_spike_mask), zeros(1, sum(m.burst_spike_mask)), 'r|', 'MarkerSize', 12);
-end
-xlim([0, m.recording_duration_s]);
-ylim([-1, 1]);
-yticks([]);
-xlabel('Time (s)');
-title(sprintf('Burst fraction %.3g, non-burst LvR %.3g, non-burst LV %.3g', ...
-    m.burst_spike_fraction, m.LvR_nonburst, m.LV_nonburst));
-box off;
-
-saveas(fig, fullfile(output_dir, sprintf('neuron_%03d_isi_stat_qc_revised.fig', m.neuron_id)), 'fig');
-saveas(fig, fullfile(output_dir, sprintf('neuron_%03d_isi_stat_qc_revised.png', m.neuron_id)), 'png');
-if ~params.figures_visible
-    close(fig);
-end
-end
-
-function plot_population_summary(neuron_table, output_dir, params)
-if isempty(neuron_table)
-    return;
-end
-if params.figures_visible
-    visible_mode = 'on';
-else
-    visible_mode = 'off';
-end
-fig = figure('Visible', visible_mode, 'Position', [100, 100, 950, 900], ...
-    'Color', 'w', 'Name', 'Population revised ISI summary');
-
-subplot(2,1,1); hold on;
-scatter(neuron_table.burst_spike_fraction, neuron_table.LvR_nonburst, 50, 'filled', ...
-    'MarkerFaceColor', [0.20, 0.45, 0.70], 'MarkerFaceAlpha', 0.75);
-xline(params.low_burst_fraction_threshold, 'Color', [0.7 0.7 0.7], 'LineStyle', '--');
-xline(params.high_burst_fraction_threshold, 'r--');
-yline(params.low_LvR_threshold, 'b--');
-yline(params.high_LvR_threshold, 'b--');
-xlabel('Burst spike fraction');
-ylabel('Non-burst LvR');
-title('Burst burden vs non-burst local regularity');
-box off;
-
-subplot(2,1,2); hold on;
-burst_like = neuron_table.burst_spike_fraction >= params.high_burst_fraction_threshold;
-scatter(neuron_table.burst_spike_fraction(burst_like), neuron_table.CV_IBI(burst_like), 55, 'filled', ...
-    'MarkerFaceColor', [0.80, 0.25, 0.20], 'MarkerFaceAlpha', 0.75);
-yline(params.low_CV_IBI_threshold, 'k--');
-yline(params.high_CV_IBI_threshold, 'k--');
-xlabel('Burst spike fraction');
-ylabel('CV IBI');
-title('Burst-like neurons: burst burden vs IBI variability');
-box off;
-
-saveas(fig, fullfile(output_dir, 'population_isi_stat_summary_revised.fig'), 'fig');
-saveas(fig, fullfile(output_dir, 'population_isi_stat_summary_revised.png'), 'png');
-if ~params.figures_visible
-    close(fig);
-end
-% --- Max ISI vs Q50 ISI figure ---
-fig2 = figure('Visible', visible_mode, 'Position', [150, 150, 700, 600], ...
-    'Color', 'w', 'Name', 'Max ISI vs Q50 ISI');
-
-valid = isfinite(neuron_table.max_ISI_ms) & isfinite(neuron_table.median_ISI_ms) & ...
-        neuron_table.max_ISI_ms > 0 & neuron_table.median_ISI_ms > 0;
-
-scatter(neuron_table.max_ISI_ms(valid), neuron_table.median_ISI_ms(valid), ...
-    60, 'filled', 'MarkerFaceColor', [0.20, 0.45, 0.70], 'MarkerFaceAlpha', 0.8);
-hold on;
-
-% Add neuron ID labels to each point.
-for i = find(valid)'
-    text(neuron_table.max_ISI_ms(i), neuron_table.median_ISI_ms(i), ...
-        sprintf('  %d', neuron_table.neuron_id(i)), ...
-        'FontSize', 9, 'Color', [0.1 0.1 0.1]);
-end
-
-set(gca, 'XScale', 'log', 'YScale', 'log');
-xlabel('Max ISI (ms)');
-ylabel('Q50 ISI / Median ISI (ms)');
-title('Max ISI vs Q50 ISI');
-grid on;
-box off;
-
-saveas(fig2, fullfile(output_dir, 'population_maxISI_vs_Q50ISI.fig'), 'fig');
-saveas(fig2, fullfile(output_dir, 'population_maxISI_vs_Q50ISI.png'), 'png');
-
-if ~params.figures_visible
-    close(fig2);
-end
-end
-function plot_roi_isi_violin(per_neuron_metrics, output_dir, params)
-% Plot ROI-wise ISI distributions as violin plots.
-% y-axis uses raw ISI_ms.
-
-if isempty(per_neuron_metrics)
-    return;
-end
-
-if params.figures_visible
-    visible_mode = 'on';
-else
-    visible_mode = 'off';
-end
-
-nrois = numel(per_neuron_metrics);
-
-fig = figure('Visible', visible_mode, 'Position', [120, 120, 1100, 650], ...
-    'Color', 'w', 'Name', 'ROI-wise ISI violin plot');
-hold on;
-
-max_width = 0.38;
-min_points_for_violin = 3;
-
-for roi_idx = 1:nrois
-    m = per_neuron_metrics{roi_idx};
-    if isempty(m) || ~isfield(m, 'ISI_ms')
-        continue;
-    end
-
-    isi_ms = m.ISI_ms(:);
-    isi_ms = isi_ms(isfinite(isi_ms) & isi_ms > 0);
-
-    if isempty(isi_ms)
-        continue;
-    end
-
-    y = isi_ms;
-
-    % Draw violin if enough ISIs exist.
-    if numel(y) >= min_points_for_violin
-        if exist('ksdensity', 'file') == 2
-            y_min = min(y);
-            y_max = max(y);
-
-            if y_min == y_max
-                y_grid = y_min + linspace(-0.05, 0.05, 50);
-                dens = ones(size(y_grid));
-            else
-                y_grid = linspace(y_min, y_max, 100);
-                dens = ksdensity(y, y_grid);
-            end
-        else
-            % Fallback if Statistics Toolbox is unavailable.
-            edges = linspace(min(y), max(y), 30);
-            if numel(unique(edges)) < 2
-                y_grid = y(1) + linspace(-0.05, 0.05, 50);
-                dens = ones(size(y_grid));
-            else
-                counts = histcounts(y, edges, 'Normalization', 'pdf');
-                y_grid = edges(1:end-1) + diff(edges)/2;
-                dens = counts;
-            end
-        end
-
-        if max(dens) > 0
-            dens = dens ./ max(dens) * max_width;
-        else
-            dens = zeros(size(dens));
-        end
-
-        x_left = roi_idx - dens;
-        x_right = roi_idx + dens;
-
-        patch([x_left, fliplr(x_right)], [y_grid, fliplr(y_grid)], ...
-            [0.55, 0.70, 0.85], ...
-            'FaceAlpha', 0.55, ...
-            'EdgeColor', [0.25, 0.35, 0.45], ...
-            'LineWidth', 0.8);
-    end
-
-    % Overlay individual ISIs with small horizontal jitter.
-    jitter_width = 0.08;
-    x_jitter = roi_idx + (rand(size(y)) - 0.5) * 2 * jitter_width;
-    plot(x_jitter, y, '.', ...
-        'Color', [0.15, 0.15, 0.15], ...
-        'MarkerSize', 5);
-
-    % Overlay Q25, median, Q75.
-    q25 = prctile(y, 25);
-    q50 = prctile(y, 50);
-    q75 = prctile(y, 75);
-
-    plot([roi_idx - 0.25, roi_idx + 0.25], [q50, q50], ...
-        'k-', 'LineWidth', 2.0);
-
-    plot([roi_idx, roi_idx], [q25, q75], ...
-        'k-', 'LineWidth', 1.2);
-
-    plot([roi_idx - 0.15, roi_idx + 0.15], [q25, q25], ...
-        'k-', 'LineWidth', 1.0);
-    plot([roi_idx - 0.15, roi_idx + 0.15], [q75, q75], ...
-        'k-', 'LineWidth', 1.0);
-end
-
-xlim([0.5, nrois + 0.5]);
-xticks(1:nrois);
-xlabel('ROI / neuron ID');
-
-ylabel('ISI (ms)');
-title('ROI-wise ISI distribution');
-
-grid on;
-box off;
-
-saveas(fig, fullfile(output_dir, 'roi_isi_violin_ISI_ms.fig'), 'fig');
-saveas(fig, fullfile(output_dir, 'roi_isi_violin_ISI_ms.png'), 'png');
-
-if ~params.figures_visible
-    close(fig);
-end
-end
-%% Parameters
-function params = default_isi_stat_params_revised()
-params = struct();
-
-% Timestamp convention.
-params.frame_index_origin_is_zero_time = true;  % frame 1 -> t = 0 s.
-
-% Firing-rate stationarity.
-params.window_s = 10;
-params.window_step_s = 5;
-params.rate_drift_slope_threshold_hz_per_min = 0.05;
-params.rate_drift_half_diff_fraction = 0.5;
-
-% Data sufficiency and spike-detection QC.
-params.min_spike_count = 10;
-params.suspicious_short_isi_ms = 1.0;          % suspicious duplicate/false split interval.
-params.suspicious_short_isi_fraction_threshold = 0.05;
-params.min_frames_per_burst_interval = 3;      % warn if burst threshold spans fewer frames.
-
-% Burst detection. These are deliberately exposed for sensitivity analysis.
-params.burst_start_isi_threshold_ms = 20;      % high-frequency interval required to start/qualify a burst.
-params.burst_end_isi_threshold_ms = NaN;       % if NaN, set to max(50 ms, 3*start threshold).
-params.min_burst_end_isi_threshold_ms = 50;
-params.burst_end_to_start_ratio = 3;
-params.min_spikes_per_burst = 3;
-params.min_fast_isi_count_per_burst = NaN;     % if NaN, set to min_spikes_per_burst - 1.
-params.max_burst_duration_ms = Inf;
-params.require_quiescence_boundaries = true;   % key guard against sustained high-frequency tonic misclassification.
-params.allow_edge_bursts = false;              % edge-truncated candidates are excluded by default.
-params.high_short_isi_fraction_threshold = 0.50;
-
-% Burst interpretation.
-params.min_burst_count_for_periodicity = 5;
-params.low_burst_fraction_threshold = 0.10;
-params.high_burst_fraction_threshold = 0.30;
-params.low_CV_IBI_threshold = 0.50;
-params.high_CV_IBI_threshold = 1.00;
-
-% Non-burst local regularity.
-params.low_LvR_threshold = 0.80;
-params.high_LvR_threshold = 1.20;
-params.LvR_refractory_R_s = 0.005;
-
-% Plots and output.
-params.make_per_neuron_figures = true;
-params.figures_visible = false;
-params.isi_histogram_num_bins = 100;
-params.ibi_histogram_num_bins = 20;
-params.isi_histogram_xlim_log10_ms = [];
-params.ibi_histogram_xlim_s = [];
-
-% Sensitivity analysis.
-params.run_threshold_sensitivity = true;
-params.sensitivity_burst_start_thresholds_ms = [10 20 30];
-params.sensitivity_scale_end_threshold = true;
-end
-
-function params = finalize_isi_stat_params(params)
-if ~isfield(params, 'burst_start_isi_threshold_ms') || isempty(params.burst_start_isi_threshold_ms)
-    params.burst_start_isi_threshold_ms = 20;
-end
-if ~isfield(params, 'burst_end_isi_threshold_ms') || isempty(params.burst_end_isi_threshold_ms) || isnan(params.burst_end_isi_threshold_ms)
-    params.burst_end_isi_threshold_ms = max(params.min_burst_end_isi_threshold_ms, ...
-        params.burst_end_to_start_ratio * params.burst_start_isi_threshold_ms);
-end
-if ~isfield(params, 'min_fast_isi_count_per_burst') || isempty(params.min_fast_isi_count_per_burst) || isnan(params.min_fast_isi_count_per_burst)
-    params.min_fast_isi_count_per_burst = max(1, params.min_spikes_per_burst - 1);
-end
-params.LvR_refractory_R_s = double(params.LvR_refractory_R_s);
-end
-
-
-%% Small compatibility utilities
-function base = merge_struct_fields(base, override)
-if ~isstruct(override)
-    return;
-end
-names = fieldnames(override);
-for i = 1:numel(names)
-    base.(names{i}) = override.(names{i});
-end
-end
-
-function y = safe_div(a, b)
-if isempty(b) || b == 0 || ~isfinite(b)
-    y = NaN;
-else
-    y = a ./ b;
-end
-end
-
-function y = safe_median(x)
-x = x(isfinite(x));
-if isempty(x)
-    y = NaN;
-else
-    y = median(x);
-end
-end
-
-function y = safe_min(x)
-x = x(isfinite(x));
-if isempty(x)
-    y = NaN;
-else
-    y = min(x);
-end
-end
-
-function y = nanmean_compat(x)
-x = x(isfinite(x));
-if isempty(x)
-    y = NaN;
-else
-    y = mean(x);
-end
-end
-
-function y = nanstd_compat(x)
-x = x(isfinite(x));
-if numel(x) <= 1
-    y = NaN;
-else
-    y = std(x);
-end
-end
-function y = safe_max(x)
-x = x(isfinite(x));
-if isempty(x)
-    y = NaN;
-else
-    y = max(x);
-end
-end
-
 
 function [peak_table, peaks_index, peaks_amplitude, peaks_polarity] = detect_sensitivity_peaks(traces_sensitivity, freq, params)
 nrois = size(traces_sensitivity, 2);

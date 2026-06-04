@@ -1933,14 +1933,17 @@ if stim_context.supported
             fprintf('Stim analysis branch: grating tuning\n');
             fprintf('  OSI/DSI: enabled\n');
             fprintf('  outputs: pref_dir, pref_ori, gOSI, gDSI, OSI, DSI\n');
-            voltage_tuning = compute_grating_tuning(voltage_stim_metrics_snr.delta_mean, stim_windows.orientations);
-            calcium_tuning = compute_grating_tuning(calcium_stim_metrics_snr.delta_mean, stim_windows.orientations);
+            [voltage_tuning, calcium_tuning, per_roi_tuning] = compute_dual_grating_tuning_by_roi( ...
+                voltage_stim_metrics_snr.delta_mean, calcium_stim_metrics_snr.delta_mean, stim_windows.orientations);
             stim_results.analysis_kind = 'grating_tuning';
             stim_results.tuning = struct( ...
                 'voltage', voltage_tuning, ...
-                'calcium', calcium_tuning);
+                'calcium', calcium_tuning, ...
+                'per_roi', per_roi_tuning);
 
-            save(fullfile(save_path, '7_stim_tuning_summary.mat'), 'voltage_tuning', 'calcium_tuning');
+            per_roi_tuning = save_grating_tuning_by_roi(per_roi_tuning, save_path, '7_stim_tuning_by_roi');
+            stim_results.tuning.per_roi = per_roi_tuning;
+            save(fullfile(save_path, '7_stim_tuning_summary.mat'), 'voltage_tuning', 'calcium_tuning', 'per_roi_tuning');
 
             stim_tuning_fig = figure('Color', 'w');
             subplot(2, 2, 1);
@@ -4579,6 +4582,113 @@ for roi_idx = 1:nrois
     orth_resp = r(orth_idx);
     tuning.dsi(roi_idx) = (pref_resp - opp_resp) / max(eps, pref_resp + opp_resp);
     tuning.osi(roi_idx) = (pref_resp - orth_resp) / max(eps, pref_resp + orth_resp);
+end
+end
+
+function [voltage_tuning, calcium_tuning, per_roi_tuning] = compute_dual_grating_tuning_by_roi(voltage_delta_mean, calcium_delta_mean, orientations)
+% Compute grating tuning once per ROI, then assemble population arrays.
+nrois = max(size(voltage_delta_mean, 1), size(calcium_delta_mean, 1));
+voltage_tuning = compute_grating_tuning(voltage_delta_mean, orientations);
+calcium_tuning = compute_grating_tuning(calcium_delta_mean, orientations);
+per_roi_tuning = repmat(empty_grating_roi_tuning(), nrois, 1);
+
+for roi_idx = 1:nrois
+    voltage_roi_delta = NaN(1, numel(orientations));
+    calcium_roi_delta = NaN(1, numel(orientations));
+    if roi_idx <= size(voltage_delta_mean, 1)
+        voltage_roi_delta = voltage_delta_mean(roi_idx, :);
+    end
+    if roi_idx <= size(calcium_delta_mean, 1)
+        calcium_roi_delta = calcium_delta_mean(roi_idx, :);
+    end
+
+    per_roi_tuning(roi_idx).roi_index = roi_idx;
+    per_roi_tuning(roi_idx).voltage = compute_grating_tuning(voltage_roi_delta, orientations);
+    per_roi_tuning(roi_idx).calcium = compute_grating_tuning(calcium_roi_delta, orientations);
+end
+end
+
+function entry = empty_grating_roi_tuning()
+entry = struct( ...
+    'roi_index', NaN, ...
+    'voltage', struct(), ...
+    'calcium', struct(), ...
+    'mat_file', "", ...
+    'fig_file', "", ...
+    'png_file', "");
+end
+
+function per_roi_tuning = save_grating_tuning_by_roi(per_roi_tuning, save_path, output_dir_name)
+% Save each ROI grating tuning result as its own MAT/FIG/PNG bundle.
+roi_tuning_dir = fullfile(save_path, output_dir_name);
+if ~isfolder(roi_tuning_dir)
+    mkdir(roi_tuning_dir);
+end
+
+for roi_idx = 1:numel(per_roi_tuning)
+    roi_entry = per_roi_tuning(roi_idx);
+    voltage_roi_tuning = roi_entry.voltage;
+    calcium_roi_tuning = roi_entry.calcium;
+    roi_label = sprintf('roi_%03d', roi_entry.roi_index);
+    mat_file = fullfile(roi_tuning_dir, sprintf('%s_stim_tuning.mat', roi_label));
+    fig_file = fullfile(roi_tuning_dir, sprintf('%s_stim_tuning.fig', roi_label));
+    png_file = fullfile(roi_tuning_dir, sprintf('%s_stim_tuning.png', roi_label));
+
+    roi_entry.mat_file = string(mat_file);
+    roi_entry.fig_file = string(fig_file);
+    roi_entry.png_file = string(png_file);
+    save(mat_file, 'roi_entry', 'voltage_roi_tuning', 'calcium_roi_tuning');
+
+    fig = figure('Color', 'w', 'Name', sprintf('ROI %03d Grating Tuning', roi_entry.roi_index), ...
+        'Position', [120, 120, 1000, 750]);
+    subplot(2, 2, 1);
+    plot_tuning_single(voltage_roi_tuning, 'r', sprintf('ROI %03d Voltage', roi_entry.roi_index));
+    subplot(2, 2, 2);
+    plot_tuning_single(calcium_roi_tuning, 'g', sprintf('ROI %03d Calcium', roi_entry.roi_index));
+    subplot(2, 2, 3);
+    plot_roi_tuning_metric_pair(voltage_roi_tuning, calcium_roi_tuning, 'gosi', 'gOSI');
+    subplot(2, 2, 4);
+    plot_roi_tuning_metric_pair(voltage_roi_tuning, calcium_roi_tuning, 'pref_dir', 'Preferred direction');
+    save_figure_bundle(fig, fig_file, png_file);
+    close(fig);
+
+    per_roi_tuning(roi_idx) = roi_entry;
+end
+end
+
+function plot_tuning_single(tuning, line_color, panel_title)
+angles = tuning.unique_orientations(:)';
+response = tuning.response_by_condition;
+if isempty(response)
+    response = NaN(1, numel(angles));
+elseif size(response, 1) > 1
+    response = response(1, :);
+end
+plot(angles, response, '-o', 'Color', line_color, 'MarkerFaceColor', line_color, 'LineWidth', 1.5);
+xlabel('Direction (deg)');
+ylabel('Net Response');
+title(panel_title);
+grid on;
+end
+
+function plot_roi_tuning_metric_pair(voltage_tuning, calcium_tuning, field_name, metric_label)
+voltage_value = extract_first_finite_field(voltage_tuning, field_name);
+calcium_value = extract_first_finite_field(calcium_tuning, field_name);
+bar([voltage_value, calcium_value], 'FaceColor', [0.45, 0.55, 0.70]);
+set(gca, 'XTickLabel', {'Voltage', 'Calcium'});
+ylabel(metric_label);
+title(metric_label);
+grid on;
+end
+
+function value = extract_first_finite_field(s, field_name)
+value = NaN;
+if isstruct(s) && isfield(s, field_name)
+    candidate = s.(field_name);
+    candidate = candidate(isfinite(candidate));
+    if ~isempty(candidate)
+        value = candidate(1);
+    end
 end
 end
 
@@ -7499,11 +7609,13 @@ if stim_context.supported
         end
 
         if stim_windows.is_grating
-            voltage_tuning = compute_grating_tuning(voltage_stim_metrics_snr.delta_mean, stim_windows.orientations);
-            calcium_tuning = compute_grating_tuning(calcium_stim_metrics_snr.delta_mean, stim_windows.orientations);
+            [voltage_tuning, calcium_tuning, per_roi_tuning] = compute_dual_grating_tuning_by_roi( ...
+                voltage_stim_metrics_snr.delta_mean, calcium_stim_metrics_snr.delta_mean, stim_windows.orientations);
             stim_results.analysis_kind = 'grating_tuning';
-            stim_results.tuning = struct('voltage', voltage_tuning, 'calcium', calcium_tuning);
-            save(fullfile(save_path, '7_stim_tuning_summary.mat'), 'voltage_tuning', 'calcium_tuning');
+            stim_results.tuning = struct('voltage', voltage_tuning, 'calcium', calcium_tuning, 'per_roi', per_roi_tuning);
+            per_roi_tuning = save_grating_tuning_by_roi(per_roi_tuning, save_path, '7_stim_tuning_by_roi');
+            stim_results.tuning.per_roi = per_roi_tuning;
+            save(fullfile(save_path, '7_stim_tuning_summary.mat'), 'voltage_tuning', 'calcium_tuning', 'per_roi_tuning');
             stim_tuning_fig = figure('Color', 'w');
             subplot(2, 2, 1); plot_tuning_population(voltage_tuning.unique_orientations, voltage_tuning.response_by_condition, 'r', 'Voltage');
             subplot(2, 2, 2); plot_tuning_population(calcium_tuning.unique_orientations, calcium_tuning.response_by_condition, 'g', 'Calcium');

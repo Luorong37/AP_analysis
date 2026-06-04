@@ -16,7 +16,7 @@ clc;
 %% 1. Input / Output Paths
 % Point to one rebuilt Rec*/Cycle* folder, or to one folder from a raw
 % two-folder pair if using the raw dual compatibility block below.
-cycle_path = 'V:\Luorong\Invivo\26.01.29_invivo dual color\Methods2\Rec1_2026-01-29 19-39-03\Cycle1';
+cycle_path = 'V:\Luorong\Invivo\26.06.02_dual_color_WT\Methods2_drifting_grating\Rec1_2026-06-02_21-05-24\Cycle1';
 
 % Optional name for this run. Leave empty to let Dual_analysis3 build a
 % name from record, cycle, and timestamp.
@@ -39,7 +39,7 @@ analysis_mode = 'analysis_only';
 % Existing Dual_analysis3 output folder for analysis_only reruns. This must
 % be a Dual_analysis3 result folder containing dual_info.mat,
 % voltage_results.mat, calcium_results.mat, and dual_results.mat.
-reuse_results_path = 'V:\Luorong\Invivo\26.01.29_invivo dual color\Methods2\Rec1_2026-01-29 19-39-03\Cycle1\Cam2_Red5%simo_Analysis\2026-01-31 22-00-48';
+reuse_results_path = 'V:\Luorong\Invivo\26.06.02_dual_color_WT\Methods2_drifting_grating\Rec1_2026-06-02_21-05-24\Cycle1\Dual_analysis3\Rec1_2026-06-02_21-05-24_Cycle1_2026-06-03 00-30-07-384';
 
 % Backend:
 % 'default'                  -> standard dual analysis
@@ -100,7 +100,7 @@ camera_source_override = [];
 %% 6. Motion Correction
 % Motion is estimated on voltage and applied to calcium to keep channels
 % spatially locked.
-run_motion_correction = true;
+run_motion_correction = false;
 
 motion_cfg = struct( ...
     'enabled', run_motion_correction, ...

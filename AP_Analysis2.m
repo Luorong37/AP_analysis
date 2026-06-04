@@ -38,8 +38,8 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\CC\20260523_CC_slice_AcemNeon2_9\slice3\Methods1_default\Rec1_2026-05-23_17-31-09\Cycle1';
-file = 'Cam1_Cyan5%';  % must add format.do not add '\' at last
+folder_path = 'E:\1_Data\CRY\4.2 Solaris-JF608-ROI5';
+file = '';  % must add format.do not add '\' at last
 bin = 4;
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓
 freq = 400; % Hz
