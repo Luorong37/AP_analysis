@@ -38,7 +38,7 @@ fprintf('Loading...\n')
 
 % ↓↓↓↓↓-----------Prompt user for define path-----------↓↓↓↓↓
 % support for folder, .tif, .tiff, .bin.
-folder_path = 'E:\1_Data\CRY\4.2 Solaris-JF608-ROI5';
+folder_path = 'E:\1_Data\CRY\zsy20250113 Solaris_Dark_mOrange2_Kv2.1_JF549slice1field3';
 file = '';  % must add format.do not add '\' at last
 bin = 4;
 % ↓↓↓↓↓-----------Prompt user for frame rate------------↓↓↓↓↓

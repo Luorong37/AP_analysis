@@ -5,23 +5,15 @@
 % 2. Create or reuse one ROI file from that reference cycle.
 % 3. Reuse the same ROI file for every other Cycle* under the same record.
 %
-% Two main analysis workflows:
-%   1. dual3_rec_control.mode='full': create one new timestamped result folder per
-%      cycle and run the complete analysis.
-%   2. dual3_rec_control.mode='analysis_only': find one previous complete result
-%      folder per cycle, reuse its ROI/traces/accepted peaks/stim context,
-%      and write only the downstream rerun into a new timestamped folder.
-%
-% Analysis-only fork details:
-%   Set dual3_rec_control.mode='analysis_only'. The
+% Analysis-only fork workflow:
+%   Set analysis_mode = 'analysis_only' before running this script. The
 %   script will find each Cycle*/Dual_analysis3 source result, reuse its
 %   saved traces/ROI/info, and write the new analysis outputs under
 %   Cycle*/Dual_analysis3/<run_name>. The source folder is
 %   read as input and is not used as save_path.
 %
 % Motion-only workflow:
-%   Set dual3_rec_control.mode='motion_only'. dual3_rec_control.rec_path may
-%   point either to one Rec*
+%   Set analysis_mode = 'motion_only'. rec_path may point either to one Rec*
 %   folder or to a Methods* folder containing multiple Rec* folders. The
 %   script runs Dual_analysis3 motion correction for every discovered
 %   Rec*/Cycle* and stops each cycle immediately after motion outputs are
@@ -29,98 +21,56 @@
 %
 % This script keeps Dual_analysis3 as a normal runnable script.
 % It passes parameters in from an outer scope by calling run(...).
-
+clear all
 %% Input Setup
-% Recommended workflow control:
-%
-%   dual3_rec_control = struct();
-%   dual3_rec_control.mode = "full";
-%   dual3_rec_control.rec_path = '...\Rec1_...';
-%
-% Or reuse each Cycle's latest complete result:
-%
-%   dual3_rec_control = struct();
-%   dual3_rec_control.mode = "analysis_only";
-%   dual3_rec_control.rec_path = '...\Rec1_...';
-%
-% dual3_rec_control is the only batch workflow-control input. Missing fields
-% use the preset below; unrelated workspace variables are ignored.
-% Signal-processing parameters below remain separate and are passed to
-% Dual_analysis3 only when the selected mode needs them.
+% Point this to one rebuilt record folder that contains Cycle* subfolders.
 
 % -------------------------------------------------------------------------
-% A. Workflow control presets
+% A. Main batch scope
 % -------------------------------------------------------------------------
-if ~exist('dual3_rec_control', 'var') || isempty(dual3_rec_control)
-    dual3_rec_control = struct();
+if ~exist('rec_path', 'var') || isempty(rec_path)
+    rec_path = 'E:\1_Data\Luorong\26.06.04_dual_color_WT\Methods2_drifting_grating\Rec1_2026-06-04_20-52-30';
 end
-dual3_rec_control_defaults = struct( ...
-    'rec_path', 'V:\Luorong\Invivo\26.06.02_dual_color_WT\Methods2_drifting_grating\Rec1_2026-06-02_21-05-24', ...
-    'backend', "default", ...
-    'mode', "analysis_only", ...
-    'output_root', "Dual_analysis3", ...
-    'run_tag', "", ...
-    'reference_cycle_name', "Cycle1", ...
-    'reference_roi_file', "", ...
-    'reuse_reference_roi', false, ...
-    'redraw_reference_roi', false, ...
-    'reference_offset_mode', "none", ...
-    'include_reference_cycle', false, ...
-    'cycles', strings(0, 1), ...
-    'skip_existing', [], ...
-    'record_average_only', false, ...
-    'record_average', false, ...
-    'stop_on_error', true, ...
-    'reuse_saved_peaks', true, ...
-    'write_diary', true, ...
-    'run_motion', true, ...
-    'cycle_offset_mode', "none", ...
-    'reuse_offset', [0, 0]);
-dual3_rec_control_effective = apply_control_defaults_rec(dual3_rec_control, dual3_rec_control_defaults);
-
-rec_path = char(string(dual3_rec_control_effective.rec_path));
-analysis_backend = char(string(dual3_rec_control_effective.backend));
-analysis_mode = char(string(dual3_rec_control_effective.mode));
-analysis_only_output_root_dir = char(string(dual3_rec_control_effective.output_root));
-analysis_only_run_tag = string(dual3_rec_control_effective.run_tag);
-reference_cycle_name = char(string(dual3_rec_control_effective.reference_cycle_name));
-reference_roi_file = char(string(dual3_rec_control_effective.reference_roi_file));
-reuse_existing_reference_roi = logical(dual3_rec_control_effective.reuse_reference_roi);
-rerun_reference_cycle_for_roi = logical(dual3_rec_control_effective.redraw_reference_roi);
-reference_correct_offset_mode = dual3_rec_control_effective.reference_offset_mode;
-run_reference_cycle_in_batch = logical(dual3_rec_control_effective.include_reference_cycle);
-cycle_name_filter = string(dual3_rec_control_effective.cycles);
-skip_cycles_with_existing_results = dual3_rec_control_effective.skip_existing;
-run_record_average_only = logical(dual3_rec_control_effective.record_average_only);
-run_record_average = logical(dual3_rec_control_effective.record_average);
-stop_on_cycle_error = logical(dual3_rec_control_effective.stop_on_error);
-analysis_only_reuse_saved_peak_results = logical(dual3_rec_control_effective.reuse_saved_peaks);
-enable_batch_diary = logical(dual3_rec_control_effective.write_diary);
-run_motion_correction = logical(dual3_rec_control_effective.run_motion);
-correct_offset_mode = dual3_rec_control_effective.cycle_offset_mode;
-reuse_offset = dual3_rec_control_effective.reuse_offset;
-
+if ~exist('analysis_backend', 'var') || isempty(analysis_backend)
+    analysis_backend = 'default';   % 'default' | 'volpy_voltage_reanalysis'
+end
+if ~exist('analysis_mode', 'var') || isempty(analysis_mode)
+    analysis_mode = 'analysis_only';         % 'full' | 'analysis_only' | 'motion_only'
+end
 analysis_only_rec_mode = strcmpi(string(analysis_mode), "analysis_only");
 motion_only_rec_mode = strcmpi(string(analysis_mode), "motion_only");
-if ~any(strcmpi(string(analysis_mode), ["full", "analysis_only", "motion_only"]))
-    error('Unsupported dual3_rec_control.mode: %s. Use full, analysis_only, or motion_only.', string(analysis_mode));
-end
 source_result_root_dir = resolve_result_root_dir_rec(analysis_backend);
 result_root_dir = source_result_root_dir;
 average_output_dir_name = resolve_average_output_dir_name_rec(analysis_backend);
 batch_summary_file_name = resolve_batch_summary_filename_rec(analysis_backend);
-if strlength(analysis_only_run_tag) == 0
+if ~exist('analysis_only_output_root_dir', 'var') || isempty(analysis_only_output_root_dir)
+    analysis_only_output_root_dir = resolve_analysis_only_output_root_dir_rec();
+end
+if ~exist('analysis_only_run_tag', 'var') || isempty(analysis_only_run_tag)
     analysis_only_run_tag = string(datetime('now', 'Format', 'yyyy-MM-dd HH-mm-ss'));
 end
-dual3_rec_control_effective.run_tag = analysis_only_run_tag;
-if analysis_only_rec_mode
-    run_motion_correction = false;
-    correct_offset_mode = "none";
-elseif motion_only_rec_mode
-    run_motion_correction = true;
-    correct_offset_mode = "none";
+
+% Choose one cycle as the ROI reference.
+if ~exist('reference_cycle_name', 'var') || isempty(reference_cycle_name)
+    reference_cycle_name = 'Cycle1';
 end
-dual3_rec_control_effective.run_motion = run_motion_correction;
+
+% If you already have a good ROI file, fill it here and the script will
+% skip the reference ROI selection step.
+if ~exist('reference_roi_file', 'var') || isempty(reference_roi_file)
+    reference_roi_file = '';
+end
+
+% Reuse the latest ROI result already present in the reference cycle when
+% possible. If false, the reference cycle will be rerun to generate ROI.
+if ~exist('reuse_existing_reference_roi', 'var') || isempty(reuse_existing_reference_roi)
+    reuse_existing_reference_roi = false;
+end
+
+% When true, rerun the reference cycle first to create a fresh ROI file.
+if ~exist('rerun_reference_cycle_for_roi', 'var') || isempty(rerun_reference_cycle_for_roi)
+    rerun_reference_cycle_for_roi = false;
+end
 
 % Whether the reference cycle should enter manual inter-camera ROI offset
 % correction before ROI drawing.
@@ -129,37 +79,53 @@ dual3_rec_control_effective.run_motion = run_motion_correction;
 %   'manual_points'   -> click one matching point on the two average images
 %   'matlab_register' -> use MATLAB built-in translation registration
 % Legacy true/false is still accepted and maps to manual_points/none.
+if ~exist('reference_correct_offset_mode', 'var') || isempty(reference_correct_offset_mode)
+    if exist('reference_correct_offset', 'var') && ~isempty(reference_correct_offset)
+        reference_correct_offset_mode = reference_correct_offset;
+    else
+        reference_correct_offset_mode = 'none' ;
+    end
+end
 reference_correct_offset_mode = normalize_correct_offset_mode_rec(reference_correct_offset_mode);
-correct_offset_mode = normalize_correct_offset_mode_rec(correct_offset_mode);
-dual3_rec_control_effective.cycle_offset_mode = string(correct_offset_mode);
+
+% After creating/reusing the reference ROI, also run the full analysis on
+% the reference cycle inside the batch loop.
+if ~exist('run_reference_cycle_in_batch', 'var') || isempty(run_reference_cycle_in_batch)
+    run_reference_cycle_in_batch = false;
+end
+
+% Leave empty to run every Cycle*. Otherwise provide a string array like:
+% ["Cycle1","Cycle3","Cycle5"] %strings(0, 1)
+if ~exist('cycle_name_filter', 'var') || isempty(cycle_name_filter)
+    cycle_name_filter = strings(0, 1); %strings(0, 1)
+end
 
 % Skip a cycle if it already contains previous matching results. In
 % motion-only mode this checks completed motion-correction outputs; in the
 % normal workflow it checks completed Dual_analysis3 ROI results.
-if isempty(skip_cycles_with_existing_results)
+if ~exist('skip_cycles_with_existing_results', 'var') || isempty(skip_cycles_with_existing_results)
     skip_cycles_with_existing_results = motion_only_rec_mode;
 end
-dual3_rec_control_effective.skip_existing = logical(skip_cycles_with_existing_results);
-run_record_average = logical(run_record_average) || logical(run_record_average_only);
-fprintf('[Batch] Effective workflow control:\n');
-fprintf('  mode=%s\n', string(analysis_mode));
-fprintf('  rec_path=%s\n', string(rec_path));
-fprintf('  cycle_filter_count=%d\n', numel(cycle_name_filter));
-fprintf('  skip_existing=%d\n', logical(skip_cycles_with_existing_results));
-fprintf('  record_average=%d\n', run_record_average);
-fprintf('  run_motion=%d\n', run_motion_correction);
-fprintf('  cycle_offset_mode=%s\n', string(correct_offset_mode));
-if analysis_only_rec_mode
-    fprintf('  analysis_only_output_root=%s\n', string(analysis_only_output_root_dir));
-    fprintf('  reuse_saved_peaks=%d\n', analysis_only_reuse_saved_peak_results);
+
+% When true, do not revisit the per-cycle workflow. Instead, reopen the
+% existing batch summary file and build only the final record-average
+% outputs. This is the fast path once all cycles have already been run.
+if ~exist('run_record_average_only', 'var') || isempty(run_record_average_only)
+    run_record_average_only = false;
 end
-print_dual3_rec_execution_plan( ...
-    analysis_mode, reuse_existing_reference_roi, rerun_reference_cycle_for_roi, ...
-    strlength(string(reference_roi_file)) > 0, analysis_only_reuse_saved_peak_results, ...
-    skip_cycles_with_existing_results, run_record_average);
+% Build the cross-cycle record average only when explicitly requested. This
+% keeps routine per-cycle batch runs from failing just because no completed
+% cycle is available yet, or because the user only wanted per-cycle outputs.
+if ~exist('run_record_average', 'var') || isempty(run_record_average)
+    run_record_average = false;
+end
+run_record_average = logical(run_record_average) || logical(run_record_average_only);
+if ~exist('stop_on_cycle_error', 'var') || isempty(stop_on_cycle_error)
+    stop_on_cycle_error = true;
+end
 
 % -------------------------------------------------------------------------
-% B. Algorithm Parameters: common channel settings
+% B. Common per-channel manual settings
 % These map onto camera_cfg automatically so routine reruns usually only
 % need edits here instead of manual struct rewriting below.
 % -------------------------------------------------------------------------
@@ -175,8 +141,19 @@ end
 if ~exist('calcium_transpose_movie', 'var') || isempty(calcium_transpose_movie)
     calcium_transpose_movie = true;
 end
+if ~exist('run_motion_correction', 'var') || isempty(run_motion_correction)
+    run_motion_correction = true;
+end
+if motion_only_rec_mode
+    run_motion_correction = true;
+end
+if ~exist('correct_offset_mode', 'var') || isempty(correct_offset_mode)
+    correct_offset_mode = 'none';
+end
+correct_offset_mode = normalize_correct_offset_mode_rec(correct_offset_mode);
+
 % -------------------------------------------------------------------------
-% C. Algorithm Parameters: shared Dual_analysis3 overrides
+% C. Advanced shared Dual_analysis3 overrides
 % -------------------------------------------------------------------------
 % Shared Dual_analysis3 overrides.
 if ~exist('camera_cfg', 'var') || isempty(camera_cfg)
@@ -223,33 +200,14 @@ end
 if ~exist('calcium_polarity', 'var') || isempty(calcium_polarity)
     calcium_polarity = 1;
 end
-if ~exist('voltage_peak_polarity_mode', 'var') || isempty(voltage_peak_polarity_mode)
-    voltage_peak_polarity_mode = "auto";
+if ~exist('reuse_offset', 'var') || isempty(reuse_offset)
+    reuse_offset = [0,0];
 end
-if ~exist('voltage_peak_min_prominence', 'var') || isempty(voltage_peak_min_prominence)
-    voltage_peak_min_prominence = 0.3;
-end
-if ~exist('voltage_peak_min_prominence_mode', 'var') || isempty(voltage_peak_min_prominence_mode)
-    voltage_peak_min_prominence_mode = "relative_factor";
-end
-if ~exist('voltage_peak_min_distance_frames', 'var') || isempty(voltage_peak_min_distance_frames)
-    voltage_peak_min_distance_frames = max(2, round(0.003 * voltage_frame_rate));
-end
-if ~exist('voltage_peak_min_height', 'var') || isempty(voltage_peak_min_height)
-    voltage_peak_min_height = 0;
-end
-if ~exist('run_manual_voltage_peak_edit', 'var') || isempty(run_manual_voltage_peak_edit)
-    run_manual_voltage_peak_edit = true;
-end
-voltage_peak_params = struct( ...
-    'polarity_mode', string(voltage_peak_polarity_mode), ...
-    'min_peak_prominence', voltage_peak_min_prominence, ...
-    'min_peak_prominence_mode', string(voltage_peak_min_prominence_mode), ...
-    'min_peak_distance_frames', voltage_peak_min_distance_frames, ...
-    'min_peak_height', voltage_peak_min_height, ...
-    'run_manual_edit', logical(run_manual_voltage_peak_edit));
 if ~exist('gpu', 'var') || isempty(gpu)
     gpu = true;
+end
+if ~exist('enable_batch_diary', 'var') || isempty(enable_batch_diary)
+    enable_batch_diary = true;
 end
 if ~exist('motion_cfg', 'var') || isempty(motion_cfg)
     motion_cfg = struct( ...
@@ -363,8 +321,7 @@ if motion_only_rec_mode
     end
 
     reference_roi_file = "";
-    save(batch_summary_file, 'batch_results', 'reference_roi_file', 'analysis_mode', ...
-        'motion_cycle_entries', 'dual3_rec_control_effective');
+    save(batch_summary_file, 'batch_results', 'reference_roi_file', 'analysis_mode', 'motion_cycle_entries');
     fprintf('\nMotion-only batch summary saved to:\n  %s\n', batch_summary_file);
     return;
 end
@@ -491,7 +448,7 @@ else
         for i = 1:numel(cycle_dirs)
             current_cycle_name = string(cycle_dirs(i).name);
             current_cycle_path = fullfile(cycle_dirs(i).folder, cycle_dirs(i).name);
-            source_result = find_latest_reusable_analysis_result(current_cycle_path, analysis_backend);
+            source_result = find_latest_explicit_result(current_cycle_path, analysis_backend);
 
             if strlength(source_result) == 0
                 batch_results(end+1, 1) = struct( ...
@@ -530,8 +487,7 @@ else
                     camera_cfg, map_bin, calcium_smoothing_window, ...
                     bleach_mode_voltage, bleach_mode_calcium, run_background_removal, ...
                     voltage_polarity, calcium_polarity, ...
-                    reuse_offset, gpu, motion_cfg, voltage_peak_params, ...
-                    analysis_only_reuse_saved_peak_results);
+                    reuse_offset, gpu, motion_cfg);
 
                 batch_results(end+1, 1) = struct( ...
                     'cycle_name', current_cycle_name, ...
@@ -604,7 +560,7 @@ else
                 camera_cfg, map_bin, calcium_smoothing_window, ...
                 bleach_mode_voltage, bleach_mode_calcium, run_background_removal, ...
                 voltage_polarity, calcium_polarity, ...
-                reuse_offset, gpu, motion_cfg, analysis_backend, voltage_peak_params);
+                reuse_offset, gpu, motion_cfg, analysis_backend);
             reference_roi_file = string(reference_result.roi_file);
             fprintf('Reference ROI file created:\n  %s\n', reference_roi_file);
         end
@@ -664,7 +620,7 @@ else
                     camera_cfg, map_bin, calcium_smoothing_window, ...
                     bleach_mode_voltage, bleach_mode_calcium, run_background_removal, ...
                     voltage_polarity, calcium_polarity, ...
-                    reuse_offset, gpu, motion_cfg, analysis_backend, voltage_peak_params);
+                    reuse_offset, gpu, motion_cfg, analysis_backend);
 
                 batch_results(end+1, 1) = struct( ...
                     'cycle_name', current_cycle_name, ...
@@ -692,8 +648,7 @@ else
         end
     end
 
-    save(batch_summary_file, 'batch_results', 'reference_roi_file', 'analysis_mode', ...
-        'analysis_only_output_root_dir', 'analysis_only_run_tag', 'dual3_rec_control_effective');
+    save(batch_summary_file, 'batch_results', 'reference_roi_file', 'analysis_mode', 'analysis_only_output_root_dir', 'analysis_only_run_tag');
     fprintf('\nBatch summary saved to:\n  %s\n', batch_summary_file);
 end
 
@@ -716,78 +671,12 @@ else
 end
 
 %% Local Functions
-function control = apply_control_defaults_rec(control, defaults)
-if ~isstruct(control) || ~isscalar(control)
-    error('dual3_rec_control must be one scalar struct.');
-end
-unknown_fields = setdiff(fieldnames(control), fieldnames(defaults));
-if ~isempty(unknown_fields)
-    error('Unknown dual3_rec_control field(s): %s', strjoin(unknown_fields, ', '));
-end
-default_fields = fieldnames(defaults);
-for idx = 1:numel(default_fields)
-    field_name = default_fields{idx};
-    if ~isfield(control, field_name) || isempty(control.(field_name))
-        control.(field_name) = defaults.(field_name);
-    end
-end
-end
-
-function print_dual3_rec_execution_plan( ...
-    mode, reuse_reference_roi, redraw_reference_roi, has_reference_roi_file, ...
-    reuse_saved_peaks, skip_existing, run_average)
-mode = lower(string(mode));
-rows = strings(0, 3);
-rows(end+1, :) = ["Discover Cycle folders", "RUN", "Apply control.cycles filter"];
-switch mode
-    case "full"
-        if redraw_reference_roi
-            rows(end+1, :) = ["Reference ROI", "RUN", "Force a new ROI on the reference cycle"];
-        elseif reuse_reference_roi || has_reference_roi_file
-            rows(end+1, :) = ["Reference ROI", "REUSE", "Use the latest/reference configured ROI"];
-        else
-            rows(end+1, :) = ["Reference ROI", "RUN", "Create ROI when no explicit reference ROI is supplied"];
-        end
-        rows(end+1, :) = ["Per-cycle movie processing", "RUN", "Run complete Dual_analysis3 for selected cycles"];
-        rows(end+1, :) = ["Previous traces and peaks", "SKIP", "Full mode computes new results"];
-    case "analysis_only"
-        rows(end+1, :) = ["Find previous result per Cycle", "RUN", "Select latest complete reusable result"];
-        rows(end+1, :) = ["Per-cycle movie/ROI/trace processing", "SKIP", "Read saved ROI and traces"];
-        if reuse_saved_peaks
-            rows(end+1, :) = ["Per-cycle accepted peaks", "REUSE", "Validate accepted peaks from each source result"];
-        else
-            rows(end+1, :) = ["Per-cycle accepted peaks", "RUN", "Recompute peaks from saved voltage sensitivity traces"];
-        end
-        rows(end+1, :) = ["Per-cycle plots / DSI / OSI", "RUN", "Write new analysis_only result folder"];
-        rows(end+1, :) = ["Previous result folders", "READ ONLY", "Never overwrite source folders"];
-    case "motion_only"
-        rows(end+1, :) = ["Per-cycle motion correction", "RUN", "Run motion stage only"];
-        rows(end+1, :) = ["ROI / traces / peaks / tuning", "STOP", "Do not run later sections"];
-end
-if skip_existing
-    rows(end+1, :) = ["Existing matching output", "SKIP", "Do not rerun a completed matching output"];
-else
-    rows(end+1, :) = ["Existing matching output", "RUN AGAIN", "Create another timestamped output"];
-end
-if run_average
-    rows(end+1, :) = ["Record-level average", "RUN", "Generate stimulus-type-specific Rec summary"];
-else
-    rows(end+1, :) = ["Record-level average", "SKIP", "Keep per-cycle outputs only"];
-end
-
-fprintf('[Batch] Execution plan:\n');
-fprintf('  %-38s %-10s %s\n', 'Stage', 'Action', 'Meaning');
-for idx = 1:size(rows, 1)
-    fprintf('  %-38s %-10s %s\n', rows(idx, 1), rows(idx, 2), rows(idx, 3));
-end
-end
-
 function result = run_dual_cycle_with_overrides( ...
     dual_script_path, cycle_path, reuse_roi_file, correct_offset_mode, ...
     camera_cfg, map_bin, calcium_smoothing_window, ...
     bleach_mode_voltage, bleach_mode_calcium, run_background_removal, ...
     voltage_polarity, calcium_polarity, ...
-    reuse_offset, gpu, motion_cfg, analysis_backend, voltage_peak_params)
+    reuse_offset, gpu, motion_cfg, analysis_backend)
 
 % All variables defined in this function are visible to Dual_analysis3.m
 % when it is executed via run(...). This keeps Dual_analysis3 as a script
@@ -796,19 +685,6 @@ function result = run_dual_cycle_with_overrides( ...
 [~, record_name_for_name] = fileparts(record_path_for_name);
 time_tag = string(datetime('now', 'Format', 'yyyy-MM-dd HH-mm-ss-SSS'));
 analysis_run_name = sprintf('%s_%s_%s', record_name_for_name, cycle_name_for_name, char(time_tag));
-dual3_control = struct( ...
-    'cycle_path', string(cycle_path), ...
-    'preset', "full", ...
-    'backend', string(analysis_backend), ...
-    'run_name', string(analysis_run_name), ...
-    'source_results_path', ternary_rec( ...
-        strlength(string(reuse_roi_file)) > 0, string(fileparts(reuse_roi_file)), ""), ...
-    'offset_mode', string(correct_offset_mode), ...
-    'reuse_offset', reuse_offset, ...
-    'sections', struct( ...
-        'motion', ternary_rec(logical(motion_cfg.enabled), "run", "skip"), ...
-        'registration', ternary_rec(strlength(string(reuse_roi_file)) > 0, "skip", "run"), ...
-        'roi', ternary_rec(strlength(string(reuse_roi_file)) > 0, "reuse", "run")));
 if strcmpi(string(analysis_backend), "volpy_voltage_reanalysis")
     standard_result = find_latest_explicit_result(cycle_path, 'default');
     if strlength(standard_result) == 0
@@ -816,12 +692,6 @@ if strcmpi(string(analysis_backend), "volpy_voltage_reanalysis")
     end
     volpy_source_results_path = string(fileparts(standard_result));
 end
-voltage_peak_polarity_mode = voltage_peak_params.polarity_mode;
-voltage_peak_min_prominence = voltage_peak_params.min_peak_prominence;
-voltage_peak_min_prominence_mode = voltage_peak_params.min_peak_prominence_mode;
-voltage_peak_min_distance_frames = voltage_peak_params.min_peak_distance_frames;
-voltage_peak_min_height = voltage_peak_params.min_peak_height;
-run_manual_voltage_peak_edit = voltage_peak_params.run_manual_edit;
 
 run(dual_script_path);
 
@@ -843,17 +713,16 @@ function result = run_dual_cycle_motion_only( ...
 [record_path_for_name, cycle_name_for_name] = fileparts(cycle_path);
 [~, record_name_for_name] = fileparts(record_path_for_name);
 time_tag = string(datetime('now', 'Format', 'yyyy-MM-dd HH-mm-ss-SSS'));
+analysis_mode = 'motion_only';
+analysis_backend = 'default';
 analysis_run_name = sprintf('%s_%s_motion_only_%s', ...
     record_name_for_name, cycle_name_for_name, char(time_tag));
 analysis_run_name = sanitize_path_component_rec(analysis_run_name);
-dual3_control = struct( ...
-    'cycle_path', string(cycle_path), ...
-    'preset', "motion_only", ...
-    'backend', "default", ...
-    'run_name', string(analysis_run_name), ...
-    'offset_mode', "none", ...
-    'reuse_offset', reuse_offset);
+run_motion_correction = true;
 motion_cfg.enabled = true;
+reuse_roi_file = '';
+correct_offset_mode = 'none';
+reuse_results_path = '';
 
 run(dual_script_path);
 
@@ -867,34 +736,21 @@ function result = run_dual_cycle_analysis_only_fork( ...
     camera_cfg, map_bin, calcium_smoothing_window, ...
     bleach_mode_voltage, bleach_mode_calcium, run_background_removal, ...
     voltage_polarity, calcium_polarity, ...
-    reuse_offset, gpu, motion_cfg, voltage_peak_params, ...
-    analysis_only_reuse_saved_peak_results)
+    reuse_offset, gpu, motion_cfg)
 
 % Reuse saved ROI/trace/stim context from an existing Dual_analysis3 folder,
 % but write the rerun products to a new folder under output_root_dir.
 [record_path_for_name, cycle_name_for_name] = fileparts(cycle_path);
 [~, record_name_for_name] = fileparts(record_path_for_name);
+analysis_mode = 'analysis_only';
+analysis_backend = 'default';
 analysis_run_name = sprintf('%s_%s_analysis_only_%s', ...
     record_name_for_name, cycle_name_for_name, char(string(run_tag)));
 analysis_run_name = sanitize_path_component_rec(analysis_run_name);
+reuse_results_path = char(string(source_results_path));
 save_path = fullfile(cycle_path, char(string(output_root_dir)), analysis_run_name);
-dual3_control = struct( ...
-    'cycle_path', string(cycle_path), ...
-    'preset', "analysis_only", ...
-    'backend', "default", ...
-    'run_name', string(analysis_run_name), ...
-    'output_path', string(save_path), ...
-    'source_results_path', string(source_results_path), ...
-    'offset_mode', "none", ...
-    'reuse_offset', reuse_offset, ...
-    'sections', struct('peak', ternary_rec( ...
-        logical(analysis_only_reuse_saved_peak_results), "reuse", "run")));
-voltage_peak_polarity_mode = voltage_peak_params.polarity_mode;
-voltage_peak_min_prominence = voltage_peak_params.min_peak_prominence;
-voltage_peak_min_prominence_mode = voltage_peak_params.min_peak_prominence_mode;
-voltage_peak_min_distance_frames = voltage_peak_params.min_peak_distance_frames;
-voltage_peak_min_height = voltage_peak_params.min_peak_height;
-run_manual_voltage_peak_edit = voltage_peak_params.run_manual_edit;
+reuse_roi_file = '';
+correct_offset_mode = 'none';
 
 run(dual_script_path);
 
@@ -1020,6 +876,10 @@ else
 end
 end
 
+function result_root_dir = resolve_analysis_only_output_root_dir_rec()
+result_root_dir = 'Dual_analysis3';
+end
+
 function average_output_dir_name = resolve_average_output_dir_name_rec(analysis_backend)
 if strcmpi(string(analysis_backend), "volpy_voltage_reanalysis")
     average_output_dir_name = 'Dual_analysis3_rec_average_volpy_voltage';
@@ -1066,29 +926,6 @@ roi_listing = dir(fullfile(cycle_path, result_root_dir, '**', '1_dual_roi_result
 explicit_result = select_latest_file_from_listing_rec(roi_listing);
 end
 
-function explicit_result = find_latest_reusable_analysis_result(cycle_path, analysis_backend)
-explicit_result = "";
-if nargin < 2 || isempty(analysis_backend)
-    analysis_backend = 'default';
-end
-result_root_dir = resolve_result_root_dir_rec(analysis_backend);
-listing = dir(fullfile(cycle_path, result_root_dir, '**', 'voltage_results.mat'));
-if isempty(listing)
-    return;
-end
-
-[~, order] = sort([listing.datenum], 'descend');
-listing = listing(order);
-required_files = {'dual_info.mat', 'calcium_results.mat', '1_dual_roi_results.mat'};
-for idx = 1:numel(listing)
-    candidate_dir = listing(idx).folder;
-    if all(cellfun(@(name) isfile(fullfile(candidate_dir, name)), required_files))
-        explicit_result = string(fullfile(candidate_dir, listing(idx).name));
-        return;
-    end
-end
-end
-
 function motion_result = find_latest_motion_correction_result(cycle_path)
 motion_result = "";
 motion_roots = "Dual_analysis3";
@@ -1125,19 +962,11 @@ end
 function explicit_result = find_latest_analysis_only_fork_result(cycle_path, output_root_dir)
 explicit_result = "";
 explicit_listing = dir(fullfile(cycle_path, char(string(output_root_dir)), '**', '-1_explicit_dual_results.mat'));
-if ~isempty(explicit_listing)
-    is_analysis_only = contains(string({explicit_listing.folder}), "_analysis_only_", 'IgnoreCase', true);
-    explicit_listing = explicit_listing(is_analysis_only);
-end
 explicit_result = select_latest_file_from_listing_rec(explicit_listing);
 if strlength(explicit_result) > 0
     return;
 end
 roi_listing = dir(fullfile(cycle_path, char(string(output_root_dir)), '**', '1_dual_roi_results.mat'));
-if ~isempty(roi_listing)
-    is_analysis_only = contains(string({roi_listing.folder}), "_analysis_only_", 'IgnoreCase', true);
-    roi_listing = roi_listing(is_analysis_only);
-end
 explicit_result = select_latest_file_from_listing_rec(roi_listing);
 end
 
@@ -1192,36 +1021,76 @@ record_average.info = struct( ...
     'result_dirs', result_dirs(:), ...
     'cycle_count', numel(cycle_entries), ...
     'created_at', datetime("now"), ...
+    'alignment_mode', "flash_onset", ...
     'calcium_smoothing_window', calcium_smoothing_window, ...
     'voltage_polarity', voltage_polarity, ...
     'calcium_polarity', calcium_polarity);
-stim_groups = strings(numel(cycle_entries), 1);
-for idx = 1:numel(cycle_entries)
-    stim_groups(idx) = classify_cycle_stim_group_rec(cycle_entries(idx));
-end
-record_average.info.stim_group_by_cycle = stim_groups;
-if any(stim_groups == "unsupported")
-    unsupported_cycles = string({cycle_entries(stim_groups == "unsupported").cycle_name})';
-    error('Cannot identify flash/grating stimulus type for cycles: %s', ...
-        strjoin(unsupported_cycles, ', '));
-end
-record_stim_types = unique(stim_groups);
-if numel(record_stim_types) ~= 1
-    error('One Rec must contain one stimulus type. Found: %s', ...
-        strjoin(record_stim_types, ', '));
-end
-record_stim_type = record_stim_types(1);
-record_average.info.stim_type = record_stim_type;
-fprintf('Building %s record average from %d cycles.\n', record_stim_type, numel(cycle_entries));
-stim_average = build_record_average_stim_group( ...
-    cycle_entries, record_stim_type, output_dir, ...
-    voltage_polarity, calcium_polarity, calcium_smoothing_window);
-record_average.voltage = stim_average.voltage;
-record_average.calcium = stim_average.calcium;
-record_average.stim_windows = stim_average.stim_windows;
-record_average.visualizations = stim_average.visualizations;
-record_average.time_frequency = stim_average.time_frequency;
-record_average.grating_tuning = stim_average.grating_tuning;
+
+record_average.voltage.raw = average_cycle_stage(cycle_entries, 'voltage', 'raw', 'flash_onset');
+record_average.voltage.sensitivity = average_cycle_stage(cycle_entries, 'voltage', 'sensitivity', 'flash_onset');
+record_average.voltage.snr = average_cycle_stage(cycle_entries, 'voltage', 'snr', 'flash_onset');
+record_average.calcium.raw = average_cycle_stage(cycle_entries, 'calcium', 'raw', 'flash_onset');
+record_average.calcium.sensitivity = average_cycle_stage(cycle_entries, 'calcium', 'sensitivity', 'flash_onset');
+record_average.calcium.snr = average_cycle_stage(cycle_entries, 'calcium', 'snr', 'flash_onset');
+
+record_average.stim_windows = resolve_record_average_stim_windows( ...
+    cycle_entries, ...
+    record_average.voltage.raw.time, ...
+    record_average.calcium.raw.time);
+
+raw_summary_png = fullfile(output_dir, '1_record_average_raw_summary.png');
+sens_summary_png = fullfile(output_dir, '2_record_average_sensitivity_summary.png');
+snr_summary_png = fullfile(output_dir, '3_record_average_snr_summary.png');
+sens_overlap_png = fullfile(output_dir, '4_record_average_sensitivity_overlap.png');
+snr_overlap_png = fullfile(output_dir, '5_record_average_snr_overlap.png');
+
+plot_record_stage_summary( ...
+    record_average.voltage.raw, record_average.calcium.raw, ...
+    record_average.stim_windows, 'Raw', raw_summary_png, ...
+    [0.85 0.15 0.15], [0.10 0.65 0.20], 1, 1, ...
+    'Voltage Raw', sprintf('Calcium Raw (%s, window=%d)', record_average.calcium.raw.stage_name, calcium_smoothing_window));
+plot_record_stage_summary( ...
+    record_average.voltage.sensitivity, record_average.calcium.sensitivity, ...
+    record_average.stim_windows, 'Sensitivity', sens_summary_png, ...
+    [0.85 0.15 0.15], [0.10 0.65 0.20], voltage_polarity, calcium_polarity, ...
+    'Voltage Sensitivity', sprintf('Calcium Sensitivity (%s, window=%d)', record_average.calcium.sensitivity.stage_name, calcium_smoothing_window));
+plot_record_stage_summary( ...
+    record_average.voltage.snr, record_average.calcium.snr, ...
+    record_average.stim_windows, 'SNR', snr_summary_png, ...
+    [0.85 0.15 0.15], [0.10 0.65 0.20], voltage_polarity, calcium_polarity, ...
+    'Voltage SNR', sprintf('Calcium SNR (%s, window=%d)', record_average.calcium.snr.stage_name, calcium_smoothing_window));
+
+plot_record_metric_overlap( ...
+    record_average.voltage.sensitivity, record_average.calcium.sensitivity, ...
+    record_average.stim_windows, 'Sensitivity', sens_overlap_png, ...
+    [0.85 0.15 0.15], [0.10 0.65 0.20], voltage_polarity, calcium_polarity);
+plot_record_metric_overlap( ...
+    record_average.voltage.snr, record_average.calcium.snr, ...
+    record_average.stim_windows, 'SNR', snr_overlap_png, ...
+    [0.85 0.15 0.15], [0.10 0.65 0.20], voltage_polarity, calcium_polarity);
+
+tf_input = struct( ...
+    'voltage', struct( ...
+        'trace', voltage_polarity * record_average.voltage.sensitivity.average, ...
+        'time', record_average.voltage.sensitivity.time, ...
+        'frame_rate', record_average.voltage.sensitivity.frame_rate, ...
+        'stage_name', "sensitivity_average"), ...
+    'calcium', struct( ...
+        'trace', calcium_polarity * record_average.calcium.sensitivity.average, ...
+        'time', record_average.calcium.sensitivity.time, ...
+        'frame_rate', record_average.calcium.sensitivity.frame_rate, ...
+        'stage_name', "sensitivity_average"));
+record_average.time_frequency = build_record_average_time_frequency( ...
+    tf_input, record_average.stim_windows, output_dir);
+
+record_average.visualizations = struct( ...
+    'raw_summary_png', string(raw_summary_png), ...
+    'sensitivity_summary_png', string(sens_summary_png), ...
+    'snr_summary_png', string(snr_summary_png), ...
+    'sensitivity_overlap_png', string(sens_overlap_png), ...
+    'snr_overlap_png', string(snr_overlap_png), ...
+    'fourier_summary_png', string(record_average.time_frequency.visualizations.fourier_summary_png), ...
+    'wavelet_summary_png', string(record_average.time_frequency.visualizations.wavelet_summary_png));
 
 results_file = fullfile(output_dir, 'record_average_results.mat');
 save(results_file, 'record_average', '-v7.3');
@@ -1268,141 +1137,16 @@ entry.calcium.sensitivity = extract_cycle_stage(calcium_results, {'sensitivity_s
 entry.calcium.snr = extract_cycle_stage(calcium_results, {'snr_smoothed', 'snr'});
 
 entry.stim_windows = struct();
-entry.grating_tuning = struct();
 if isfile(stim_path)
     tmp_stim = load(stim_path, 'stim_results');
     if isfield(tmp_stim, 'stim_results') && isstruct(tmp_stim.stim_results) ...
             && isfield(tmp_stim.stim_results, 'windows')
         entry.stim_windows = tmp_stim.stim_results.windows;
     end
-    if isfield(tmp_stim, 'stim_results') && isstruct(tmp_stim.stim_results) ...
-            && isfield(tmp_stim.stim_results, 'analysis_kind') ...
-            && strcmpi(string(tmp_stim.stim_results.analysis_kind), "grating_tuning") ...
-            && isfield(tmp_stim.stim_results, 'tuning')
-        entry.grating_tuning = tmp_stim.stim_results.tuning;
-    end
 end
 entry.alignment = struct( ...
     'voltage_flash_onset_time', resolve_flash_onset_time(entry.stim_windows, 'voltage'), ...
     'calcium_flash_onset_time', resolve_flash_onset_time(entry.stim_windows, 'calcium'));
-end
-
-function group_name = classify_cycle_stim_group_rec(entry)
-group_name = "unsupported";
-if isstruct(entry.grating_tuning) && ~isempty(fieldnames(entry.grating_tuning))
-    group_name = "grating";
-    return;
-end
-if isstruct(entry.stim_windows)
-    if isfield(entry.stim_windows, 'is_grating') && logical(entry.stim_windows.is_grating)
-        group_name = "grating";
-        return;
-    end
-    if isfield(entry.stim_windows, 'stim_type') ...
-            && strcmpi(string(entry.stim_windows.stim_type), "visualstim_flash")
-        group_name = "flash";
-    end
-end
-end
-
-function group_average = build_record_average_stim_group( ...
-    cycle_entries, group_name, output_dir, ...
-    voltage_polarity, calcium_polarity, calcium_smoothing_window)
-if group_name == "flash"
-    alignment_mode = "flash_onset";
-else
-    alignment_mode = "recording_start";
-end
-
-group_average = struct();
-group_average.info = struct( ...
-    'stim_group', group_name, ...
-    'cycle_names', string({cycle_entries.cycle_name})', ...
-    'result_dirs', string({cycle_entries.result_dir})', ...
-    'cycle_count', numel(cycle_entries), ...
-    'alignment_mode', alignment_mode, ...
-    'created_at', datetime("now"));
-group_average.voltage.raw = average_cycle_stage(cycle_entries, 'voltage', 'raw', alignment_mode);
-group_average.voltage.sensitivity = average_cycle_stage(cycle_entries, 'voltage', 'sensitivity', alignment_mode);
-group_average.voltage.snr = average_cycle_stage(cycle_entries, 'voltage', 'snr', alignment_mode);
-group_average.calcium.raw = average_cycle_stage(cycle_entries, 'calcium', 'raw', alignment_mode);
-group_average.calcium.sensitivity = average_cycle_stage(cycle_entries, 'calcium', 'sensitivity', alignment_mode);
-group_average.calcium.snr = average_cycle_stage(cycle_entries, 'calcium', 'snr', alignment_mode);
-group_average.stim_windows = resolve_record_average_stim_windows( ...
-    cycle_entries, group_average.voltage.raw.time, group_average.calcium.raw.time, alignment_mode);
-
-raw_summary_png = fullfile(output_dir, '1_record_average_raw_summary.png');
-sens_summary_png = fullfile(output_dir, '2_record_average_sensitivity_summary.png');
-snr_summary_png = fullfile(output_dir, '3_record_average_snr_summary.png');
-sens_overlap_png = fullfile(output_dir, '4_record_average_sensitivity_overlap.png');
-snr_overlap_png = fullfile(output_dir, '5_record_average_snr_overlap.png');
-
-plot_record_stage_summary( ...
-    group_average.voltage.raw, group_average.calcium.raw, ...
-    group_average.stim_windows, 'Raw', raw_summary_png, ...
-    [0.85 0.15 0.15], [0.10 0.65 0.20], 1, 1, ...
-    'Voltage Raw', sprintf('Calcium Raw (%s, window=%d)', ...
-    group_average.calcium.raw.stage_name, calcium_smoothing_window));
-plot_record_stage_summary( ...
-    group_average.voltage.sensitivity, group_average.calcium.sensitivity, ...
-    group_average.stim_windows, 'Sensitivity', sens_summary_png, ...
-    [0.85 0.15 0.15], [0.10 0.65 0.20], voltage_polarity, calcium_polarity, ...
-    'Voltage Sensitivity', sprintf('Calcium Sensitivity (%s, window=%d)', ...
-    group_average.calcium.sensitivity.stage_name, calcium_smoothing_window));
-plot_record_stage_summary( ...
-    group_average.voltage.snr, group_average.calcium.snr, ...
-    group_average.stim_windows, 'SNR', snr_summary_png, ...
-    [0.85 0.15 0.15], [0.10 0.65 0.20], voltage_polarity, calcium_polarity, ...
-    'Voltage SNR', sprintf('Calcium SNR (%s, window=%d)', ...
-    group_average.calcium.snr.stage_name, calcium_smoothing_window));
-plot_record_metric_overlap( ...
-    group_average.voltage.sensitivity, group_average.calcium.sensitivity, ...
-    group_average.stim_windows, 'Sensitivity', sens_overlap_png, ...
-    [0.85 0.15 0.15], [0.10 0.65 0.20], voltage_polarity, calcium_polarity);
-plot_record_metric_overlap( ...
-    group_average.voltage.snr, group_average.calcium.snr, ...
-    group_average.stim_windows, 'SNR', snr_overlap_png, ...
-    [0.85 0.15 0.15], [0.10 0.65 0.20], voltage_polarity, calcium_polarity);
-
-group_average.visualizations = struct( ...
-    'raw_summary_png', string(raw_summary_png), ...
-    'sensitivity_summary_png', string(sens_summary_png), ...
-    'snr_summary_png', string(snr_summary_png), ...
-    'sensitivity_overlap_png', string(sens_overlap_png), ...
-    'snr_overlap_png', string(snr_overlap_png), ...
-    'fourier_summary_png', "", ...
-    'wavelet_summary_png', "", ...
-    'grating_tuning_summary_png', "", ...
-    'grating_tuning_roi_dir', "");
-
-if group_name == "flash"
-    tf_input = struct( ...
-        'voltage', struct( ...
-            'trace', voltage_polarity * group_average.voltage.sensitivity.average, ...
-            'time', group_average.voltage.sensitivity.time, ...
-            'frame_rate', group_average.voltage.sensitivity.frame_rate, ...
-            'stage_name', "sensitivity_average"), ...
-        'calcium', struct( ...
-            'trace', calcium_polarity * group_average.calcium.sensitivity.average, ...
-            'time', group_average.calcium.sensitivity.time, ...
-            'frame_rate', group_average.calcium.sensitivity.frame_rate, ...
-            'stage_name', "sensitivity_average"));
-    group_average.time_frequency = build_record_average_time_frequency( ...
-        tf_input, group_average.stim_windows, output_dir);
-    group_average.visualizations.fourier_summary_png = ...
-        string(group_average.time_frequency.visualizations.fourier_summary_png);
-    group_average.visualizations.wavelet_summary_png = ...
-        string(group_average.time_frequency.visualizations.wavelet_summary_png);
-    group_average.grating_tuning = struct('status', "not_applicable");
-else
-    group_average.grating_tuning = build_record_average_grating_tuning(cycle_entries, output_dir);
-    group_average.visualizations.grating_tuning_summary_png = ...
-        string(group_average.grating_tuning.visualizations.summary_png);
-    group_average.visualizations.grating_tuning_roi_dir = ...
-        string(group_average.grating_tuning.visualizations.roi_dir);
-    group_average.time_frequency = struct('status', "not_generated_for_grating_group");
-end
-
 end
 
 function stage = extract_cycle_stage(results_struct, preferred_stages)
@@ -1490,19 +1234,14 @@ averaged = struct( ...
     'nrois', nrois);
 end
 
-function stim_windows = resolve_record_average_stim_windows(cycle_entries, voltage_time, calcium_time, alignment_mode)
+function stim_windows = resolve_record_average_stim_windows(cycle_entries, voltage_time, calcium_time)
 stim_windows = struct();
 for idx = 1:numel(cycle_entries)
     candidate = cycle_entries(idx).stim_windows;
     if isstruct(candidate) && isfield(candidate, 'supported') && candidate.supported
         stim_windows = candidate;
-        if string(alignment_mode) == "recording_start"
-            voltage_anchor = cycle_entries(idx).voltage.raw.time(1);
-            calcium_anchor = cycle_entries(idx).calcium.raw.time(1);
-        else
-            voltage_anchor = cycle_entries(idx).alignment.voltage_flash_onset_time;
-            calcium_anchor = cycle_entries(idx).alignment.calcium_flash_onset_time;
-        end
+        voltage_anchor = cycle_entries(idx).alignment.voltage_flash_onset_time;
+        calcium_anchor = cycle_entries(idx).alignment.calcium_flash_onset_time;
         break;
     end
 end
@@ -1585,326 +1324,9 @@ switch string(alignment_mode)
         if ~isfinite(alignment_time)
             error('Missing flash onset time for %s in cycle %s.', channel_name, cycle_entry.cycle_name);
         end
-    case "recording_start"
-        alignment_time = cycle_entry.(channel_name).raw.time(1);
     otherwise
         error('Unsupported record-average alignment mode: %s', alignment_mode);
 end
-end
-
-function summary = build_record_average_grating_tuning(cycle_entries, output_dir)
-summary = struct( ...
-    'status', "not_available", ...
-    'reason', "No compatible grating tuning results were found.", ...
-    'included_cycles', strings(0, 1), ...
-    'excluded_cycles', strings(0, 1), ...
-    'orientations', [], ...
-    'voltage', struct(), ...
-    'calcium', struct(), ...
-    'visualizations', struct('summary_png', "", 'summary_fig', "", 'roi_dir', ""), ...
-    'result_file', "");
-
-valid = false(numel(cycle_entries), 1);
-for idx = 1:numel(cycle_entries)
-    tuning = cycle_entries(idx).grating_tuning;
-    valid(idx) = isstruct(tuning) ...
-        && isfield(tuning, 'voltage') && isfield(tuning, 'calcium') ...
-        && has_complete_grating_curves_rec(tuning.voltage) ...
-        && has_complete_grating_curves_rec(tuning.calcium);
-end
-summary.included_cycles = string({cycle_entries(valid).cycle_name})';
-summary.excluded_cycles = string({cycle_entries(~valid).cycle_name})';
-if ~any(valid)
-    return;
-end
-
-included_entries = cycle_entries(valid);
-orientation_cells = cell(numel(included_entries), 1);
-for idx = 1:numel(included_entries)
-    orientation_cells{idx} = mod(double(included_entries(idx).grating_tuning.voltage.unique_orientations(:)), 360);
-end
-orientations = unique(vertcat(orientation_cells{:}));
-orientations = sort(orientations(:))';
-
-voltage_roi_count = size(included_entries(1).grating_tuning.voltage.response_by_condition, 1);
-calcium_roi_count = size(included_entries(1).grating_tuning.calcium.response_by_condition, 1);
-if voltage_roi_count ~= calcium_roi_count
-    error('Voltage/calcium ROI count mismatch in grating tuning: voltage=%d calcium=%d.', ...
-        voltage_roi_count, calcium_roi_count);
-end
-for idx = 2:numel(included_entries)
-    current_voltage_count = size(included_entries(idx).grating_tuning.voltage.response_by_condition, 1);
-    current_calcium_count = size(included_entries(idx).grating_tuning.calcium.response_by_condition, 1);
-    if current_voltage_count ~= voltage_roi_count || current_calcium_count ~= calcium_roi_count
-        error('ROI count mismatch in grating tuning for cycle %s.', included_entries(idx).cycle_name);
-    end
-end
-
-summary.status = "completed";
-summary.reason = "";
-summary.orientations = orientations;
-summary.curve_rule = struct( ...
-    'orientation_rule', "union after modulo 360; missing directions remain NaN", ...
-    'cycle_average_rule', "mean across available cycles with omitnan", ...
-    'dsi_mean_rule', "mean of per-cycle DSI", ...
-    'dsi_from_mean_curve_rule', "recompute DSI from the cycle-mean grating-present curve", ...
-    'nonstim_role', "saved and plotted but excluded from DSI/OSI");
-summary.voltage = average_grating_channel_rec(included_entries, 'voltage', orientations, voltage_roi_count);
-summary.calcium = average_grating_channel_rec(included_entries, 'calcium', orientations, calcium_roi_count);
-
-summary_png = fullfile(output_dir, '8_record_average_grating_tuning_summary.png');
-summary_fig = fullfile(output_dir, '8_record_average_grating_tuning_summary.fig');
-roi_dir = fullfile(output_dir, '8_record_average_grating_tuning_by_roi');
-if ~isfolder(roi_dir)
-    mkdir(roi_dir);
-end
-plot_record_grating_summary_rec(summary, summary_fig, summary_png);
-plot_record_grating_by_roi_rec(summary, roi_dir);
-
-summary.visualizations.summary_png = string(summary_png);
-summary.visualizations.summary_fig = string(summary_fig);
-summary.visualizations.roi_dir = string(roi_dir);
-summary.result_file = string(fullfile(output_dir, '8_record_average_grating_tuning.mat'));
-summary.metrics_csv = string(fullfile(output_dir, '8_record_average_grating_metrics.csv'));
-write_record_grating_metrics_table_rec(summary, summary.metrics_csv);
-record_grating_tuning = summary;
-save(char(summary.result_file), 'record_grating_tuning', '-v7.3');
-end
-
-function tf = has_complete_grating_curves_rec(tuning)
-tf = isstruct(tuning) ...
-    && isfield(tuning, 'unique_orientations') ...
-    && isfield(tuning, 'response_by_condition') ...
-    && isfield(tuning, 'nonstim_response_by_condition');
-end
-
-function channel = average_grating_channel_rec(cycle_entries, channel_name, orientations, nrois)
-ncycles = numel(cycle_entries);
-nangles = numel(orientations);
-stim_per_cycle = NaN(nrois, nangles, ncycles);
-nonstim_per_cycle = NaN(nrois, nangles, ncycles);
-metrics_per_cycle = initialize_grating_metric_arrays_rec(nrois, ncycles);
-
-for cycle_idx = 1:ncycles
-    tuning = cycle_entries(cycle_idx).grating_tuning.(channel_name);
-    cycle_angles = mod(double(tuning.unique_orientations(:)'), 360);
-    for angle_idx = 1:numel(cycle_angles)
-        target_idx = find(abs(orientations - cycle_angles(angle_idx)) < 1e-9, 1, 'first');
-        if isempty(target_idx)
-            continue;
-        end
-        stim_per_cycle(:, target_idx, cycle_idx) = tuning.response_by_condition(:, angle_idx);
-        nonstim_per_cycle(:, target_idx, cycle_idx) = tuning.nonstim_response_by_condition(:, angle_idx);
-    end
-    metric_names = fieldnames(metrics_per_cycle);
-    for metric_idx = 1:numel(metric_names)
-        metric_name = metric_names{metric_idx};
-        if isfield(tuning, metric_name)
-            metrics_per_cycle.(metric_name)(:, cycle_idx) = tuning.(metric_name)(:);
-        end
-    end
-end
-
-stim_mean = mean(stim_per_cycle, 3, 'omitnan');
-nonstim_mean = mean(nonstim_per_cycle, 3, 'omitnan');
-stim_n = sum(isfinite(stim_per_cycle), 3);
-nonstim_n = sum(isfinite(nonstim_per_cycle), 3);
-stim_sem = std(stim_per_cycle, 0, 3, 'omitnan') ./ sqrt(max(1, stim_n));
-nonstim_sem = std(nonstim_per_cycle, 0, 3, 'omitnan') ./ sqrt(max(1, nonstim_n));
-
-metrics_from_mean_curve = compute_grating_metrics_from_curve_rec(stim_mean, orientations);
-
-channel = struct( ...
-    'stim_per_cycle', stim_per_cycle, ...
-    'nonstim_per_cycle', nonstim_per_cycle, ...
-    'stim_mean', stim_mean, ...
-    'stim_sem', stim_sem, ...
-    'stim_n', stim_n, ...
-    'nonstim_mean', nonstim_mean, ...
-    'nonstim_sem', nonstim_sem, ...
-    'nonstim_n', nonstim_n, ...
-    'metrics_per_cycle', metrics_per_cycle, ...
-    'metrics_mean_across_cycles', summarize_grating_metrics_across_cycles_rec(metrics_per_cycle), ...
-    'metrics_from_mean_curve', metrics_from_mean_curve);
-end
-
-function metrics = initialize_grating_metric_arrays_rec(nrois, ncycles)
-metric_names = {'pref_dir', 'pref_ori', 'gdsi', 'gosi', 'dsi', 'osi'};
-metrics = struct();
-for idx = 1:numel(metric_names)
-    metrics.(metric_names{idx}) = NaN(nrois, ncycles);
-end
-end
-
-function summary = summarize_grating_metrics_across_cycles_rec(metrics)
-metric_names = fieldnames(metrics);
-summary = struct();
-for idx = 1:numel(metric_names)
-    values = metrics.(metric_names{idx});
-    summary.(metric_names{idx}) = struct( ...
-        'mean', mean(values, 2, 'omitnan'), ...
-        'sem', std(values, 0, 2, 'omitnan') ./ sqrt(max(1, sum(isfinite(values), 2))), ...
-        'n', sum(isfinite(values), 2));
-end
-end
-
-function metrics = compute_grating_metrics_from_curve_rec(response_by_condition, orientations)
-nrois = size(response_by_condition, 1);
-metrics = struct( ...
-    'pref_dir', NaN(nrois, 1), ...
-    'pref_ori', NaN(nrois, 1), ...
-    'gdsi', NaN(nrois, 1), ...
-    'gosi', NaN(nrois, 1), ...
-    'dsi', NaN(nrois, 1), ...
-    'osi', NaN(nrois, 1));
-theta_rad = deg2rad(orientations(:)');
-for roi_idx = 1:nrois
-    response = response_by_condition(roi_idx, :);
-    if all(~isfinite(response)) || sum(response, 'omitnan') <= 0
-        continue;
-    end
-    [~, pref_idx] = max(response, [], 'omitnan');
-    metrics.pref_dir(roi_idx) = orientations(pref_idx);
-    metrics.pref_ori(roi_idx) = mod(metrics.pref_dir(roi_idx), 180);
-    response_sum = sum(response, 'omitnan');
-    metrics.gdsi(roi_idx) = abs(sum(response .* exp(1i * theta_rad), 'omitnan') / response_sum);
-    metrics.gosi(roi_idx) = abs(sum(response .* exp(1i * 2 * theta_rad), 'omitnan') / response_sum);
-
-    opposite_idx = closest_angle_index_rec(orientations, mod(metrics.pref_dir(roi_idx) + 180, 360));
-    orthogonal_idx = closest_angle_index_rec(orientations, mod(metrics.pref_dir(roi_idx) + 90, 360));
-    pref_response = response(pref_idx);
-    opposite_response = response(opposite_idx);
-    orthogonal_response = response(orthogonal_idx);
-    metrics.dsi(roi_idx) = (pref_response - opposite_response) / ...
-        max(eps, pref_response + opposite_response);
-    metrics.osi(roi_idx) = (pref_response - orthogonal_response) / ...
-        max(eps, pref_response + orthogonal_response);
-end
-end
-
-function idx = closest_angle_index_rec(angles, target_angle)
-wrapped_difference = abs(mod(angles - target_angle + 180, 360) - 180);
-[~, idx] = min(wrapped_difference);
-end
-
-function plot_record_grating_summary_rec(summary, fig_file, png_file)
-fig = figure('Color', 'w', 'Name', 'Record Average Grating Tuning', ...
-    'Position', [100, 80, 1300, 850]);
-tiledlayout(fig, 2, 2, 'Padding', 'compact', 'TileSpacing', 'compact');
-plot_population_grating_curves_rec(nexttile, summary.orientations, summary.voltage, ...
-    [0.85 0.15 0.15], 'Voltage Spike Count', 'Spikes / trial');
-plot_population_grating_curves_rec(nexttile, summary.orientations, summary.calcium, ...
-    [0.10 0.65 0.20], 'Calcium Mean Sensitivity', 'Mean sensitivity');
-plot_metric_comparison_rec(nexttile, summary.voltage, summary.calcium, 'dsi', 'DSI');
-plot_metric_comparison_rec(nexttile, summary.voltage, summary.calcium, 'osi', 'OSI');
-sgtitle(fig, sprintf('Record-Average Grating Tuning | %d included cycles', ...
-    numel(summary.included_cycles)));
-save_figure_bundle_rec(fig, fig_file, png_file);
-close(fig);
-end
-
-function plot_population_grating_curves_rec(ax, orientations, channel, line_color, title_text, y_label)
-stim_population = mean(channel.stim_mean, 1, 'omitnan');
-nonstim_population = mean(channel.nonstim_mean, 1, 'omitnan');
-stim_sem = std(channel.stim_mean, 0, 1, 'omitnan') ./ ...
-    sqrt(max(1, sum(isfinite(channel.stim_mean), 1)));
-nonstim_sem = std(channel.nonstim_mean, 0, 1, 'omitnan') ./ ...
-    sqrt(max(1, sum(isfinite(channel.nonstim_mean), 1)));
-errorbar(ax, orientations, stim_population, stim_sem, '-o', ...
-    'Color', line_color, 'MarkerFaceColor', line_color, 'LineWidth', 1.5);
-hold(ax, 'on');
-errorbar(ax, orientations, nonstim_population, nonstim_sem, '--o', ...
-    'Color', lighten_color(line_color, 0.55), 'MarkerFaceColor', 'w', 'LineWidth', 1.2);
-xlabel(ax, 'Direction (deg)');
-ylabel(ax, y_label);
-title(ax, title_text);
-legend(ax, {'Grating', 'Non-grating'}, 'Location', 'best');
-grid(ax, 'on');
-end
-
-function plot_metric_comparison_rec(ax, voltage, calcium, metric_name, metric_label)
-voltage_cycle_mean = voltage.metrics_mean_across_cycles.(metric_name).mean;
-calcium_cycle_mean = calcium.metrics_mean_across_cycles.(metric_name).mean;
-voltage_curve_metric = voltage.metrics_from_mean_curve.(metric_name);
-calcium_curve_metric = calcium.metrics_from_mean_curve.(metric_name);
-values = [ ...
-    mean(voltage_cycle_mean, 'omitnan'), mean(voltage_curve_metric, 'omitnan'); ...
-    mean(calcium_cycle_mean, 'omitnan'), mean(calcium_curve_metric, 'omitnan')];
-bar(ax, values);
-set(ax, 'XTickLabel', {'Voltage', 'Calcium'});
-ylabel(ax, metric_label);
-title(ax, sprintf('%s: cycle mean vs mean curve', metric_label));
-legend(ax, {'Mean of cycle metrics', 'Metric from mean curve'}, 'Location', 'best');
-grid(ax, 'on');
-end
-
-function plot_record_grating_by_roi_rec(summary, roi_dir)
-nrois = size(summary.voltage.stim_mean, 1);
-for roi_idx = 1:nrois
-    fig = figure('Color', 'w', 'Name', sprintf('Record Average Grating ROI %03d', roi_idx), ...
-        'Position', [120, 100, 1100, 760]);
-    tiledlayout(fig, 2, 2, 'Padding', 'compact', 'TileSpacing', 'compact');
-    plot_roi_grating_curves_rec(nexttile, summary.orientations, summary.voltage, roi_idx, ...
-        [0.85 0.15 0.15], 'Voltage Spike Count', 'Spikes / trial');
-    plot_roi_grating_curves_rec(nexttile, summary.orientations, summary.calcium, roi_idx, ...
-        [0.10 0.65 0.20], 'Calcium Mean Sensitivity', 'Mean sensitivity');
-    plot_roi_metric_pair_rec(nexttile, summary, roi_idx, 'dsi', 'DSI');
-    plot_roi_metric_pair_rec(nexttile, summary, roi_idx, 'osi', 'OSI');
-    sgtitle(fig, sprintf('ROI %03d Record-Average Grating Tuning', roi_idx));
-    fig_file = fullfile(roi_dir, sprintf('roi_%03d_record_average_tuning.fig', roi_idx));
-    png_file = fullfile(roi_dir, sprintf('roi_%03d_record_average_tuning.png', roi_idx));
-    save_figure_bundle_rec(fig, fig_file, png_file);
-    close(fig);
-end
-end
-
-function write_record_grating_metrics_table_rec(summary, csv_file)
-nrois = size(summary.voltage.stim_mean, 1);
-roi = (1:nrois)';
-metrics_table = table( ...
-    roi, ...
-    summary.voltage.metrics_mean_across_cycles.dsi.mean, ...
-    summary.voltage.metrics_from_mean_curve.dsi, ...
-    summary.voltage.metrics_mean_across_cycles.osi.mean, ...
-    summary.voltage.metrics_from_mean_curve.osi, ...
-    summary.calcium.metrics_mean_across_cycles.dsi.mean, ...
-    summary.calcium.metrics_from_mean_curve.dsi, ...
-    summary.calcium.metrics_mean_across_cycles.osi.mean, ...
-    summary.calcium.metrics_from_mean_curve.osi, ...
-    'VariableNames', { ...
-        'ROI', ...
-        'Voltage_DSI_MeanAcrossCycles', 'Voltage_DSI_FromMeanCurve', ...
-        'Voltage_OSI_MeanAcrossCycles', 'Voltage_OSI_FromMeanCurve', ...
-        'Calcium_DSI_MeanAcrossCycles', 'Calcium_DSI_FromMeanCurve', ...
-        'Calcium_OSI_MeanAcrossCycles', 'Calcium_OSI_FromMeanCurve'});
-writetable(metrics_table, char(csv_file));
-end
-
-function plot_roi_grating_curves_rec(ax, orientations, channel, roi_idx, line_color, title_text, y_label)
-errorbar(ax, orientations, channel.stim_mean(roi_idx, :), channel.stim_sem(roi_idx, :), ...
-    '-o', 'Color', line_color, 'MarkerFaceColor', line_color, 'LineWidth', 1.5);
-hold(ax, 'on');
-errorbar(ax, orientations, channel.nonstim_mean(roi_idx, :), channel.nonstim_sem(roi_idx, :), ...
-    '--o', 'Color', lighten_color(line_color, 0.55), 'MarkerFaceColor', 'w', 'LineWidth', 1.2);
-xlabel(ax, 'Direction (deg)');
-ylabel(ax, y_label);
-title(ax, title_text);
-legend(ax, {'Grating', 'Non-grating'}, 'Location', 'best');
-grid(ax, 'on');
-end
-
-function plot_roi_metric_pair_rec(ax, summary, roi_idx, metric_name, metric_label)
-values = [ ...
-    summary.voltage.metrics_mean_across_cycles.(metric_name).mean(roi_idx), ...
-    summary.voltage.metrics_from_mean_curve.(metric_name)(roi_idx); ...
-    summary.calcium.metrics_mean_across_cycles.(metric_name).mean(roi_idx), ...
-    summary.calcium.metrics_from_mean_curve.(metric_name)(roi_idx)];
-bar(ax, values);
-set(ax, 'XTickLabel', {'Voltage', 'Calcium'});
-ylabel(ax, metric_label);
-title(ax, metric_label);
-legend(ax, {'Mean of cycle metrics', 'Metric from mean curve'}, 'Location', 'best');
-grid(ax, 'on');
 end
 
 function plot_record_stage_summary(voltage_stage, calcium_stage, stim_windows, metric_name, output_png, voltage_color, calcium_color, voltage_display_scale, calcium_display_scale, voltage_title, calcium_title)

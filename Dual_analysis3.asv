@@ -24,11 +24,12 @@
 %   - Calcium-only final smoothing stages are stored explicitly as
 %     raw_smoothed, sensitivity_smoothed, and snr_smoothed after the main
 %     metric stages are computed.
-%   - Motion correction is estimated once on the voltage movie and the
-%     same shifts are applied to the calcium movie after transpose/resize.
+%   - Motion correction normally uses voltage-estimated shifts for both
+%     channels. If frame counts differ, calcium is corrected independently
+%     and its own shifts/parameters are saved under calcium-specific names.
 %   - Main output files are dual_info.mat, voltage_results.mat,
-%     calcium_results.mat, dual_results.mat, stim_results.mat, and
-%     -1_explicit_dual_results.mat.
+%     calcium_results.mat, voltage_peak_results.mat, dual_results.mat,
+%     stim_results.mat, and -1_explicit_dual_results.mat.
 
 % Preserve externally provided config variables so this script can still be
 % driven by an outer batch script via:
@@ -61,8 +62,9 @@
 % 2. Confirm camera_cfg matches your real camera-role mapping.
 % 3. Only change transpose flags here; later sections inherit them.
 % 4. If motion shifts or ROI files already exist, fill the reuse paths.
-% 5. This script focuses on per-channel trace processing plus dual-channel
-%    comparison. AP event-level refinement remains in AP_analysis3.
+% 5. This script includes AP3-style voltage sensitivity peak detection and
+%    manual add/delete editing. AP waveform morphology summaries remain in
+%    AP_analysis3.
 % 6. Every trace-processing section now saves a compact "section record"
 %    alongside its usual outputs. The record is designed to answer two
 %    practical questions when reopening old results:
@@ -128,7 +130,7 @@ if ~exist('analysis_run_name', 'var') || isempty(analysis_run_name)
     analysis_run_name = sprintf('%s_%s_%s', record_name_for_name, cycle_name_for_name, char(nowtime));
 end
 if ~exist('analysis_mode', 'var') || isempty(analysis_mode)
-    analysis_mode = 'full';          % 'full' | 'analysis_only'
+    analysis_mode = 'full';          % 'full' | 'analysis_only' | 'motion_only'
 end
 if ~exist('analysis_backend', 'var') || isempty(analysis_backend)
     analysis_backend = 'default';    % 'default' | 'volpy_voltage_reanalysis'
@@ -249,6 +251,31 @@ end
 if ~exist('calcium_polarity', 'var') || isempty(calcium_polarity)
     calcium_polarity = 1;             % default display/analysis polarity for calcium traces
 end
+if ~exist('voltage_peak_polarity_mode', 'var') || isempty(voltage_peak_polarity_mode)
+    voltage_peak_polarity_mode = "auto"; % "auto", "positive", or "negative"
+end
+if ~exist('voltage_peak_min_prominence', 'var') || isempty(voltage_peak_min_prominence)
+    voltage_peak_min_prominence = 0.4;
+end
+if ~exist('voltage_peak_min_prominence_mode', 'var') || isempty(voltage_peak_min_prominence_mode)
+    voltage_peak_min_prominence_mode = "relative_factor"; % "relative_factor" or "absolute"
+end
+if ~exist('voltage_peak_min_distance_frames', 'var') || isempty(voltage_peak_min_distance_frames)
+    voltage_peak_min_distance_frames = max(2, round(0.01 * voltage_frame_rate));
+end
+if ~exist('voltage_peak_min_height', 'var') || isempty(voltage_peak_min_height)
+    voltage_peak_min_height = 0;
+end
+if ~exist('run_manual_voltage_peak_edit', 'var') || isempty(run_manual_voltage_peak_edit)
+    run_manual_voltage_peak_edit = true;
+end
+voltage_peak_params = struct( ...
+    'polarity_mode', string(voltage_peak_polarity_mode), ...
+    'min_peak_prominence', voltage_peak_min_prominence, ...
+    'min_peak_prominence_mode', string(voltage_peak_min_prominence_mode), ...
+    'min_peak_distance_frames', voltage_peak_min_distance_frames, ...
+    'min_peak_height', voltage_peak_min_height, ...
+    'run_manual_edit', logical(run_manual_voltage_peak_edit));
 % Inter-camera ROI offset mode:
 %   'none'            -> do not estimate a new offset; use reuse_offset or [0 0]
 %   'manual_points'   -> manually click one matching point on the voltage
@@ -309,11 +336,21 @@ if numel(camera_cfg) ~= 2
     error('Dual_analysis3 currently expects exactly two cameras.');
 end
 
+analysis_only_mode = strcmpi(string(analysis_mode), "analysis_only");
+motion_only_mode = strcmpi(string(analysis_mode), "motion_only");
+volpy_reanalysis_mode = strcmpi(string(analysis_backend), "volpy_voltage_reanalysis");
+if motion_only_mode && volpy_reanalysis_mode
+    error('analysis_mode=motion_only is only supported with analysis_backend=default.');
+end
+if motion_only_mode && ~logical(run_motion_correction)
+    error('analysis_mode=motion_only requires run_motion_correction=true.');
+end
+
 if ~exist('save_path', 'var') || isempty(save_path)
-    if strcmpi(string(analysis_mode), "analysis_only") && strlength(string(reuse_results_path)) > 0
+    if analysis_only_mode && strlength(string(reuse_results_path)) > 0
         save_path = reuse_results_path;
     else
-        if strcmpi(string(analysis_backend), "volpy_voltage_reanalysis")
+        if volpy_reanalysis_mode
             save_root_dir = 'Dual_analysis3_volpy_voltage';
         else
             save_root_dir = 'Dual_analysis3';
@@ -323,8 +360,6 @@ if ~exist('save_path', 'var') || isempty(save_path)
     end
 end
 mkdir(save_path);
-analysis_only_mode = strcmpi(string(analysis_mode), "analysis_only");
-volpy_reanalysis_mode = strcmpi(string(analysis_backend), "volpy_voltage_reanalysis");
 % Parallel pool setup happens once, before any movie loading or map
 % generation. Helper functions only reuse an existing pool and fall back to
 % serial work when no pool is available.
@@ -386,7 +421,8 @@ if volpy_reanalysis_mode
         t_voltage, t_calcium, ...
         freq_voltage, freq_calcium, ...
         nframes_voltage, nframes_calcium, ...
-        voltage_polarity, calcium_polarity, calcium_smoothing_window, true);
+        voltage_polarity, calcium_polarity, calcium_smoothing_window, ...
+        voltage_peak_params, true);
     return;
 end
 
@@ -551,15 +587,19 @@ end
 copy_analysis_code(currentScript, code_path);
 
 %% Motion Correction
-% Motion is estimated once on voltage and then applied to calcium.
-% The processing intent is to keep both channels spatially locked. If the
-% two channels were corrected independently, one biological ROI could end
-% up drifting to different places in voltage and calcium.
+% Motion is normally estimated once on voltage and then applied to calcium.
+% When frame counts differ, one shift cannot be applied frame-for-frame, so
+% calcium falls back to an independently estimated rigid correction.
 print_section('Motion Correction');
 fprintf('Motion correction enabled: %d\n', logical(run_motion_correction));
 if run_motion_correction
-    fprintf('Applying shared motion correction from voltage to calcium...\n');
-    fprintf('Motion model: rigid NoRMCorre estimated on voltage, then apply_shifts to calcium.\n');
+    if nframes_voltage == nframes_calcium
+        fprintf('Applying shared motion correction from voltage to calcium...\n');
+        fprintf('Motion model: rigid NoRMCorre estimated on voltage, then apply_shifts to calcium.\n');
+    else
+        fprintf('Frame-count mismatch detected: voltage=%d, calcium=%d.\n', nframes_voltage, nframes_calcium);
+        fprintf('Fallback motion model: estimate voltage and calcium rigid NoRMCorre shifts independently.\n');
+    end
     fprintf('Motion QC outputs: save downsampled corrected TIFFs for both channels and save shared motion metrics on the voltage reference movie.\n');
 else
     fprintf('Shared motion correction skipped. Downstream ROI and trace analysis will use the geometry-matched but otherwise raw movies.\n');
@@ -573,10 +613,12 @@ if ncols_v ~= ncols_c || nrows_v ~= nrows_c
     error('Camera sizes diverged after motion correction. Check geometry matching and transpose settings.');
 end
 
-movie_voltage = reshape(movie_voltage_3d, ncols_v * nrows_v, nframes_voltage);
-movie_calcium = reshape(movie_calcium_3d, ncols_c * nrows_c, nframes_calcium);
-% From here on, movies are stored in [pixels x frames] form because the
-% ROI-processing functions work primarily on trace-oriented matrices.
+if ~motion_only_mode
+    movie_voltage = reshape(movie_voltage_3d, ncols_v * nrows_v, nframes_voltage);
+    movie_calcium = reshape(movie_calcium_3d, ncols_c * nrows_c, nframes_calcium);
+end
+% From here on, non-motion-only runs store movies in [pixels x frames] form
+% because the ROI-processing functions work primarily on trace matrices.
 clear movie_voltage_3d movie_calcium_3d;
 ncols = ncols_v;
 nrows = nrows_v;
@@ -596,7 +638,11 @@ calcium_results.movie_info.updated_at = datetime("now");
 save(voltage_results_path, 'voltage_results', '-v7.3');
 save(calcium_results_path, 'calcium_results', '-v7.3');
 if voltage_motion_info.applied
-    fprintf('Motion complete | shared shift file: %s\n', voltage_motion_info.shift_file);
+    if strcmpi(string(calcium_motion_info.method), "NoRMCorre_rigid_independent_calcium")
+        fprintf('Motion complete | voltage shift file unchanged: %s\n', voltage_motion_info.shift_file);
+    else
+        fprintf('Motion complete | shared shift file: %s\n', voltage_motion_info.shift_file);
+    end
 else
     fprintf('Motion correction result: skipped by run_motion_correction=false.\n');
 end
@@ -608,6 +654,36 @@ if isfield(calcium_motion_info, 'downsampled_tif_file') && strlength(string(calc
 end
 if isfield(voltage_motion_info, 'metrics_png') && strlength(string(voltage_motion_info.metrics_png)) > 0
     fprintf('Saved shared motion metrics plot: %s\n', string(voltage_motion_info.metrics_png));
+end
+if isfield(calcium_motion_info, 'shift_file') && strlength(string(calcium_motion_info.shift_file)) > 0 ...
+        && strcmpi(string(calcium_motion_info.method), "NoRMCorre_rigid_independent_calcium")
+    fprintf('Saved independent calcium shift file: %s\n', string(calcium_motion_info.shift_file));
+    fprintf('Saved independent calcium parameter file: %s\n', string(calcium_motion_info.parameter_file));
+    if isfield(calcium_motion_info, 'parameters')
+        calcium_options = calcium_motion_info.parameters;
+        fprintf(['Calcium NoRMCorre parameters | d1=%d d2=%d bin_width=%d ' ...
+            'max_shift=%d us_fac=%d iter=%d correct_bidir=%d\n'], ...
+            calcium_options.d1, calcium_options.d2, calcium_options.bin_width, ...
+            calcium_options.max_shift, calcium_options.us_fac, ...
+            calcium_options.iter, calcium_options.correct_bidir);
+    end
+end
+if isfield(calcium_motion_info, 'metrics_png') && strlength(string(calcium_motion_info.metrics_png)) > 0
+    fprintf('Saved calcium motion metrics plot: %s\n', string(calcium_motion_info.metrics_png));
+end
+if motion_only_mode
+    print_section('Motion Only Stop');
+    dual_results.motion_only = struct( ...
+        'status', "completed", ...
+        'analysis_mode', string(analysis_mode), ...
+        'save_path', string(save_path), ...
+        'voltage_motion_info', voltage_motion_info, ...
+        'calcium_motion_info', calcium_motion_info, ...
+        'created_at', datetime("now"));
+    save(dual_results_path, 'dual_results', '-v7.3');
+    fprintf('Motion-only mode completed. Stopping before Channel Registration / ROI / trace analysis.\n');
+    fprintf('Results saved to: %s\n', save_path);
+    return;
 end
 
 %% Channel Registration
@@ -1294,6 +1370,13 @@ dual_results.visualizations.noise_reference = struct( ...
 save(dual_results_path, 'dual_results', '-v7.3');
 fprintf('Noise reference comparison saved to: %s\n', noise_ref_png);
 
+%% Voltage Sensitivity Peak Detection
+% Match the AP_analysis3 sensitivity-peak workflow immediately after SNR:
+% automatic findpeaks, optional add/delete editing, and explicit storage of
+% both detected and final accepted peak stages.
+[voltage_results, ~] = run_voltage_peak_detection_section( ...
+    voltage_results, voltage_results_path, save_path, freq_voltage, voltage_peak_params);
+
 %% Channel Summary Plots
 % This figure is a checkpoint only. It does not create new trace stages;
 % it simply shows which saved stage version is currently being used for
@@ -1832,194 +1915,17 @@ save(dual_results_path, 'dual_results', '-v7.3');
 fprintf('Dual comparison saved to: %s\n', dual_results_path);
 
 %% Stim-Aware Analysis
-% Add stimulus shading and trial-based stimulation metrics when the cycle
-% includes visual stimulation logs.
-% This reconnects the processed traces to stimulus time and turns them into
-% trial-based response summaries that can be compared across conditions.
-print_section('Stim-Aware Analysis');
-fprintf('Running stimulus-specific analysis after dual comparison...\n');
-[voltage_results, calcium_results] = load_channel_results( ...
-    voltage_results_path, calcium_results_path, voltage_results, calcium_results);
-has_voltage_sensitivity = has_trace_stage(voltage_results, 'sensitivity');
-has_voltage_snr = has_trace_stage(voltage_results, 'snr');
-has_calcium_sensitivity = has_trace_stage(calcium_results, 'sensitivity_smoothed') || has_trace_stage(calcium_results, 'sensitivity');
-has_calcium_snr = has_trace_stage(calcium_results, 'snr_smoothed') || has_trace_stage(calcium_results, 'snr');
-if has_voltage_sensitivity
-    voltage_sensitivity = fetch_trace_stage(voltage_results, 'sensitivity');
-else
-    voltage_sensitivity = [];
-end
-if has_voltage_snr
-    voltage_snr = fetch_trace_stage(voltage_results, 'snr');
-else
-    voltage_snr = [];
-end
-if has_calcium_sensitivity
-    [calcium_sensitivity, calcium_sensitivity_stage] = resolve_preferred_trace_stage(calcium_results, {'sensitivity_smoothed', 'sensitivity'});
-else
-    calcium_sensitivity = [];
-    calcium_sensitivity_stage = '';
-end
-if has_calcium_snr
-    [calcium_snr, calcium_snr_stage] = resolve_preferred_trace_stage(calcium_results, {'snr_smoothed', 'snr'});
-else
-    calcium_snr = [];
-    calcium_snr_stage = '';
-end
-
-stim_results.info = rmfield_if_exists(stim_context, {'logs', 'method_manifest'});
-stim_results.windows = stim_windows;
-
-if stim_context.supported
-    % The same saved stages used for plotting are also used for numeric
-    % stimulus metrics, so visualization and quantification stay aligned.
-    print_stim_context_summary(stim_context, stim_windows, 'Stim-Aware Analysis');
-    stim_results.status = ternary(isstruct(stim_windows) && isfield(stim_windows, 'supported') && stim_windows.supported, ...
-        'supported', 'unsupported_window_layout');
-
-    if stim_windows.supported
-        if ~(has_voltage_snr && has_calcium_snr)
-            error('Stim-aware analysis requires snr stage in both voltage_results and calcium_results.');
-        end
-        fprintf('Stim response metrics:\n');
-        fprintf('  trace stages | voltage snr=snr | calcium snr=%s | calcium sensitivity=%s\n', ...
-            string(calcium_snr_stage), string(calcium_sensitivity_stage));
-        fprintf('  voltage polarity: %d\n', voltage_polarity);
-        fprintf('  calcium polarity: %d\n', calcium_polarity);
-        fprintf('  formulas: delta_mean, delta_peak, delta_auc = stim - baseline\n');
-        fprintf('  calcium final smoothing window: %d\n', calcium_smoothing_window);
-        fprintf('  plotted stages: sensitivity and snr only\n');
-        if strcmpi(string(stim_context.stim_type), "visualstim_flash")
-            fprintf('  flash window rule: baseline = gray 2 s before flash onset | response = 2 s from flash onset\n');
-            fprintf('  flash shading rule: actual flash pulse only\n');
-        end
-
-        stim_trace_fig = figure('Color', 'w');
-        subplot(2, 2, 1); hold on; title('Voltage Sensitivity'); plot_optional_stage(voltage_polarity * voltage_sensitivity, t_voltage, has_voltage_sensitivity, 'Sensitivity stage unavailable'); add_stim_shading(gca, stim_windows.voltage, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
-        subplot(2, 2, 2); hold on; title('Voltage SNR'); plot_optional_stage(voltage_polarity * voltage_snr, t_voltage, has_voltage_snr, 'SNR stage unavailable'); add_stim_shading(gca, stim_windows.voltage, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
-        subplot(2, 2, 3); hold on; title(sprintf('Calcium Sensitivity (%s)', strrep(char(calcium_sensitivity_stage), '_', '\_'))); plot_optional_stage(calcium_polarity * calcium_sensitivity, t_calcium, has_calcium_sensitivity, 'Sensitivity stage unavailable'); add_stim_shading(gca, stim_windows.calcium, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
-        subplot(2, 2, 4); hold on; title(sprintf('Calcium SNR (%s)', strrep(char(calcium_snr_stage), '_', '\_'))); plot_optional_stage(calcium_polarity * calcium_snr, t_calcium, has_calcium_snr, 'SNR stage unavailable'); add_stim_shading(gca, stim_windows.calcium, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
-        save_figure_bundle(stim_trace_fig, fullfile(save_path, '4_dual_trace_summary_with_stim.fig'), fullfile(save_path, '4_dual_trace_summary_with_stim.png'));
-        close(stim_trace_fig);
-
-        voltage_stim_metrics_snr = compute_stim_trial_metrics(voltage_snr, stim_windows.voltage, voltage_polarity, freq_voltage);
-        calcium_stim_metrics_snr = compute_stim_trial_metrics(calcium_snr, stim_windows.calcium, calcium_polarity, freq_calcium);
-
-        stim_results.response = struct( ...
-            'analysis_trace_stage', struct( ...
-                'snr', struct('voltage', "snr", 'calcium', string(calcium_snr_stage)), ...
-                'sensitivity', struct('voltage', "sensitivity", 'calcium', string(calcium_sensitivity_stage))), ...
-            'plot_trace_stage', struct('voltage_sensitivity', "sensitivity", 'voltage_snr', "snr", ...
-                'calcium_sensitivity', string(calcium_sensitivity_stage), 'calcium_snr', string(calcium_snr_stage)), ...
-            'calcium_smoothing_window', calcium_smoothing_window, ...
-            'voltage_polarity', voltage_polarity, ...
-            'calcium_polarity', calcium_polarity, ...
-            'snr', struct('voltage', voltage_stim_metrics_snr, 'calcium', calcium_stim_metrics_snr));
-
-        if has_voltage_sensitivity && has_calcium_sensitivity
-            voltage_stim_metrics_sensitivity = compute_stim_trial_metrics(voltage_sensitivity, stim_windows.voltage, voltage_polarity, freq_voltage);
-            calcium_stim_metrics_sensitivity = compute_stim_trial_metrics(calcium_sensitivity, stim_windows.calcium, calcium_polarity, freq_calcium);
-            stim_results.response.sensitivity = struct( ...
-                'voltage', voltage_stim_metrics_sensitivity, ...
-                'calcium', calcium_stim_metrics_sensitivity);
-            fprintf('  condition-response metrics will be generated for both sensitivity and snr\n');
-        else
-            voltage_stim_metrics_sensitivity = [];
-            calcium_stim_metrics_sensitivity = [];
-            fprintf('  sensitivity metrics skipped because one or both sensitivity stages are unavailable\n');
-        end
-
-        if stim_windows.is_grating
-            fprintf('Stim analysis branch: grating tuning\n');
-            fprintf('  OSI/DSI: enabled\n');
-            fprintf('  outputs: pref_dir, pref_ori, gOSI, gDSI, OSI, DSI\n');
-            voltage_tuning = compute_grating_tuning(voltage_stim_metrics_snr.delta_mean, stim_windows.orientations);
-            calcium_tuning = compute_grating_tuning(calcium_stim_metrics_snr.delta_mean, stim_windows.orientations);
-            stim_results.analysis_kind = 'grating_tuning';
-            stim_results.tuning = struct( ...
-                'voltage', voltage_tuning, ...
-                'calcium', calcium_tuning);
-
-            save(fullfile(save_path, '7_stim_tuning_summary.mat'), 'voltage_tuning', 'calcium_tuning');
-
-            stim_tuning_fig = figure('Color', 'w');
-            subplot(2, 2, 1);
-            plot_tuning_population(voltage_tuning.unique_orientations, voltage_tuning.response_by_condition, 'r', 'Voltage');
-            subplot(2, 2, 2);
-            plot_tuning_population(calcium_tuning.unique_orientations, calcium_tuning.response_by_condition, 'g', 'Calcium');
-            subplot(2, 2, 3);
-            scatter(voltage_tuning.gosi, calcium_tuning.gosi, 28, 'filled');
-            xlabel('Voltage gOSI'); ylabel('Calcium gOSI'); title('Orientation Selectivity'); grid on;
-            subplot(2, 2, 4);
-            scatter(voltage_tuning.pref_dir, calcium_tuning.pref_dir, 28, 'filled');
-            hold on; plot([0 360], [0 360], 'k--');
-            xlim([0 360]); ylim([0 360]);
-            xlabel('Voltage Pref. Dir (deg)'); ylabel('Calcium Pref. Dir (deg)');
-            title('Preferred Direction'); grid on;
-            save_figure_bundle(stim_tuning_fig, fullfile(save_path, '7_stim_tuning_summary.fig'), fullfile(save_path, '7_stim_tuning_summary.png'));
-            close(stim_tuning_fig);
-        else
-            fprintf('Stim analysis branch: condition response\n');
-            fprintf('  OSI/DSI: skipped\n');
-            fprintf('  reason: non-grating stimulus type = %s\n', stim_context.stim_type);
-            if strcmpi(string(stim_context.stim_type), "visualstim_flash")
-                fprintf('  flash condition summary uses post-flash 2 s response windows\n');
-                fprintf('  flash delta summary compares response 2 s against the preceding gray 2 s baseline\n');
-            end
-            voltage_block_summary_snr = summarize_block_by_condition( ...
-                voltage_snr, stim_windows.voltage, stim_windows.block_labels, voltage_polarity, stim_windows.trial_labels);
-            calcium_block_summary_snr = summarize_block_by_condition( ...
-                calcium_snr, stim_windows.calcium, stim_windows.block_labels, calcium_polarity, stim_windows.trial_labels);
-            voltage_delta_summary_snr = summarize_stim_by_condition(voltage_stim_metrics_snr, stim_windows);
-            calcium_delta_summary_snr = summarize_stim_by_condition(calcium_stim_metrics_snr, stim_windows);
-            stim_results.analysis_kind = 'condition_response';
-            stim_results.condition_summary = struct( ...
-                'snr', struct( ...
-                    'block', struct('voltage', voltage_block_summary_snr, 'calcium', calcium_block_summary_snr), ...
-                    'delta', struct('voltage', voltage_delta_summary_snr, 'calcium', calcium_delta_summary_snr)));
-
-            plot_stim_condition_summary( ...
-                voltage_block_summary_snr, calcium_block_summary_snr, ...
-                stim_context, save_path, '7_stim_block_summary_snr', 'SNR Block Response', 'SNR');
-            plot_stim_condition_summary( ...
-                voltage_delta_summary_snr, calcium_delta_summary_snr, ...
-                stim_context, save_path, '7_stim_delta_summary_snr', 'SNR Delta Response', '\Delta SNR (stim - baseline)');
-
-            if ~isempty(voltage_stim_metrics_sensitivity) && ~isempty(calcium_stim_metrics_sensitivity)
-                voltage_block_summary_sensitivity = summarize_block_by_condition( ...
-                    voltage_sensitivity, stim_windows.voltage, stim_windows.block_labels, voltage_polarity, stim_windows.trial_labels);
-                calcium_block_summary_sensitivity = summarize_block_by_condition( ...
-                    calcium_sensitivity, stim_windows.calcium, stim_windows.block_labels, calcium_polarity, stim_windows.trial_labels);
-                voltage_delta_summary_sensitivity = summarize_stim_by_condition(voltage_stim_metrics_sensitivity, stim_windows);
-                calcium_delta_summary_sensitivity = summarize_stim_by_condition(calcium_stim_metrics_sensitivity, stim_windows);
-
-                stim_results.condition_summary.sensitivity = struct( ...
-                    'block', struct('voltage', voltage_block_summary_sensitivity, 'calcium', calcium_block_summary_sensitivity), ...
-                    'delta', struct('voltage', voltage_delta_summary_sensitivity, 'calcium', calcium_delta_summary_sensitivity));
-
-                plot_stim_condition_summary( ...
-                    voltage_block_summary_sensitivity, calcium_block_summary_sensitivity, ...
-                    stim_context, save_path, '7_stim_block_summary_sensitivity', 'Sensitivity Block Response', 'Sensitivity');
-                plot_stim_condition_summary( ...
-                    voltage_delta_summary_sensitivity, calcium_delta_summary_sensitivity, ...
-                    stim_context, save_path, '7_stim_delta_summary_sensitivity', 'Sensitivity Delta Response', '\Delta Sensitivity (stim - baseline)');
-            end
-        end
-    else
-        fprintf('Stim analysis skipped after classification:\n');
-        fprintf('  reason: stim windows could not be reconstructed\n');
-        fprintf('  stim type: %s\n', stim_context.stim_type);
-        fprintf('  selected program: %s\n', stim_context.selected_program);
-    end
-else
-    stim_results.status = 'not_applicable_or_missing_inputs';
-    fprintf('Stim-aware analysis skipped:\n');
-    fprintf('  reason: required stimulation metadata incomplete\n');
-    fprintf('  record mode: %s\n', string(stim_context.recordmode));
-    fprintf('  has logs: %d\n', stim_context.has_logs);
-    fprintf('  has stimSpec: %d\n', stim_context.has_stimSpec);
-end
-save(stim_results_path, 'stim_results', '-v7.3');
+% Shared stimulus-aware analysis after Dual Comparison. This saves the
+% stim-shadow trace summary and all grating/condition-response outputs.
+stim_results = run_dual_stim_aware_analysis_section( ...
+    save_path, ...
+    voltage_results, voltage_results_path, ...
+    calcium_results, calcium_results_path, ...
+    stim_results, stim_results_path, ...
+    stim_context, stim_windows, ...
+    t_voltage, t_calcium, ...
+    freq_voltage, freq_calcium, ...
+    voltage_polarity, calcium_polarity, calcium_smoothing_window);
 
 %% Population Time-Frequency Analysis
 % Replace the previous "oscillation event" summary with a more direct
@@ -2983,8 +2889,9 @@ fprintf('All required code files were copied to %s\n', code_path);
 end
 
 function [voltage_corrected, calcium_corrected, voltage_motion_info, calcium_motion_info] = run_shared_motion_correction(voltage_movie, calcium_movie, cycle_path, save_path, cfg)
-% Estimate one shared motion model on voltage, then apply the same shifts
-% to calcium so both channels remain spatially coupled after correction.
+% Use voltage shifts for both channels when frame counts match. If they do
+% not match, preserve the normal voltage outputs and estimate a separate
+% calcium shift field under calcium-specific output names.
 voltage_corrected = voltage_movie;
 calcium_corrected = calcium_movie;
 
@@ -3011,10 +2918,14 @@ calcium_motion_info = struct( ...
     'parameter_file', '', ...
     'downsample_factor', NaN, ...
     'downsampled_tif_file', '', ...
+    'metrics_file', '', ...
+    'metrics_fig', '', ...
+    'metrics_png', '', ...
     'highpass', cfg.highpass, ...
     'use_saved_shift', cfg.use_saved_shift, ...
     'auto_reused_previous_shift', false, ...
-    'source_role', 'voltage');
+    'source_role', 'voltage', ...
+    'frame_count_fallback', false);
 
 if ~cfg.enabled
     return;
@@ -3025,9 +2936,7 @@ end
 if ncols_v ~= ncols_c || nrows_v ~= nrows_c
     error('Shared motion correction requires matched voltage/calcium frame size before applying shifts.');
 end
-if nframes_v ~= nframes_c
-    error('Shared motion correction requires the same frame count for voltage and calcium movies.');
-end
+use_independent_calcium_motion = nframes_v ~= nframes_c;
 
 options_r = NoRMCorreSetParms('d1', ncols_v, 'd2', nrows_v, 'bin_width', 200, ...
     'max_shift', 30, 'us_fac', 30, 'iter', 1, 'correct_bidir', false);
@@ -3036,14 +2945,6 @@ shift_res_path = fullfile(save_path, 'shared_motion_shifts_result.mat');
 params_save_path = fullfile(save_path, 'shared_motion_correction_para.mat');
 voltage_single = single(voltage_movie);
 calcium_single = single(calcium_movie);
-if cfg.highpass
-    % Use the same high-pass-preprocessed voltage movie for motion-quality
-    % metrics so the raw-vs-corrected comparison matches the shift
-    % estimation target used by NoRMCorre.
-    movie_for_estimation = create_temp_highpass(voltage_single);
-else
-    movie_for_estimation = voltage_single;
-end
 
 shift_source_file = string(cfg.saved_shift_file);
 auto_reused_previous_shift = false;
@@ -3068,13 +2969,86 @@ if (cfg.use_saved_shift && strlength(shift_source_file) > 0) || auto_reused_prev
         copyfile(char(shift_source_file), shift_res_path);
     end
 else
+    % Only build the high-pass temporary movie when NoRMCorre actually has
+    % to estimate shifts. When reusing a saved shift field, this full-size
+    % temporary copy is unnecessary and can add tens of GB to the memory
+    % peak before apply_shifts.
+    if cfg.highpass
+        movie_for_estimation = create_temp_highpass(voltage_single);
+    else
+        movie_for_estimation = voltage_single;
+    end
     [~, shifts_r, ~] = normcorre_batch(movie_for_estimation, options_r);
+    clear movie_for_estimation;
     save(shift_res_path, 'shifts_r', 'options_r', '-v7.3');
 end
 
 voltage_corrected = apply_shifts(voltage_single, shifts_r, options_r);
-calcium_corrected = apply_shifts(calcium_single, shifts_r, options_r);
 save(params_save_path, 'options_r', 'cfg');
+
+calcium_shift_res_path = '';
+calcium_params_save_path = '';
+calcium_shift_source_file = "";
+calcium_auto_reused_previous_shift = false;
+if use_independent_calcium_motion
+    fprintf(['Voltage/calcium frame counts differ (%d vs %d). ' ...
+        'Estimating an independent calcium motion model.\n'], nframes_v, nframes_c);
+    options_c = NoRMCorreSetParms('d1', ncols_c, 'd2', nrows_c, 'bin_width', 200, ...
+        'max_shift', 30, 'us_fac', 30, 'iter', 1, 'correct_bidir', false);
+    calcium_shift_res_path = fullfile(save_path, 'calcium_motion_shifts_result.mat');
+    calcium_params_save_path = fullfile(save_path, 'calcium_motion_correction_para.mat');
+
+    if cfg.auto_reuse_previous_shift
+        calcium_shift_source_file = find_latest_previous_calcium_motion_shift(cycle_path, save_path);
+        calcium_auto_reused_previous_shift = strlength(calcium_shift_source_file) > 0;
+    end
+
+    if calcium_auto_reused_previous_shift
+        fprintf('Reusing existing calcium motion shift file:\n  %s\n', calcium_shift_source_file);
+        calcium_shift_data = load(char(calcium_shift_source_file));
+        if isfield(calcium_shift_data, 'options_c')
+            options_c = calcium_shift_data.options_c;
+        elseif isfield(calcium_shift_data, 'options_r')
+            options_c = calcium_shift_data.options_r;
+        end
+        if isfield(calcium_shift_data, 'shifts_c')
+            shifts_c = calcium_shift_data.shifts_c;
+        elseif isfield(calcium_shift_data, 'shifts_r')
+            shifts_c = calcium_shift_data.shifts_r;
+        else
+            error('Saved calcium motion shift file contains neither shifts_c nor shifts_r: %s', ...
+                calcium_shift_source_file);
+        end
+        if numel(shifts_c) ~= nframes_c
+            warning('Dual_analysis3:CalciumSavedShiftFrameMismatch', ...
+                ['Saved calcium shifts contain %d frames but current calcium movie has %d. ' ...
+                'Re-estimating calcium motion.'], numel(shifts_c), nframes_c);
+            calcium_auto_reused_previous_shift = false;
+            calcium_shift_source_file = "";
+        end
+    end
+    if ~calcium_auto_reused_previous_shift
+        if cfg.highpass
+            calcium_for_estimation = create_temp_highpass(calcium_single);
+        else
+            calcium_for_estimation = calcium_single;
+        end
+        [~, shifts_c, ~] = normcorre_batch(calcium_for_estimation, options_c);
+        clear calcium_for_estimation;
+    end
+    save(calcium_shift_res_path, 'shifts_c', 'options_c', '-v7.3');
+    calcium_corrected = apply_shifts(calcium_single, shifts_c, options_c);
+    calcium_motion_context = struct( ...
+        'reason', "voltage_calcium_frame_count_mismatch", ...
+        'voltage_frame_count', nframes_v, ...
+        'calcium_frame_count', nframes_c, ...
+        'source_shift_file', calcium_shift_source_file, ...
+        'auto_reused_previous_shift', calcium_auto_reused_previous_shift, ...
+        'created_at', datetime("now"));
+    save(calcium_params_save_path, 'options_c', 'cfg', 'calcium_motion_context');
+else
+    calcium_corrected = apply_shifts(calcium_single, shifts_r, options_r);
+end
 
 % Save the same tsub=40 motion-corrected QC TIFF that AP_analysis2 /
 % AP_analysis3 produce, but do it for both channels in the shared-motion
@@ -3085,18 +3059,31 @@ calcium_ds_path = fullfile(save_path, sprintf('calcium_motion_corrected_ds%d.tif
 save_downsampled_motion_tif(voltage_corrected, downsample_factor, voltage_ds_path);
 save_downsampled_motion_tif(calcium_corrected, downsample_factor, calcium_ds_path);
 
-% Quantify motion-correction quality on the voltage reference movie,
-% because the shared shift field is estimated from voltage and then reused
-% by calcium.
-voltage_corrected_for_estimation = apply_shifts(movie_for_estimation, shifts_r, options_r);
+% Quantify motion-correction quality on a temporally downsampled voltage
+% reference movie. Running NoRMCorre motion_metrics on the full dual-camera
+% movie allocates large cropped copies and can exceed memory on long runs.
 motion_metrics_file = fullfile(save_path, 'shared_motion_metrics.mat');
 motion_metrics_fig = fullfile(save_path, 'shared_motion_metrics.fig');
 motion_metrics_png = fullfile(save_path, 'shared_motion_metrics.png');
 save_shared_motion_metrics( ...
-    movie_for_estimation, voltage_corrected_for_estimation, ...
     voltage_single, voltage_corrected, ...
     shifts_r, options_r.max_shift, ...
-    motion_metrics_file, motion_metrics_fig, motion_metrics_png);
+    motion_metrics_file, motion_metrics_fig, motion_metrics_png, downsample_factor);
+
+calcium_motion_metrics_file = '';
+calcium_motion_metrics_fig = '';
+calcium_motion_metrics_png = '';
+if use_independent_calcium_motion
+    calcium_motion_metrics_file = fullfile(save_path, 'calcium_motion_metrics.mat');
+    calcium_motion_metrics_fig = fullfile(save_path, 'calcium_motion_metrics.fig');
+    calcium_motion_metrics_png = fullfile(save_path, 'calcium_motion_metrics.png');
+    save_shared_motion_metrics( ...
+        calcium_single, calcium_corrected, ...
+        shifts_c, options_c.max_shift, ...
+        calcium_motion_metrics_file, calcium_motion_metrics_fig, ...
+        calcium_motion_metrics_png, downsample_factor, 'Calcium');
+end
+clear calcium_single;
 
 voltage_motion_info.applied = true;
 voltage_motion_info.method = 'NoRMCorre_rigid_shared_voltage_reference';
@@ -3111,27 +3098,66 @@ voltage_motion_info.metrics_png = motion_metrics_png;
 voltage_motion_info.use_saved_shift = cfg.use_saved_shift || auto_reused_previous_shift;
 voltage_motion_info.auto_reused_previous_shift = auto_reused_previous_shift;
 
-calcium_motion_info.applied = true;
-calcium_motion_info.method = 'reuse_voltage_motion_shifts';
-calcium_motion_info.shift_file = shift_res_path;
-calcium_motion_info.source_shift_file = char(shift_source_file);
-calcium_motion_info.parameter_file = params_save_path;
 calcium_motion_info.downsample_factor = downsample_factor;
 calcium_motion_info.downsampled_tif_file = calcium_ds_path;
-calcium_motion_info.use_saved_shift = cfg.use_saved_shift || auto_reused_previous_shift;
-calcium_motion_info.auto_reused_previous_shift = auto_reused_previous_shift;
+calcium_motion_info.applied = true;
+if use_independent_calcium_motion
+    voltage_motion_info.shared_with_role = '';
+    calcium_motion_info.method = 'NoRMCorre_rigid_independent_calcium';
+    calcium_motion_info.shift_file = calcium_shift_res_path;
+    calcium_motion_info.source_shift_file = char(calcium_shift_source_file);
+    calcium_motion_info.parameter_file = calcium_params_save_path;
+    calcium_motion_info.metrics_file = calcium_motion_metrics_file;
+    calcium_motion_info.metrics_fig = calcium_motion_metrics_fig;
+    calcium_motion_info.metrics_png = calcium_motion_metrics_png;
+    calcium_motion_info.use_saved_shift = calcium_auto_reused_previous_shift;
+    calcium_motion_info.auto_reused_previous_shift = calcium_auto_reused_previous_shift;
+    calcium_motion_info.source_role = 'calcium';
+    calcium_motion_info.frame_count_fallback = true;
+    calcium_motion_info.parameters = options_c;
+else
+    calcium_motion_info.method = 'reuse_voltage_motion_shifts';
+    calcium_motion_info.shift_file = shift_res_path;
+    calcium_motion_info.source_shift_file = char(shift_source_file);
+    calcium_motion_info.parameter_file = params_save_path;
+    calcium_motion_info.use_saved_shift = cfg.use_saved_shift || auto_reused_previous_shift;
+    calcium_motion_info.auto_reused_previous_shift = auto_reused_previous_shift;
+end
 end
 
 function save_downsampled_motion_tif(movie_3d, downsample_factor, save_path_tif)
-if exist('downsample_data', 'file') ~= 2
-    error('NoRMCorre helper downsample_data is required to save downsampled motion-corrected TIFFs.');
-end
 if exist('array2tif', 'file') ~= 2
     error('array2tif helper is required to save downsampled motion-corrected TIFFs.');
 end
-movie_ds = downsample_data(movie_3d, 'time', downsample_factor);
+movie_ds = downsample_movie_time_mean(movie_3d, downsample_factor);
 movie_ds = scale_movie_to_uint16_display(movie_ds);
 array2tif(uint16(movie_ds), save_path_tif);
+end
+
+function movie_ds = downsample_movie_time_mean(movie_3d, downsample_factor)
+% Downsample by averaging contiguous temporal blocks without reshaping the
+% full movie. NoRMCorre's downsample_data is convenient but can allocate a
+% very large temporary array for long dual-camera movies.
+movie_size = size(movie_3d);
+if numel(movie_size) < 3
+    movie_size(3) = 1;
+end
+ncols = movie_size(1);
+nrows = movie_size(2);
+nframes = movie_size(3);
+downsample_factor = max(1, round(double(downsample_factor)));
+ndownsampled = floor(nframes / downsample_factor);
+if ndownsampled < 1
+    movie_ds = single(movie_3d);
+    return;
+end
+
+movie_ds = zeros(ncols, nrows, ndownsampled, 'single');
+for idx = 1:ndownsampled
+    frame_start = (idx - 1) * downsample_factor + 1;
+    frame_stop = idx * downsample_factor;
+    movie_ds(:, :, idx) = mean(single(movie_3d(:, :, frame_start:frame_stop)), 3, 'omitnan');
+end
 end
 
 function movie_scaled = scale_movie_to_uint16_display(movie_3d)
@@ -3146,24 +3172,35 @@ movie_scaled(movie_scaled < 0) = 0;
 movie_scaled(movie_scaled > 65535) = 65535;
 end
 
-function save_shared_motion_metrics(filtered_raw, filtered_corrected, full_raw, full_corrected, shifts_r, max_shift, mat_file, fig_file, png_file)
+function save_shared_motion_metrics(full_raw, full_corrected, shifts_r, max_shift, mat_file, fig_file, png_file, metric_downsample_factor, channel_label)
 if exist('motion_metrics', 'file') ~= 2
     error('NoRMCorre helper motion_metrics is required for motion-correction QC metrics.');
 end
-[c_filtered_raw, m_filtered_raw, v_filtered_raw] = motion_metrics(filtered_raw, max_shift);
-[c_filtered_corrected, m_filtered_corrected, v_filtered_corrected] = motion_metrics(filtered_corrected, max_shift);
-[c_full_raw, m_full_raw, v_full_raw] = motion_metrics(full_raw, max_shift);
-[c_full_corrected, m_full_corrected, v_full_corrected] = motion_metrics(full_corrected, max_shift);
+if nargin < 8 || isempty(metric_downsample_factor)
+    metric_downsample_factor = 40;
+end
+if nargin < 9 || strlength(string(channel_label)) == 0
+    channel_label = "Shared";
+else
+    channel_label = string(channel_label);
+end
+metric_downsample_factor = max(1, round(double(metric_downsample_factor)));
+
+full_raw_ds = downsample_movie_time_mean(full_raw, metric_downsample_factor);
+[c_full_raw, m_full_raw, v_full_raw] = motion_metrics(full_raw_ds, max_shift);
+clear full_raw_ds;
+
+full_corrected_ds = downsample_movie_time_mean(full_corrected, metric_downsample_factor);
+[c_full_corrected, m_full_corrected, v_full_corrected] = motion_metrics(full_corrected_ds, max_shift);
+clear full_corrected_ds;
+
 shifts_plot = squeeze(cat(3, shifts_r(:).shifts));
 metrics_data = struct( ...
     'rigid_shifts', shifts_plot, ...
+    'metric_downsample_factor', metric_downsample_factor, ...
     'filtered', struct( ...
-        'correlation_raw', c_filtered_raw, ...
-        'correlation_corrected', c_filtered_corrected, ...
-        'mean_raw', m_filtered_raw, ...
-        'mean_corrected', m_filtered_corrected, ...
-        'variance_raw', v_filtered_raw, ...
-        'variance_corrected', v_filtered_corrected), ...
+        'status', 'skipped', ...
+        'reason', 'High-pass filtered metrics are skipped to avoid an extra full-movie apply_shifts and motion_metrics memory peak.'), ...
     'full', struct( ...
         'correlation_raw', c_full_raw, ...
         'correlation_corrected', c_full_corrected, ...
@@ -3173,31 +3210,41 @@ metrics_data = struct( ...
         'variance_corrected', v_full_corrected));
 save(mat_file, 'metrics_data', '-v7.3');
 
-fig = figure('Color', 'w', 'Name', 'Shared Motion Metrics');
+if channel_label == "Shared"
+    figure_name = 'Shared Motion Metrics';
+    shift_title = 'Shared Rigid Shifts';
+    correlation_title = 'Correlation Coefficients On Full Voltage Movie';
+    metric_description = sprintf('High-pass filtered metrics skipped\nFull-voltage metrics use time downsample x%d', ...
+        metric_downsample_factor);
+else
+    figure_name = sprintf('%s Motion Metrics', channel_label);
+    shift_title = sprintf('%s Rigid Shifts', channel_label);
+    correlation_title = sprintf('Correlation Coefficients On Full %s Movie', channel_label);
+    metric_description = sprintf('High-pass filtered metrics skipped\nFull-%s metrics use time downsample x%d', ...
+        lower(channel_label), metric_downsample_factor);
+end
+
+fig = figure('Color', 'w', 'Name', figure_name);
 subplot(3, 1, 1);
 plot(shifts_plot, 'LineWidth', 1);
-title('Shared Rigid Shifts');
+title(shift_title);
 legend('y-shifts', 'x-shifts');
 grid on;
 
 subplot(3, 1, 2);
-plot(c_filtered_raw, 'Color', [0.45 0.45 0.45], 'LineWidth', 1);
-hold on;
-plot(c_filtered_corrected, 'r', 'LineWidth', 1.2);
-title('Correlation Coefficients On Filtered Voltage Movie');
-legend('raw', 'corrected');
-ylim([0.8, 1]);
-grid on;
+text(0.5, 0.5, metric_description, ...
+    'Units', 'normalized', 'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle');
+axis off;
 
 subplot(3, 1, 3);
 plot(c_full_raw, 'Color', [0.45 0.45 0.45], 'LineWidth', 1);
 hold on;
 plot(c_full_corrected, 'r', 'LineWidth', 1.2);
-title('Correlation Coefficients On Full Voltage Movie');
+title(correlation_title);
 legend('raw', 'corrected');
 ylim([0.8, 1]);
 grid on;
-xlabel('Frame');
+xlabel(sprintf('Downsampled frame (x%d)', metric_downsample_factor));
 
 save_figure_bundle(fig, fig_file, png_file);
 close(fig);
@@ -3228,15 +3275,43 @@ end
 function shift_file = find_latest_previous_motion_shift(cycle_path, current_save_path)
 shift_file = "";
 dual_root = fullfile(cycle_path, 'Dual_analysis3');
+if isfolder(dual_root)
+    listing = dir(fullfile(dual_root, '**', 'shared_motion_shifts_result.mat'));
+    shift_file = select_latest_shift_candidate(listing, current_save_path);
+    if strlength(shift_file) > 0
+        return;
+    end
+end
+
+% Fall back to legacy single-channel Cam*_Analysis outputs when no modern
+% Dual_analysis3 shared shift file exists yet. In rebuilt dual-color data,
+% Cam2 is the voltage channel by convention, so it is checked before other
+% camera analysis folders.
+legacy_voltage_listing = dir(fullfile(cycle_path, 'Cam2*_Analysis', '**', 'motion_shifts_result.mat'));
+shift_file = select_latest_shift_candidate(legacy_voltage_listing, current_save_path);
+if strlength(shift_file) > 0
+    return;
+end
+
+legacy_listing = dir(fullfile(cycle_path, 'Cam*_Analysis', '**', 'motion_shifts_result.mat'));
+shift_file = select_latest_shift_candidate(legacy_listing, current_save_path);
+end
+
+function shift_file = find_latest_previous_calcium_motion_shift(cycle_path, current_save_path)
+shift_file = "";
+dual_root = fullfile(cycle_path, 'Dual_analysis3');
 if ~isfolder(dual_root)
     return;
 end
+listing = dir(fullfile(dual_root, '**', 'calcium_motion_shifts_result.mat'));
+shift_file = select_latest_shift_candidate(listing, current_save_path);
+end
 
-listing = dir(fullfile(dual_root, '**', 'shared_motion_shifts_result.mat'));
+function shift_file = select_latest_shift_candidate(listing, current_save_path)
+shift_file = "";
 if isempty(listing)
     return;
 end
-
 current_save_path = string(current_save_path);
 candidate_paths = strings(0, 1);
 candidate_times = zeros(0, 1);
@@ -4421,6 +4496,368 @@ elseif contains(label, 'blue')
 end
 end
 
+function [voltage_results, peak_results] = run_voltage_peak_detection_section( ...
+    voltage_results, voltage_results_path, save_path, frame_rate, params)
+print_section('Voltage Sensitivity Peak Detection');
+fprintf('Detecting voltage peaks from trace_results.sensitivity...\n');
+voltage_sensitivity = fetch_trace_stage(voltage_results, 'sensitivity');
+nrois = size(voltage_sensitivity, 2);
+peak_results = struct();
+
+[peak_table_detected, peaks_index, peaks_amplitude, peaks_polarity] = ...
+    detect_voltage_sensitivity_peaks(voltage_sensitivity, frame_rate, params);
+peak_results.sensitivity_detected.data = struct( ...
+    'peak_table', peak_table_detected, ...
+    'index', {peaks_index}, ...
+    'amplitude', {peaks_amplitude}, ...
+    'polarity', {peaks_polarity});
+peak_results.sensitivity_detected.info = struct( ...
+    'result_name', 'sensitivity_detected', ...
+    'parent_results', {{}}, ...
+    'trace_result', 'sensitivity', ...
+    'method', 'detect_sensitivity_peaks', ...
+    'parameters', rmfield(params, 'run_manual_edit'), ...
+    'created_at', datetime("now"));
+peak_results.current_result = 'sensitivity_detected';
+save(fullfile(save_path, '4_voltage_sensitivity_peak_detect_results.mat'), ...
+    'peak_table_detected', 'peaks_index', 'peaks_amplitude', 'peaks_polarity', 'params');
+
+edit_history = struct('action', {}, 'roi', {}, 'peak_id', {}, 'index_before', {}, ...
+    'index_after', {}, 'mode', {}, 'created_at', {});
+manual_edit_params = struct( ...
+    'enabled', logical(params.run_manual_edit), ...
+    'min_peak_distance_frames', params.min_peak_distance_frames, ...
+    'frame_rate_hz', frame_rate, ...
+    'default_mode', "delete_box", ...
+    'keys', "A add box, D delete box, N/space next ROI, R reset ROI, Q finish");
+if params.run_manual_edit
+    [peak_table_final, edit_history] = edit_voltage_sensitivity_peaks( ...
+        voltage_sensitivity, peak_table_detected, peaks_polarity, manual_edit_params);
+    manual_edit_method = 'manual_add_delete_peak_edit';
+else
+    peak_table_final = peak_table_detected;
+    manual_edit_method = 'manual_add_delete_peak_edit_skipped';
+end
+[peaks_index, peaks_amplitude, peaks_polarity] = ...
+    voltage_peak_table_to_cells(peak_table_final, nrois, peaks_polarity);
+
+peak_results.sensitivity_manually_edited.data = struct( ...
+    'peak_table', peak_table_final, ...
+    'edit_history', edit_history, ...
+    'index', {peaks_index}, ...
+    'amplitude', {peaks_amplitude}, ...
+    'polarity', {peaks_polarity});
+peak_results.sensitivity_manually_edited.info = struct( ...
+    'result_name', 'sensitivity_manually_edited', ...
+    'parent_results', {{'sensitivity_detected'}}, ...
+    'trace_result', 'sensitivity', ...
+    'method', manual_edit_method, ...
+    'parameters', manual_edit_params, ...
+    'created_at', datetime("now"));
+peak_results.accepted_for_events = peak_results.sensitivity_manually_edited;
+peak_results.accepted_for_events.info.result_name = 'accepted_for_events';
+peak_results.accepted_for_events.info.parent_results = {'sensitivity_manually_edited'};
+peak_results.accepted_for_events.info.method = 'accepted_peaks_after_manual_edit';
+peak_results.current_result = 'accepted_for_events';
+
+save(fullfile(save_path, '4_voltage_sensitivity_peak_edit_results.mat'), ...
+    'peak_table_final', 'edit_history', 'peaks_index', 'peaks_amplitude', ...
+    'peaks_polarity', 'manual_edit_params');
+save(fullfile(save_path, '5_voltage_accepted_peaks.mat'), ...
+    'peaks_index', 'peaks_polarity', 'peaks_amplitude');
+save(fullfile(save_path, 'voltage_peak_results.mat'), 'peak_results', '-v7.3');
+
+voltage_results.peak_results = peak_results;
+save(voltage_results_path, 'voltage_results', '-v7.3');
+fprintf('Voltage peaks saved: %d ROIs | %d accepted peaks\n', ...
+    nrois, sum(cellfun(@numel, peaks_index)));
+end
+
+function [peak_table, peaks_index, peaks_amplitude, peaks_polarity] = ...
+    detect_voltage_sensitivity_peaks(traces_sensitivity, frame_rate, params)
+nrois = size(traces_sensitivity, 2);
+peaks_polarity = cell(1, nrois);
+peak_table = empty_voltage_peak_table();
+next_peak_id = 1;
+min_distance = max(1, round(params.min_peak_distance_frames));
+created_at = datetime("now");
+
+for roi_idx = 1:nrois
+    trace_i = traces_sensitivity(:, roi_idx);
+    polarity = choose_voltage_peak_polarity(trace_i, params.polarity_mode);
+    peaks_polarity{roi_idx} = polarity;
+    plot_trace = trace_i * polarity;
+    min_prominence = resolve_voltage_peak_min_prominence(plot_trace, params);
+    [~, peak_x] = findpeaks(plot_trace, ...
+        'MinPeakProminence', min_prominence, ...
+        'MinPeakDistance', min_distance, ...
+        'MinPeakHeight', params.min_peak_height);
+    if isempty(peak_x)
+        continue;
+    end
+
+    peak_count = numel(peak_x);
+    new_rows = table( ...
+        (next_peak_id:next_peak_id + peak_count - 1)', ...
+        repmat(roi_idx, peak_count, 1), ...
+        peak_x(:), ...
+        peak_x(:) ./ frame_rate, ...
+        repmat(polarity, peak_count, 1), ...
+        trace_i(peak_x(:)), ...
+        repmat("accepted", peak_count, 1), ...
+        repmat("auto", peak_count, 1), ...
+        NaN(peak_count, 1), ...
+        repmat("sensitivity_detected", peak_count, 1), ...
+        repmat(created_at, peak_count, 1), ...
+        'VariableNames', peak_table.Properties.VariableNames);
+    peak_table = [peak_table; new_rows]; %#ok<AGROW>
+    next_peak_id = next_peak_id + peak_count;
+end
+[peaks_index, peaks_amplitude, peaks_polarity] = ...
+    voltage_peak_table_to_cells(peak_table, nrois, peaks_polarity);
+end
+
+function min_prominence = resolve_voltage_peak_min_prominence(plot_trace, params)
+if lower(string(params.min_peak_prominence_mode)) == "absolute"
+    min_prominence = params.min_peak_prominence;
+else
+    trace_scale = max(plot_trace, [], 'omitnan') - mean(plot_trace, 'omitnan');
+    if ~isfinite(trace_scale) || trace_scale < 0
+        trace_scale = 0;
+    end
+    min_prominence = params.min_peak_prominence * trace_scale;
+end
+if ~isfinite(min_prominence) || min_prominence < 0
+    min_prominence = 0;
+end
+end
+
+function [peak_table, edit_history] = edit_voltage_sensitivity_peaks( ...
+    traces_sensitivity, peak_table, peaks_polarity, params)
+nrois = size(traces_sensitivity, 2);
+edit_history = struct('action', {}, 'roi', {}, 'peak_id', {}, 'index_before', {}, ...
+    'index_after', {}, 'mode', {}, 'created_at', {});
+next_peak_id = 1;
+if height(peak_table) > 0
+    next_peak_id = max(peak_table.peak_id) + 1;
+end
+quit_editor = false;
+
+for roi_idx = 1:nrois
+    if quit_editor
+        break;
+    end
+    mode = string(params.default_mode);
+    reset_table = peak_table;
+    fig = figure('Name', sprintf('ROI %d voltage sensitivity peak editor', roi_idx));
+    set(fig, 'Position', get(0, 'Screensize'));
+    while ishandle(fig)
+        ax = draw_voltage_peak_editor(fig, traces_sensitivity(:, roi_idx), peak_table, ...
+            peaks_polarity{roi_idx}, roi_idx, mode);
+        key = wait_for_voltage_peak_editor_key(fig);
+        if ~ishandle(fig)
+            break;
+        end
+        switch key
+            case "a"
+                mode = "add_box";
+                [box_position, box_ok] = get_voltage_peak_editor_box(ax);
+                if box_ok
+                    [peak_table, edit_history, next_peak_id] = add_voltage_peaks_in_box( ...
+                        traces_sensitivity(:, roi_idx), peak_table, edit_history, next_peak_id, ...
+                        roi_idx, peaks_polarity{roi_idx}, params, box_position, mode);
+                end
+            case "d"
+                mode = "delete_box";
+                [box_position, box_ok] = get_voltage_peak_editor_box(ax);
+                if box_ok
+                    [peak_table, edit_history] = delete_voltage_peaks_in_box( ...
+                        traces_sensitivity(:, roi_idx), peak_table, edit_history, ...
+                        roi_idx, peaks_polarity{roi_idx}, box_position, mode);
+                end
+            case "r"
+                peak_table(peak_table.roi == roi_idx, :) = [];
+                peak_table = [peak_table; reset_table(reset_table.roi == roi_idx, :)];
+                edit_history(end+1) = make_voltage_peak_edit_history( ...
+                    "reset", roi_idx, NaN, NaN, NaN, mode); %#ok<AGROW>
+            case "q"
+                quit_editor = true;
+                close(fig);
+            case {"n", "space", "return"}
+                close(fig);
+        end
+    end
+end
+end
+
+function ax = draw_voltage_peak_editor(fig, trace_i, peak_table, polarity, roi_idx, mode)
+figure(fig);
+clf(fig);
+set(fig, 'KeyPressFcn', @(~, event) set_voltage_peak_editor_key(event, fig));
+ax = axes('Parent', fig, 'Units', 'normalized', 'Position', [0.06 0.08 0.91 0.86]);
+plot(ax, trace_i * polarity, 'k'); hold(ax, 'on');
+accepted = peak_table.roi == roi_idx & peak_table.status == "accepted";
+deleted = peak_table.roi == roi_idx & peak_table.status == "deleted";
+accepted_idx = peak_table.index(accepted);
+deleted_idx = peak_table.index(deleted);
+if ~isempty(accepted_idx)
+    plot(ax, accepted_idx, trace_i(accepted_idx) * polarity, 'rv', 'MarkerFaceColor', 'r');
+end
+if ~isempty(deleted_idx)
+    plot(ax, deleted_idx, trace_i(deleted_idx) * polarity, 'x', ...
+        'Color', [0.5 0.5 0.5], 'LineWidth', 1.5);
+end
+title(ax, sprintf('ROI %d | %s | A add, D delete, N/Space next, R reset, Q quit', ...
+    roi_idx, upper(mode)));
+xlabel(ax, 'Frame');
+ylabel(ax, 'Sensitivity x polarity');
+grid(ax, 'on');
+end
+
+function set_voltage_peak_editor_key(event, fig)
+if any(strcmp(event.Key, {'a', 'd', 'n', 'space', 'return', 'r', 'q'}))
+    fig.UserData.key = event.Key;
+end
+end
+
+function key = wait_for_voltage_peak_editor_key(fig)
+fig.UserData.key = [];
+waitfor(fig, 'UserData');
+if ishandle(fig) && isstruct(fig.UserData) && isfield(fig.UserData, 'key')
+    key = string(fig.UserData.key);
+else
+    key = "";
+end
+end
+
+function [box_position, box_ok] = get_voltage_peak_editor_box(ax)
+box_position = [NaN NaN NaN NaN];
+box_ok = false;
+try
+    rect = drawrectangle(ax);
+    wait(rect);
+    if isvalid(rect)
+        box_position = rect.Position;
+        delete(rect);
+        box_ok = all(isfinite(box_position)) && box_position(3) > 0 && box_position(4) > 0;
+    end
+catch ME
+    warning('Dual_analysis3:VoltagePeakEditRectangleFailed', ...
+        'Rectangle selection failed: %s', ME.message);
+end
+end
+
+function [peak_table, edit_history, next_peak_id] = add_voltage_peaks_in_box( ...
+    trace_i, peak_table, edit_history, next_peak_id, roi_idx, polarity, params, box_position, mode)
+plot_trace = trace_i * polarity;
+frame_range = max(1, ceil(box_position(1))): ...
+    min(numel(trace_i), floor(box_position(1) + box_position(3)));
+if isempty(frame_range)
+    return;
+end
+[peak_y, peak_x_rel] = findpeaks(plot_trace(frame_range), ...
+    'MinPeakDistance', max(1, round(params.min_peak_distance_frames)));
+candidate_indices = frame_range(peak_x_rel);
+inside_y = peak_y >= box_position(2) & peak_y <= box_position(2) + box_position(4);
+candidate_indices = unique(candidate_indices(inside_y));
+existing = peak_table.index(peak_table.roi == roi_idx & peak_table.status == "accepted");
+
+for idx = reshape(candidate_indices, 1, [])
+    if ~isempty(existing) && any(abs(existing - idx) < params.min_peak_distance_frames)
+        continue;
+    end
+    new_row = table(next_peak_id, roi_idx, idx, idx / params.frame_rate_hz, polarity, ...
+        trace_i(idx), "accepted", "manual_add", NaN, "sensitivity_manually_edited", ...
+        datetime("now"), 'VariableNames', peak_table.Properties.VariableNames);
+    peak_table = [peak_table; new_row]; %#ok<AGROW>
+    edit_history(end+1) = make_voltage_peak_edit_history( ...
+        "add_box", roi_idx, next_peak_id, NaN, idx, mode); %#ok<AGROW>
+    existing(end+1, 1) = idx; %#ok<AGROW>
+    next_peak_id = next_peak_id + 1;
+end
+end
+
+function [peak_table, edit_history] = delete_voltage_peaks_in_box( ...
+    trace_i, peak_table, edit_history, roi_idx, polarity, box_position, mode)
+rows = find(peak_table.roi == roi_idx & peak_table.status == "accepted");
+if isempty(rows)
+    return;
+end
+peak_x = peak_table.index(rows);
+peak_y = trace_i(peak_x) * polarity;
+inside = peak_x >= box_position(1) & peak_x <= box_position(1) + box_position(3) ...
+    & peak_y >= box_position(2) & peak_y <= box_position(2) + box_position(4);
+for row_idx = reshape(rows(inside), 1, [])
+    peak_table.status(row_idx) = "deleted";
+    edit_history(end+1) = make_voltage_peak_edit_history( ...
+        "delete_box", roi_idx, peak_table.peak_id(row_idx), ...
+        peak_table.index(row_idx), NaN, mode); %#ok<AGROW>
+end
+end
+
+function entry = make_voltage_peak_edit_history(action, roi_idx, peak_id, index_before, index_after, mode)
+entry = struct( ...
+    'action', string(action), ...
+    'roi', roi_idx, ...
+    'peak_id', peak_id, ...
+    'index_before', index_before, ...
+    'index_after', index_after, ...
+    'mode', string(mode), ...
+    'created_at', datetime("now"));
+end
+
+function peak_table = empty_voltage_peak_table()
+peak_table = table( ...
+    zeros(0,1), zeros(0,1), zeros(0,1), zeros(0,1), zeros(0,1), zeros(0,1), ...
+    strings(0,1), strings(0,1), zeros(0,1), strings(0,1), NaT(0,1), ...
+    'VariableNames', {'peak_id', 'roi', 'index', 'time_s', 'polarity', ...
+    'amplitude_sensitivity', 'status', 'source', 'parent_peak_id', ...
+    'created_stage', 'created_at'});
+end
+
+function polarity = choose_voltage_peak_polarity(trace_i, mode)
+switch lower(string(mode))
+    case "positive"
+        polarity = 1;
+    case "negative"
+        polarity = -1;
+    otherwise
+        trace_mean = mean(trace_i, 'omitnan');
+        if abs(max(trace_i, [], 'omitnan') - trace_mean) >= ...
+                abs(min(trace_i, [], 'omitnan') - trace_mean)
+            polarity = 1;
+        else
+            polarity = -1;
+        end
+end
+end
+
+function [peaks_index, peaks_amplitude, peaks_polarity] = ...
+    voltage_peak_table_to_cells(peak_table, nrois, fallback_polarity)
+peaks_index = cell(1, nrois);
+peaks_amplitude = cell(1, nrois);
+peaks_polarity = cell(1, nrois);
+for roi_idx = 1:nrois
+    rows_i = peak_table(peak_table.roi == roi_idx & peak_table.status == "accepted", :);
+    if height(rows_i) > 0
+        [~, order] = sort(rows_i.index);
+        rows_i = rows_i(order, :);
+        peaks_index{roi_idx} = rows_i.index;
+        peaks_amplitude{roi_idx} = rows_i.amplitude_sensitivity;
+        peaks_polarity{roi_idx} = rows_i.polarity(1);
+    else
+        peaks_index{roi_idx} = [];
+        peaks_amplitude{roi_idx} = [];
+        if nargin >= 3 && numel(fallback_polarity) >= roi_idx && ...
+                ~isempty(fallback_polarity{roi_idx})
+            peaks_polarity{roi_idx} = fallback_polarity{roi_idx};
+        else
+            peaks_polarity{roi_idx} = 1;
+        end
+    end
+end
+end
+
 function metrics = compute_stim_trial_metrics(trace_matrix, channel_windows, polarity, frame_rate)
 % Reduce each trial into baseline-vs-stim summary numbers. These metrics
 % are the main numeric outputs used for condition comparison across ROIs.
@@ -4491,20 +4928,210 @@ catch
 end
 end
 
-function tuning = compute_grating_tuning(delta_mean, orientations)
+
+function stim_results = run_dual_stim_aware_analysis_section( ...
+    save_path, ...
+    voltage_results, voltage_results_path, ...
+    calcium_results, calcium_results_path, ...
+    stim_results, stim_results_path, ...
+    stim_context, stim_windows, ...
+    t_voltage, t_calcium, ...
+    freq_voltage, freq_calcium, ...
+    voltage_polarity, calcium_polarity, calcium_smoothing_window)
+% Shared stimulus-aware analysis used by full, analysis-only, and post-trace paths.
+% It keeps grating tuning parameters and stim-shadow summary plotting in one place.
+print_section('Stim-Aware Analysis');
+fprintf('Running stimulus-specific analysis after dual comparison...\n');
+[voltage_results, calcium_results] = load_channel_results( ...
+    voltage_results_path, calcium_results_path, voltage_results, calcium_results);
+has_voltage_sensitivity = has_trace_stage(voltage_results, 'sensitivity');
+has_voltage_snr = has_trace_stage(voltage_results, 'snr');
+has_calcium_sensitivity = has_trace_stage(calcium_results, 'sensitivity_smoothed') || has_trace_stage(calcium_results, 'sensitivity');
+has_calcium_snr = has_trace_stage(calcium_results, 'snr_smoothed') || has_trace_stage(calcium_results, 'snr');
+if has_voltage_sensitivity
+    voltage_sensitivity = fetch_trace_stage(voltage_results, 'sensitivity');
+else
+    voltage_sensitivity = [];
+end
+if has_voltage_snr
+    voltage_snr = fetch_trace_stage(voltage_results, 'snr');
+else
+    voltage_snr = [];
+end
+if has_calcium_sensitivity
+    [calcium_sensitivity, calcium_sensitivity_stage] = resolve_preferred_trace_stage(calcium_results, {'sensitivity_smoothed', 'sensitivity'});
+else
+    calcium_sensitivity = [];
+    calcium_sensitivity_stage = '';
+end
+if has_calcium_snr
+    [calcium_snr, calcium_snr_stage] = resolve_preferred_trace_stage(calcium_results, {'snr_smoothed', 'snr'});
+else
+    calcium_snr = [];
+    calcium_snr_stage = '';
+end
+stim_results.info = rmfield_if_exists(stim_context, {'logs', 'method_manifest'});
+stim_results.windows = stim_windows;
+if stim_context.supported
+    print_stim_context_summary(stim_context, stim_windows, 'Stim-Aware Analysis');
+    stim_results.status = ternary(isstruct(stim_windows) && isfield(stim_windows, 'supported') && stim_windows.supported, ...
+        'supported', 'unsupported_window_layout');
+    if stim_windows.supported
+        if ~(has_voltage_snr && has_calcium_snr)
+            error('Stim-aware analysis requires snr stage in both voltage_results and calcium_results.');
+        end
+        stim_trace_fig = figure('Color', 'w');
+        subplot(2, 2, 1); hold on; title('Voltage Sensitivity'); plot_optional_stage(voltage_polarity * voltage_sensitivity, t_voltage, has_voltage_sensitivity, 'Sensitivity stage unavailable'); add_stim_shading(gca, stim_windows.voltage, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
+        subplot(2, 2, 2); hold on; title('Voltage SNR'); plot_optional_stage(voltage_polarity * voltage_snr, t_voltage, has_voltage_snr, 'SNR stage unavailable'); add_stim_shading(gca, stim_windows.voltage, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
+        subplot(2, 2, 3); hold on; title(sprintf('Calcium Sensitivity (%s)', strrep(char(calcium_sensitivity_stage), '_', '\_'))); plot_optional_stage(calcium_polarity * calcium_sensitivity, t_calcium, has_calcium_sensitivity, 'Sensitivity stage unavailable'); add_stim_shading(gca, stim_windows.calcium, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
+        subplot(2, 2, 4); hold on; title(sprintf('Calcium SNR (%s)', strrep(char(calcium_snr_stage), '_', '\_'))); plot_optional_stage(calcium_polarity * calcium_snr, t_calcium, has_calcium_snr, 'SNR stage unavailable'); add_stim_shading(gca, stim_windows.calcium, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
+        save_figure_bundle(stim_trace_fig, fullfile(save_path, '4_dual_trace_summary_with_stim.fig'), fullfile(save_path, '4_dual_trace_summary_with_stim.png'));
+        close(stim_trace_fig);
+
+        voltage_stim_metrics_snr = compute_stim_trial_metrics(voltage_snr, stim_windows.voltage, voltage_polarity, freq_voltage);
+        calcium_stim_metrics_snr = compute_stim_trial_metrics(calcium_snr, stim_windows.calcium, calcium_polarity, freq_calcium);
+        stim_results.response = struct( ...
+            'analysis_trace_stage', struct( ...
+                'snr', struct('voltage', "snr", 'calcium', string(calcium_snr_stage)), ...
+                'sensitivity', struct('voltage', "sensitivity", 'calcium', string(calcium_sensitivity_stage))), ...
+            'plot_trace_stage', struct('voltage_sensitivity', "sensitivity", 'voltage_snr', "snr", ...
+                'calcium_sensitivity', string(calcium_sensitivity_stage), 'calcium_snr', string(calcium_snr_stage)), ...
+            'calcium_smoothing_window', calcium_smoothing_window, ...
+            'voltage_polarity', voltage_polarity, ...
+            'calcium_polarity', calcium_polarity, ...
+            'snr', struct('voltage', voltage_stim_metrics_snr, 'calcium', calcium_stim_metrics_snr));
+
+        if has_voltage_sensitivity && has_calcium_sensitivity
+            voltage_stim_metrics_sensitivity = compute_stim_trial_metrics(voltage_sensitivity, stim_windows.voltage, voltage_polarity, freq_voltage);
+            calcium_stim_metrics_sensitivity = compute_stim_trial_metrics(calcium_sensitivity, stim_windows.calcium, calcium_polarity, freq_calcium);
+            stim_results.response.sensitivity = struct('voltage', voltage_stim_metrics_sensitivity, 'calcium', calcium_stim_metrics_sensitivity);
+        else
+            voltage_stim_metrics_sensitivity = [];
+            calcium_stim_metrics_sensitivity = [];
+        end
+
+        if stim_windows.is_grating
+            if isempty(calcium_stim_metrics_sensitivity)
+                error('Grating tuning requires the calcium sensitivity stage.');
+            end
+            fprintf('Grating tuning response definitions:\n');
+            fprintf('  voltage grating/non-grating curves = accepted spike count in paired stim/baseline windows\n');
+            fprintf('  calcium grating/non-grating curves = mean sensitivity in paired stim/baseline windows\n');
+            fprintf('  calcium sensitivity zero baseline = 0; no stim-minus-baseline subtraction\n');
+            fprintf('  DSI/OSI/gDSI/gOSI source = grating-present curves only\n');
+            voltage_peaks_index = resolve_voltage_peak_indices(voltage_results);
+            voltage_spike_counts = compute_peak_counts_by_trial_windows( ...
+                voltage_peaks_index, stim_windows.voltage);
+            [voltage_tuning, calcium_tuning, per_roi_tuning] = compute_dual_grating_tuning_by_roi( ...
+                voltage_spike_counts.stim, voltage_spike_counts.baseline, ...
+                calcium_stim_metrics_sensitivity.stim_mean, ...
+                calcium_stim_metrics_sensitivity.baseline_mean, ...
+                stim_windows.orientations);
+            stim_results.analysis_kind = 'grating_tuning';
+            stim_results.tuning = struct( ...
+                'voltage', voltage_tuning, ...
+                'calcium', calcium_tuning, ...
+                'per_roi', per_roi_tuning, ...
+                'trial_response', struct( ...
+                    'voltage_spike_count', voltage_spike_counts, ...
+                    'calcium_mean_sensitivity', struct( ...
+                        'stim', calcium_stim_metrics_sensitivity.stim_mean, ...
+                        'baseline', calcium_stim_metrics_sensitivity.baseline_mean)), ...
+                'curve_definition', struct( ...
+                    'voltage', "accepted spike count per paired window", ...
+                    'calcium', "mean sensitivity per paired window; sensitivity baseline is zero", ...
+                    'negative_trial_response_rule', "clip to zero before averaging by direction"), ...
+                'dsi_osi_source', "grating_present_curve");
+            per_roi_tuning = save_grating_tuning_by_roi(per_roi_tuning, save_path, '7_stim_tuning_by_roi');
+            stim_results.tuning.per_roi = per_roi_tuning;
+            save(fullfile(save_path, '7_stim_tuning_summary.mat'), ...
+                'voltage_tuning', 'calcium_tuning', 'per_roi_tuning', ...
+                'voltage_spike_counts');
+            stim_tuning_fig = figure('Color', 'w');
+            subplot(2, 2, 1); plot_tuning_population(voltage_tuning, 'r', 'Voltage Spike Count', 'Spikes / trial');
+            subplot(2, 2, 2); plot_tuning_population(calcium_tuning, 'g', 'Calcium Mean Sensitivity', 'Mean sensitivity');
+            subplot(2, 2, 3); scatter(voltage_tuning.gosi, calcium_tuning.gosi, 28, 'filled'); xlabel('Voltage gOSI'); ylabel('Calcium gOSI'); title('Orientation Selectivity'); grid on;
+            subplot(2, 2, 4); scatter(voltage_tuning.pref_dir, calcium_tuning.pref_dir, 28, 'filled'); hold on; plot([0 360], [0 360], 'k--'); xlim([0 360]); ylim([0 360]); xlabel('Voltage Pref. Dir (deg)'); ylabel('Calcium Pref. Dir (deg)'); title('Preferred Direction'); grid on;
+            save_figure_bundle(stim_tuning_fig, fullfile(save_path, '7_stim_tuning_summary.fig'), fullfile(save_path, '7_stim_tuning_summary.png'));
+            close(stim_tuning_fig);
+        else
+            voltage_block_summary_snr = summarize_block_by_condition(voltage_snr, stim_windows.voltage, stim_windows.block_labels, voltage_polarity, stim_windows.trial_labels);
+            calcium_block_summary_snr = summarize_block_by_condition(calcium_snr, stim_windows.calcium, stim_windows.block_labels, calcium_polarity, stim_windows.trial_labels);
+            voltage_delta_summary_snr = summarize_stim_by_condition(voltage_stim_metrics_snr, stim_windows);
+            calcium_delta_summary_snr = summarize_stim_by_condition(calcium_stim_metrics_snr, stim_windows);
+            stim_results.analysis_kind = 'condition_response';
+            stim_results.condition_summary = struct( ...
+                'snr', struct( ...
+                    'block', struct('voltage', voltage_block_summary_snr, 'calcium', calcium_block_summary_snr), ...
+                    'delta', struct('voltage', voltage_delta_summary_snr, 'calcium', calcium_delta_summary_snr)));
+            plot_stim_condition_summary(voltage_block_summary_snr, calcium_block_summary_snr, stim_context, save_path, '7_stim_block_summary_snr', 'SNR Block Response', 'SNR');
+            plot_stim_condition_summary(voltage_delta_summary_snr, calcium_delta_summary_snr, stim_context, save_path, '7_stim_delta_summary_snr', 'SNR Delta Response', '\Delta SNR (stim - baseline)');
+            if ~isempty(voltage_stim_metrics_sensitivity) && ~isempty(calcium_stim_metrics_sensitivity)
+                voltage_block_summary_sensitivity = summarize_block_by_condition(voltage_sensitivity, stim_windows.voltage, stim_windows.block_labels, voltage_polarity, stim_windows.trial_labels);
+                calcium_block_summary_sensitivity = summarize_block_by_condition(calcium_sensitivity, stim_windows.calcium, stim_windows.block_labels, calcium_polarity, stim_windows.trial_labels);
+                voltage_delta_summary_sensitivity = summarize_stim_by_condition(voltage_stim_metrics_sensitivity, stim_windows);
+                calcium_delta_summary_sensitivity = summarize_stim_by_condition(calcium_stim_metrics_sensitivity, stim_windows);
+                stim_results.condition_summary.sensitivity = struct( ...
+                    'block', struct('voltage', voltage_block_summary_sensitivity, 'calcium', calcium_block_summary_sensitivity), ...
+                    'delta', struct('voltage', voltage_delta_summary_sensitivity, 'calcium', calcium_delta_summary_sensitivity));
+                plot_stim_condition_summary(voltage_block_summary_sensitivity, calcium_block_summary_sensitivity, stim_context, save_path, '7_stim_block_summary_sensitivity', 'Sensitivity Block Response', 'Sensitivity');
+                plot_stim_condition_summary(voltage_delta_summary_sensitivity, calcium_delta_summary_sensitivity, stim_context, save_path, '7_stim_delta_summary_sensitivity', 'Sensitivity Delta Response', '\Delta Sensitivity (stim - baseline)');
+            end
+        end
+    end
+else
+    stim_results.status = 'not_applicable_or_missing_inputs';
+end
+save(stim_results_path, 'stim_results', '-v7.3');
+end
+
+
+function peaks_index = resolve_voltage_peak_indices(voltage_results)
+if ~isfield(voltage_results, 'peak_results') || ...
+        ~isfield(voltage_results.peak_results, 'accepted_for_events')
+    error(['Voltage peak results are unavailable. Run the Voltage Sensitivity ' ...
+        'Peak Detection section before grating tuning.']);
+end
+peaks_index = voltage_results.peak_results.accepted_for_events.data.index;
+end
+
+function counts = compute_peak_counts_by_trial_windows(peaks_index, channel_windows)
+nrois = numel(peaks_index);
+ntrials = size(channel_windows.stim_frames, 1);
+counts = struct( ...
+    'baseline', zeros(nrois, ntrials), ...
+    'stim', zeros(nrois, ntrials), ...
+    'baseline_frames', channel_windows.baseline_frames, ...
+    'stim_frames', channel_windows.stim_frames);
+for roi_idx = 1:nrois
+    roi_peaks = double(peaks_index{roi_idx}(:));
+    roi_peaks = roi_peaks(isfinite(roi_peaks));
+    for trial_idx = 1:ntrials
+        base_range = channel_windows.baseline_frames(trial_idx, :);
+        stim_range = channel_windows.stim_frames(trial_idx, :);
+        counts.baseline(roi_idx, trial_idx) = sum( ...
+            roi_peaks >= base_range(1) & roi_peaks <= base_range(2));
+        counts.stim(roi_idx, trial_idx) = sum( ...
+            roi_peaks >= stim_range(1) & roi_peaks <= stim_range(2));
+    end
+end
+end
+
+function tuning = compute_grating_tuning(trial_response, orientations)
 orientations = orientations(:);
 unique_orientations = unique(orientations, 'stable');
-nrois = size(delta_mean, 1);
+nrois = size(trial_response, 1);
 nconditions = numel(unique_orientations);
 response_by_condition = NaN(nrois, nconditions);
 
 for i = 1:nconditions
     mask = orientations == unique_orientations(i);
-    response_by_condition(:, i) = mean(max(delta_mean(:, mask), 0), 2, 'omitnan');
+    response_by_condition(:, i) = mean(max(trial_response(:, mask), 0), 2, 'omitnan');
 end
 
 tuning = struct();
 tuning.unique_orientations = unique_orientations(:)';
+tuning.trial_response = trial_response;
 tuning.response_by_condition = response_by_condition;
 tuning.pref_dir = NaN(nrois, 1);
 tuning.pref_ori = NaN(nrois, 1);
@@ -4538,18 +5165,168 @@ for roi_idx = 1:nrois
 end
 end
 
+function [voltage_tuning, calcium_tuning, per_roi_tuning] = compute_dual_grating_tuning_by_roi( ...
+    voltage_stim_response, voltage_baseline_response, ...
+    calcium_stim_response, calcium_baseline_response, orientations)
+% The grating-present curves carry DSI/OSI. Paired non-grating curves are
+% stored beside them for direct baseline comparison.
+nrois = max([size(voltage_stim_response, 1), size(calcium_stim_response, 1)]);
+voltage_tuning = attach_nonstim_grating_curve( ...
+    compute_grating_tuning(voltage_stim_response, orientations), ...
+    compute_grating_tuning(voltage_baseline_response, orientations));
+calcium_tuning = attach_nonstim_grating_curve( ...
+    compute_grating_tuning(calcium_stim_response, orientations), ...
+    compute_grating_tuning(calcium_baseline_response, orientations));
+per_roi_tuning = repmat(empty_grating_roi_tuning(), nrois, 1);
+
+for roi_idx = 1:nrois
+    voltage_roi_stim = NaN(1, numel(orientations));
+    voltage_roi_baseline = NaN(1, numel(orientations));
+    calcium_roi_stim = NaN(1, numel(orientations));
+    calcium_roi_baseline = NaN(1, numel(orientations));
+    if roi_idx <= size(voltage_stim_response, 1)
+        voltage_roi_stim = voltage_stim_response(roi_idx, :);
+        voltage_roi_baseline = voltage_baseline_response(roi_idx, :);
+    end
+    if roi_idx <= size(calcium_stim_response, 1)
+        calcium_roi_stim = calcium_stim_response(roi_idx, :);
+        calcium_roi_baseline = calcium_baseline_response(roi_idx, :);
+    end
+
+    per_roi_tuning(roi_idx).roi_index = roi_idx;
+    per_roi_tuning(roi_idx).voltage = attach_nonstim_grating_curve( ...
+        compute_grating_tuning(voltage_roi_stim, orientations), ...
+        compute_grating_tuning(voltage_roi_baseline, orientations));
+    per_roi_tuning(roi_idx).calcium = attach_nonstim_grating_curve( ...
+        compute_grating_tuning(calcium_roi_stim, orientations), ...
+        compute_grating_tuning(calcium_roi_baseline, orientations));
+end
+end
+
+function tuning = attach_nonstim_grating_curve(tuning, nonstim_tuning)
+tuning.nonstim_trial_response = nonstim_tuning.trial_response;
+tuning.nonstim_response_by_condition = nonstim_tuning.response_by_condition;
+tuning.nonstim_pref_dir = nonstim_tuning.pref_dir;
+tuning.nonstim_pref_ori = nonstim_tuning.pref_ori;
+end
+
+function entry = empty_grating_roi_tuning()
+entry = struct( ...
+    'roi_index', NaN, ...
+    'voltage', struct(), ...
+    'calcium', struct(), ...
+    'mat_file', "", ...
+    'fig_file', "", ...
+    'png_file', "");
+end
+
+function per_roi_tuning = save_grating_tuning_by_roi(per_roi_tuning, save_path, output_dir_name)
+% Save each ROI grating tuning result as its own MAT/FIG/PNG bundle.
+roi_tuning_dir = fullfile(save_path, output_dir_name);
+if ~isfolder(roi_tuning_dir)
+    mkdir(roi_tuning_dir);
+end
+
+for roi_idx = 1:numel(per_roi_tuning)
+    roi_entry = per_roi_tuning(roi_idx);
+    voltage_roi_tuning = roi_entry.voltage;
+    calcium_roi_tuning = roi_entry.calcium;
+    roi_label = sprintf('roi_%03d', roi_entry.roi_index);
+    mat_file = fullfile(roi_tuning_dir, sprintf('%s_stim_tuning.mat', roi_label));
+    fig_file = fullfile(roi_tuning_dir, sprintf('%s_stim_tuning.fig', roi_label));
+    png_file = fullfile(roi_tuning_dir, sprintf('%s_stim_tuning.png', roi_label));
+
+    roi_entry.mat_file = string(mat_file);
+    roi_entry.fig_file = string(fig_file);
+    roi_entry.png_file = string(png_file);
+    save(mat_file, 'roi_entry', 'voltage_roi_tuning', 'calcium_roi_tuning');
+
+    fig = figure('Color', 'w', 'Name', sprintf('ROI %03d Grating Tuning', roi_entry.roi_index), ...
+        'Position', [120, 120, 1000, 750]);
+    subplot(2, 2, 1);
+    plot_tuning_single(voltage_roi_tuning, 'r', sprintf('ROI %03d Voltage Spike Count', roi_entry.roi_index), 'Spikes / trial');
+    subplot(2, 2, 2);
+    plot_tuning_single(calcium_roi_tuning, 'g', sprintf('ROI %03d Calcium Mean Sensitivity', roi_entry.roi_index), 'Mean sensitivity');
+    subplot(2, 2, 3);
+    plot_roi_tuning_metric_pair(voltage_roi_tuning, calcium_roi_tuning, 'gosi', 'gOSI');
+    subplot(2, 2, 4);
+    plot_roi_tuning_metric_pair(voltage_roi_tuning, calcium_roi_tuning, 'pref_dir', 'Preferred direction');
+    save_figure_bundle(fig, fig_file, png_file);
+    close(fig);
+
+    per_roi_tuning(roi_idx) = roi_entry;
+end
+end
+
+function plot_tuning_single(tuning, line_color, panel_title, y_axis_label)
+angles = tuning.unique_orientations(:)';
+stim_response = tuning.response_by_condition;
+nonstim_response = tuning.nonstim_response_by_condition;
+if isempty(stim_response)
+    stim_response = NaN(1, numel(angles));
+elseif size(stim_response, 1) > 1
+    stim_response = stim_response(1, :);
+end
+if isempty(nonstim_response)
+    nonstim_response = NaN(1, numel(angles));
+elseif size(nonstim_response, 1) > 1
+    nonstim_response = nonstim_response(1, :);
+end
+plot(angles, stim_response, '-o', 'Color', line_color, ...
+    'MarkerFaceColor', line_color, 'LineWidth', 1.5);
+hold on;
+plot(angles, nonstim_response, '--o', 'Color', line_color * 0.55 + 0.45, ...
+    'MarkerFaceColor', 'w', 'LineWidth', 1.2);
+xlabel('Direction (deg)');
+ylabel(y_axis_label);
+title(panel_title);
+legend({'Grating', 'Non-grating'}, 'Location', 'best');
+grid on;
+end
+
+function plot_roi_tuning_metric_pair(voltage_tuning, calcium_tuning, field_name, metric_label)
+voltage_value = extract_first_finite_field(voltage_tuning, field_name);
+calcium_value = extract_first_finite_field(calcium_tuning, field_name);
+bar([voltage_value, calcium_value], 'FaceColor', [0.45, 0.55, 0.70]);
+set(gca, 'XTickLabel', {'Voltage', 'Calcium'});
+ylabel(metric_label);
+title(metric_label);
+grid on;
+end
+
+function value = extract_first_finite_field(s, field_name)
+value = NaN;
+if isstruct(s) && isfield(s, field_name)
+    candidate = s.(field_name);
+    candidate = candidate(isfinite(candidate));
+    if ~isempty(candidate)
+        value = candidate(1);
+    end
+end
+end
+
 function idx = find_closest_angle_index(angles, target_angle)
 wrapped_diff = abs(mod(angles - target_angle + 180, 360) - 180);
 [~, idx] = min(wrapped_diff);
 end
 
-function plot_tuning_population(angles, response_by_condition, line_color, panel_title)
-mean_response = mean(response_by_condition, 1, 'omitnan');
-sem_response = std(response_by_condition, 0, 1, 'omitnan') ./ sqrt(max(1, sum(isfinite(response_by_condition), 1)));
-errorbar(angles, mean_response, sem_response, 'Color', line_color, 'LineWidth', 1.5);
+function plot_tuning_population(tuning, line_color, panel_title, y_axis_label)
+angles = tuning.unique_orientations;
+stim_response = tuning.response_by_condition;
+nonstim_response = tuning.nonstim_response_by_condition;
+stim_mean = mean(stim_response, 1, 'omitnan');
+stim_sem = std(stim_response, 0, 1, 'omitnan') ./ sqrt(max(1, sum(isfinite(stim_response), 1)));
+nonstim_mean = mean(nonstim_response, 1, 'omitnan');
+nonstim_sem = std(nonstim_response, 0, 1, 'omitnan') ./ sqrt(max(1, sum(isfinite(nonstim_response), 1)));
+errorbar(angles, stim_mean, stim_sem, '-o', 'Color', line_color, ...
+    'MarkerFaceColor', line_color, 'LineWidth', 1.5);
+hold on;
+errorbar(angles, nonstim_mean, nonstim_sem, '--o', ...
+    'Color', line_color * 0.55 + 0.45, 'MarkerFaceColor', 'w', 'LineWidth', 1.2);
 xlabel('Direction (deg)');
-ylabel('Mean Net Response');
+ylabel(y_axis_label);
 title([panel_title ' Tuning']);
+legend({'Grating', 'Non-grating'}, 'Location', 'best');
 grid on;
 end
 
@@ -5550,16 +6327,57 @@ function save_figure_bundle(fig_handle, fig_file, png_file)
 % after maximizing the figure so saved images match the on-screen layout
 % more closely than the MATLAB default small window capture.
 prepare_figure_for_png_export(fig_handle);
-saveas(fig_handle, fig_file, 'fig');
-exportgraphics(fig_handle, png_file, 'Resolution', 150);
+save_figure_outputs_resilient(fig_handle, fig_file, png_file, true);
 end
 
 function save_figure_bundle_preserve_layout(fig_handle, fig_file, png_file)
 if ~isgraphics(fig_handle, 'figure')
     return;
 end
-saveas(fig_handle, fig_file, 'fig');
-exportgraphics(fig_handle, png_file, 'Resolution', 150);
+save_figure_outputs_resilient(fig_handle, fig_file, png_file, false);
+end
+
+function save_figure_outputs_resilient(fig_handle, fig_file, png_file, prepared_for_export)
+if nargin < 4
+    prepared_for_export = false;
+end
+if ~isgraphics(fig_handle, 'figure')
+    warning('Dual_analysis3:InvalidFigureHandle', ...
+        'Figure output skipped because the figure handle is invalid: %s', png_file);
+    return;
+end
+
+try
+    saveas(fig_handle, fig_file, 'fig');
+catch ME
+    warning('Dual_analysis3:SaveFigFailed', ...
+        'Failed to save FIG file %s: %s', fig_file, ME.message);
+end
+
+if ~isgraphics(fig_handle, 'figure')
+    warning('Dual_analysis3:FigureClosedBeforePng', ...
+        'PNG export skipped because the figure closed before export: %s', png_file);
+    return;
+end
+
+try
+    drawnow;
+    exportgraphics(fig_handle, png_file, 'Resolution', 150);
+catch ME
+    warning('Dual_analysis3:ExportGraphicsFailed', ...
+        'exportgraphics failed for %s: %s. Trying saveas PNG fallback.', png_file, ME.message);
+    if isgraphics(fig_handle, 'figure')
+        try
+            if ~prepared_for_export
+                drawnow;
+            end
+            saveas(fig_handle, png_file, 'png');
+        catch ME2
+            warning('Dual_analysis3:SavePngFallbackFailed', ...
+                'PNG fallback also failed for %s: %s', png_file, ME2.message);
+        end
+    end
+end
 end
 
 function prepare_figure_for_png_export(fig_handle)
@@ -6391,6 +7209,7 @@ explicit_dual_results = struct( ...
         'dual_info', dual_info_path, ...
         'voltage_results', voltage_results_path, ...
         'calcium_results', calcium_results_path, ...
+        'voltage_peak_results', fullfile(save_path, 'voltage_peak_results.mat'), ...
         'dual_results', dual_results_path, ...
         'stim_results', stim_results_path, ...
         'time_frequency_results', time_frequency_results_path), ...
@@ -6864,7 +7683,11 @@ function run_dual_post_trace_sections( ...
     t_voltage, t_calcium, ...
     freq_voltage, freq_calcium, ...
     nframes_voltage, nframes_calcium, ...
-    voltage_polarity, calcium_polarity, calcium_smoothing_window, reuse_saved_stim_windows)
+    voltage_polarity, calcium_polarity, calcium_smoothing_window, ...
+    voltage_peak_params, reuse_saved_stim_windows)
+[voltage_results, ~] = run_voltage_peak_detection_section( ...
+    voltage_results, voltage_results_path, save_path, freq_voltage, voltage_peak_params);
+
 print_section('Channel Summary Plots');
 fprintf('Saving channel summary plots...\n');
 [voltage_results, calcium_results] = load_channel_results( ...
@@ -7343,118 +8166,15 @@ dual_results.comparison = struct( ...
         'created_at', datetime("now")));
 save(dual_results_path, 'dual_results', '-v7.3');
 
-print_section('Stim-Aware Analysis');
-fprintf('Running stimulus-specific analysis after dual comparison...\n');
-[voltage_results, calcium_results] = load_channel_results( ...
-    voltage_results_path, calcium_results_path, voltage_results, calcium_results);
-has_voltage_sensitivity = has_trace_stage(voltage_results, 'sensitivity');
-has_voltage_snr = has_trace_stage(voltage_results, 'snr');
-has_calcium_sensitivity = has_trace_stage(calcium_results, 'sensitivity_smoothed') || has_trace_stage(calcium_results, 'sensitivity');
-has_calcium_snr = has_trace_stage(calcium_results, 'snr_smoothed') || has_trace_stage(calcium_results, 'snr');
-if has_voltage_sensitivity
-    voltage_sensitivity = fetch_trace_stage(voltage_results, 'sensitivity');
-else
-    voltage_sensitivity = [];
-end
-if has_voltage_snr
-    voltage_snr = fetch_trace_stage(voltage_results, 'snr');
-else
-    voltage_snr = [];
-end
-if has_calcium_sensitivity
-    [calcium_sensitivity, calcium_sensitivity_stage] = resolve_preferred_trace_stage(calcium_results, {'sensitivity_smoothed', 'sensitivity'});
-else
-    calcium_sensitivity = [];
-    calcium_sensitivity_stage = '';
-end
-if has_calcium_snr
-    [calcium_snr, calcium_snr_stage] = resolve_preferred_trace_stage(calcium_results, {'snr_smoothed', 'snr'});
-else
-    calcium_snr = [];
-    calcium_snr_stage = '';
-end
-stim_results.info = rmfield_if_exists(stim_context, {'logs', 'method_manifest'});
-stim_results.windows = stim_windows;
-if stim_context.supported
-    print_stim_context_summary(stim_context, stim_windows, 'Stim-Aware Analysis');
-    stim_results.status = ternary(isstruct(stim_windows) && isfield(stim_windows, 'supported') && stim_windows.supported, ...
-        'supported', 'unsupported_window_layout');
-    if stim_windows.supported
-        if ~(has_voltage_snr && has_calcium_snr)
-            error('Stim-aware analysis requires snr stage in both voltage_results and calcium_results.');
-        end
-        stim_trace_fig = figure('Color', 'w');
-        subplot(2, 2, 1); hold on; title('Voltage Sensitivity'); plot_optional_stage(voltage_polarity * voltage_sensitivity, t_voltage, has_voltage_sensitivity, 'Sensitivity stage unavailable'); add_stim_shading(gca, stim_windows.voltage, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
-        subplot(2, 2, 2); hold on; title('Voltage SNR'); plot_optional_stage(voltage_polarity * voltage_snr, t_voltage, has_voltage_snr, 'SNR stage unavailable'); add_stim_shading(gca, stim_windows.voltage, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
-        subplot(2, 2, 3); hold on; title(sprintf('Calcium Sensitivity (%s)', strrep(char(calcium_sensitivity_stage), '_', '\_'))); plot_optional_stage(calcium_polarity * calcium_sensitivity, t_calcium, has_calcium_sensitivity, 'Sensitivity stage unavailable'); add_stim_shading(gca, stim_windows.calcium, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
-        subplot(2, 2, 4); hold on; title(sprintf('Calcium SNR (%s)', strrep(char(calcium_snr_stage), '_', '\_'))); plot_optional_stage(calcium_polarity * calcium_snr, t_calcium, has_calcium_snr, 'SNR stage unavailable'); add_stim_shading(gca, stim_windows.calcium, stim_windows.condition_index, stim_windows.condition_colors, 0.14, stim_windows.trial_labels, stim_windows.block_labels);
-        save_figure_bundle(stim_trace_fig, fullfile(save_path, '4_dual_trace_summary_with_stim.fig'), fullfile(save_path, '4_dual_trace_summary_with_stim.png'));
-        close(stim_trace_fig);
-
-        voltage_stim_metrics_snr = compute_stim_trial_metrics(voltage_snr, stim_windows.voltage, voltage_polarity, freq_voltage);
-        calcium_stim_metrics_snr = compute_stim_trial_metrics(calcium_snr, stim_windows.calcium, calcium_polarity, freq_calcium);
-        stim_results.response = struct( ...
-            'analysis_trace_stage', struct( ...
-                'snr', struct('voltage', "snr", 'calcium', string(calcium_snr_stage)), ...
-                'sensitivity', struct('voltage', "sensitivity", 'calcium', string(calcium_sensitivity_stage))), ...
-            'plot_trace_stage', struct('voltage_sensitivity', "sensitivity", 'voltage_snr', "snr", ...
-                'calcium_sensitivity', string(calcium_sensitivity_stage), 'calcium_snr', string(calcium_snr_stage)), ...
-            'calcium_smoothing_window', calcium_smoothing_window, ...
-            'voltage_polarity', voltage_polarity, ...
-            'calcium_polarity', calcium_polarity, ...
-            'snr', struct('voltage', voltage_stim_metrics_snr, 'calcium', calcium_stim_metrics_snr));
-
-        if has_voltage_sensitivity && has_calcium_sensitivity
-            voltage_stim_metrics_sensitivity = compute_stim_trial_metrics(voltage_sensitivity, stim_windows.voltage, voltage_polarity, freq_voltage);
-            calcium_stim_metrics_sensitivity = compute_stim_trial_metrics(calcium_sensitivity, stim_windows.calcium, calcium_polarity, freq_calcium);
-            stim_results.response.sensitivity = struct('voltage', voltage_stim_metrics_sensitivity, 'calcium', calcium_stim_metrics_sensitivity);
-        else
-            voltage_stim_metrics_sensitivity = [];
-            calcium_stim_metrics_sensitivity = [];
-        end
-
-        if stim_windows.is_grating
-            voltage_tuning = compute_grating_tuning(voltage_stim_metrics_snr.delta_mean, stim_windows.orientations);
-            calcium_tuning = compute_grating_tuning(calcium_stim_metrics_snr.delta_mean, stim_windows.orientations);
-            stim_results.analysis_kind = 'grating_tuning';
-            stim_results.tuning = struct('voltage', voltage_tuning, 'calcium', calcium_tuning);
-            save(fullfile(save_path, '7_stim_tuning_summary.mat'), 'voltage_tuning', 'calcium_tuning');
-            stim_tuning_fig = figure('Color', 'w');
-            subplot(2, 2, 1); plot_tuning_population(voltage_tuning.unique_orientations, voltage_tuning.response_by_condition, 'r', 'Voltage');
-            subplot(2, 2, 2); plot_tuning_population(calcium_tuning.unique_orientations, calcium_tuning.response_by_condition, 'g', 'Calcium');
-            subplot(2, 2, 3); scatter(voltage_tuning.gosi, calcium_tuning.gosi, 28, 'filled'); xlabel('Voltage gOSI'); ylabel('Calcium gOSI'); title('Orientation Selectivity'); grid on;
-            subplot(2, 2, 4); scatter(voltage_tuning.pref_dir, calcium_tuning.pref_dir, 28, 'filled'); hold on; plot([0 360], [0 360], 'k--'); xlim([0 360]); ylim([0 360]); xlabel('Voltage Pref. Dir (deg)'); ylabel('Calcium Pref. Dir (deg)'); title('Preferred Direction'); grid on;
-            save_figure_bundle(stim_tuning_fig, fullfile(save_path, '7_stim_tuning_summary.fig'), fullfile(save_path, '7_stim_tuning_summary.png'));
-            close(stim_tuning_fig);
-        else
-            voltage_block_summary_snr = summarize_block_by_condition(voltage_snr, stim_windows.voltage, stim_windows.block_labels, voltage_polarity, stim_windows.trial_labels);
-            calcium_block_summary_snr = summarize_block_by_condition(calcium_snr, stim_windows.calcium, stim_windows.block_labels, calcium_polarity, stim_windows.trial_labels);
-            voltage_delta_summary_snr = summarize_stim_by_condition(voltage_stim_metrics_snr, stim_windows);
-            calcium_delta_summary_snr = summarize_stim_by_condition(calcium_stim_metrics_snr, stim_windows);
-            stim_results.analysis_kind = 'condition_response';
-            stim_results.condition_summary = struct( ...
-                'snr', struct( ...
-                    'block', struct('voltage', voltage_block_summary_snr, 'calcium', calcium_block_summary_snr), ...
-                    'delta', struct('voltage', voltage_delta_summary_snr, 'calcium', calcium_delta_summary_snr)));
-            plot_stim_condition_summary(voltage_block_summary_snr, calcium_block_summary_snr, stim_context, save_path, '7_stim_block_summary_snr', 'SNR Block Response', 'SNR');
-            plot_stim_condition_summary(voltage_delta_summary_snr, calcium_delta_summary_snr, stim_context, save_path, '7_stim_delta_summary_snr', 'SNR Delta Response', '\Delta SNR (stim - baseline)');
-            if ~isempty(voltage_stim_metrics_sensitivity) && ~isempty(calcium_stim_metrics_sensitivity)
-                voltage_block_summary_sensitivity = summarize_block_by_condition(voltage_sensitivity, stim_windows.voltage, stim_windows.block_labels, voltage_polarity, stim_windows.trial_labels);
-                calcium_block_summary_sensitivity = summarize_block_by_condition(calcium_sensitivity, stim_windows.calcium, stim_windows.block_labels, calcium_polarity, stim_windows.trial_labels);
-                voltage_delta_summary_sensitivity = summarize_stim_by_condition(voltage_stim_metrics_sensitivity, stim_windows);
-                calcium_delta_summary_sensitivity = summarize_stim_by_condition(calcium_stim_metrics_sensitivity, stim_windows);
-                stim_results.condition_summary.sensitivity = struct( ...
-                    'block', struct('voltage', voltage_block_summary_sensitivity, 'calcium', calcium_block_summary_sensitivity), ...
-                    'delta', struct('voltage', voltage_delta_summary_sensitivity, 'calcium', calcium_delta_summary_sensitivity));
-                plot_stim_condition_summary(voltage_block_summary_sensitivity, calcium_block_summary_sensitivity, stim_context, save_path, '7_stim_block_summary_sensitivity', 'Sensitivity Block Response', 'Sensitivity');
-                plot_stim_condition_summary(voltage_delta_summary_sensitivity, calcium_delta_summary_sensitivity, stim_context, save_path, '7_stim_delta_summary_sensitivity', 'Sensitivity Delta Response', '\Delta Sensitivity (stim - baseline)');
-            end
-        end
-    end
-else
-    stim_results.status = 'not_applicable_or_missing_inputs';
-end
-save(stim_results_path, 'stim_results', '-v7.3');
+stim_results = run_dual_stim_aware_analysis_section( ...
+    save_path, ...
+    voltage_results, voltage_results_path, ...
+    calcium_results, calcium_results_path, ...
+    stim_results, stim_results_path, ...
+    stim_context, stim_windows, ...
+    t_voltage, t_calcium, ...
+    freq_voltage, freq_calcium, ...
+    voltage_polarity, calcium_polarity, calcium_smoothing_window);
 
 print_section('Population Time-Frequency Analysis');
 fprintf('Running Fourier and wavelet analysis after dual/stim summaries...\n');
