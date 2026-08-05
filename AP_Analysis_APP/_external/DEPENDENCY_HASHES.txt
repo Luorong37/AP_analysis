@@ -1,0 +1,6 @@
+NoRMCorre-0.1.1 copied from E:\0_Code\NoRMCorre-0.1.1 on 2026-07-30.
+
+801cd1e3efdd906c58b8f835c479151809869686a8a3e23f9dfbc5adea6c713b  NoRMCorreSetParms.m
+7cbeec931c51ca240785477fe225f10d17ad40ec060ca3afc2083ab83e8df32b  normcorre_batch.m
+902ac59b8a8552fca548d7769c8ad95e32a137fefa2ca03c04bed71bf21f7795  motion_metrics.m
+8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643  license.txt

@@ -1,0 +1,10 @@
+# MATLAB editor and generated build files
+*.asv
+*.m~
+*.autosave
+slprj/
+codegen/
+
+# AAA runtime output is reproducible and machine-local
+AP_Analysis_APP/runtime/
+

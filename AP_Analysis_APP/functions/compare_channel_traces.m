@@ -1,0 +1,69 @@
+function comparison = compare_channel_traces( ...
+        voltage_results,calcium_results,voltage_profile,calcium_profile,spec)
+%COMPARE_CHANNEL_TRACES Build the frozen Dual overlap data packages.
+% Each channel keeps its own time axis. This function does not truncate,
+% pad, interpolate, correlate, deconvolve, or integrate traces.
+% Inputs:
+%   voltage_results/calcium_results Channel result structs containing
+%       trace_results stages with [frames x ROI] data.
+%   voltage_profile/calcium_profile Bound profiles requiring frame_rate Hz.
+%   spec Scalar struct with voltage_polarity and calcium_polarity.
+% Output:
+%   comparison Struct containing paired stage matrices and independent
+%              seconds time axes; ROI counts must match exactly.
+if nargin < 5 || isempty(spec)
+    spec = struct('voltage_polarity',-1,'calcium_polarity',1);
+end
+required = {'voltage_polarity','calcium_polarity'};
+if ~isstruct(spec) || ~all(isfield(spec,required))
+    error('AAA:Functions:InvalidComparisonSpec', ...
+        'Comparison spec requires voltage_polarity and calcium_polarity.');
+end
+pairs = { ...
+    'sensitivity',{'sensitivity'},{'sensitivity_smoothed','sensitivity'}; ...
+    'snr',{'snr'},{'snr_smoothed','snr'}};
+comparison = struct(); available = struct();
+for idx = 1:size(pairs,1)
+    metric = pairs{idx,1};
+    [voltage,voltage_stage,ok_v] = try_stage(voltage_results,pairs{idx,2});
+    [calcium,calcium_stage,ok_c] = try_stage(calcium_results,pairs{idx,3});
+    available.(metric) = ok_v && ok_c;
+    if ~available.(metric), continue; end
+    if size(voltage,2) ~= size(calcium,2)
+        error('AAA:Functions:ComparisonRoiMismatch', ...
+            '%s stages have different ROI counts.',metric);
+    end
+    comparison.(metric) = struct( ...
+        'voltage_metric',double(voltage), ...
+        'calcium_metric',double(calcium), ...
+        'voltage_display',double(spec.voltage_polarity)*double(voltage), ...
+        'calcium_display',double(spec.calcium_polarity)*double(calcium), ...
+        'voltage_time',(0:size(voltage,1)-1)'/double(voltage_profile.frame_rate), ...
+        'calcium_time',(0:size(calcium,1)-1)'/double(calcium_profile.frame_rate), ...
+        'voltage_stage',string(voltage_stage), ...
+        'calcium_stage',string(calcium_stage), ...
+        'alignment_rule',"none; overlap plotting uses independent time axes");
+end
+if ~available.sensitivity && ~available.snr
+    error('AAA:Functions:ComparisonStagesMissing', ...
+        'Neither sensitivity nor SNR exists for both channels.');
+end
+comparison.info = struct('available_stage_pairs',available, ...
+    'voltage_polarity',double(spec.voltage_polarity), ...
+    'calcium_polarity',double(spec.calcium_polarity), ...
+    'method',"dual_trace_comparison_overlap_only", ...
+    'created_at',datetime("now"));
+end
+
+function [data,stage,ok] = try_stage(results,preferred)
+data = []; stage = ""; ok = false;
+for idx = 1:numel(preferred)
+    name = preferred{idx};
+    if isfield(results,'trace_results') && isfield(results.trace_results,name) ...
+            && isfield(results.trace_results.(name),'data') ...
+            && ~isempty(results.trace_results.(name).data)
+        data = results.trace_results.(name).data;
+        stage = string(name); ok = true; return;
+    end
+end
+end

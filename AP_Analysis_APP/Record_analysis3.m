@@ -1,0 +1,239 @@
+function receipt = Record_analysis3(control,runtime)
+%RECORD_ANALYSIS3 Unified AP/Dual Record-level analysis.
+% This public entry reads completed Cycle result folders and never loads a
+% movie. Dual_rec_analysis3 remains an unchanged legacy reference.
+
+if nargin<1||isempty(control),control=struct();end
+if nargin<2||isempty(runtime),runtime=struct();end
+control=normalize_control(control);
+started_at=datetime("now");
+emit(runtime,control,"running","Starting "+upper(control.mode)+" Record-level analysis.","");
+try
+    emit_phase(runtime,control,"resolve_sources","running", ...
+        "Resolving compatible Cycle result folders.","");
+    [result_dirs,cycle_names,source_report]=resolve_sources(control);
+    roles=choose_roles(control.mode);
+    output_dir=fullfile(control.record_path,control.output_dir_name);
+    if ~isfolder(output_dir),mkdir(output_dir);end
+    fprintf('[AAA] Record analysis mode=%s; cycles=%d; output=%s\n', ...
+        control.mode,numel(result_dirs),output_dir);
+    for idx=1:numel(result_dirs)
+        fprintf('[AAA]   %s -> %s\n',cycle_names(idx),result_dirs(idx));
+    end
+
+    emit_phase(runtime,control,"load_cycle_results","running", ...
+        "Loading saved Cycle result payloads.","");
+    progress=@(message)emit_phase(runtime,control,"load_cycle_results", ...
+        "running",message,"");
+    entries=load_record_results(result_dirs,cycle_names,roles,progress);
+    for entry_idx=1:numel(entries)
+        for role=roles'
+            frame_rate=entries(entry_idx).channels.(char(role)).movie_info.frame_rate;
+            emit(runtime,control,"running",sprintf( ...
+                '%s %s: saved frame rate %.12g Hz is authoritative.', ...
+                entries(entry_idx).cycle_name,role,double(frame_rate)),output_dir);
+        end
+    end
+    build_spec=struct('mode',control.mode,'roles',roles, ...
+        'record_path',control.record_path, ...
+        'reference_roi_file',control.reference_roi_file);
+    build_spec=copy_if_present(build_spec,control, ...
+        {'voltage_polarity','calcium_polarity','calcium_smoothing_window'});
+    emit_phase(runtime,control,"align_average","running", ...
+        "Aligning Cycle traces and building the Record average.","");
+    record_average=build_record_average(entries,build_spec);
+
+    grating=struct('status',"not_applicable",'reason',"Record stimulus is not grating.");
+    if record_average.info.stim_type=="grating"
+        emit_phase(runtime,control,"grating_tuning","running", ...
+            "Computing Record grating tuning summaries.","");
+        grating=analyze_record_grating(entries,roles);
+    end
+    record_average.grating_tuning=grating;
+
+    emit_phase(runtime,control,"render","running", ...
+        "Rendering Record result figures.","");
+    render_spec=struct('mode',control.mode, ...
+        'voltage_polarity',control.voltage_polarity, ...
+        'calcium_polarity',control.calcium_polarity);
+    render_progress=@(message)emit_phase(runtime,control,"render", ...
+        "running",message,"");
+    rendered_files=render_record_results(record_average,grating,entries, ...
+        output_dir,render_spec,render_progress);
+    frequency=struct('status',"not_applicable", ...
+        'reason',"Record stimulus is not flash.");
+    frequency_files=struct('files',strings(0,1));
+    if record_average.info.stim_type=="flash"&&control.run_frequency
+        emit_phase(runtime,control,"frequency","running", ...
+            "Computing Record FFT/CWT summaries.","");
+        [frequency,frequency_files]=analyze_record_frequency( ...
+            record_average,control.frequency,output_dir);
+    end
+    record_average.output_files=rendered_files;
+    record_average.time_frequency=frequency;
+    record_average.source_report=source_report;
+    output_files=unique([string(rendered_files.files(:)); ...
+        string(frequency_files.files(:))],'stable');
+    emit_phase(runtime,control,"persist","running", ...
+        "Saving Record result bundle and manifest.","");
+    manifest_file=write_manifest(control,record_average,output_files,output_dir);
+    result_ctx=record_result_context(control,runtime,output_dir, ...
+        record_average,output_files);
+    [~,result_record]=save_analysis_results(result_ctx,"record",struct( ...
+        'state',"completed",'action',"run",'output_files',output_files));
+    results_file=result_record.file;
+    output_files=unique([results_file;output_files],'stable');
+    if strlength(manifest_file)>0,output_files(end+1,1)=manifest_file;end
+    receipt=struct('status',"completed",'mode',control.mode, ...
+        'scope',"record_average",'input_path',control.record_path, ...
+        'output_path',string(output_dir),'started_at',started_at, ...
+        'completed_at',datetime("now"),'completed_sections', ...
+        ["record_average";"record_visualization"], ...
+        'failed_section',"",'error',struct(),'results_file',results_file, ...
+        'manifest_file',manifest_file,'output_files',unique(output_files,'stable'), ...
+        'included_cycles',cycle_names,'result_dirs',result_dirs, ...
+        'source_report',source_report);
+    emit(runtime,control,"completed", ...
+        sprintf('%s Record-level analysis completed for %d Cycle(s).', ...
+        upper(char(control.mode)),numel(result_dirs)),output_dir);
+catch ME
+    emit(runtime,control,"failed",string(ME.message),"");
+    rethrow(ME);
+end
+end
+
+function ctx=record_result_context(control,runtime,output_dir,record_average,output_files)
+roles=string(record_average.info.roles(:));
+channels=repmat(struct('profile',struct('role',""),'output_files',struct(), ...
+    'results',struct(),'data',struct()),numel(roles),1);
+for idx=1:numel(roles),channels(idx).profile.role=roles(idx);end
+ctx=struct('mode',control.mode,'scope',"record",'request',control.request, ...
+    'input_path',control.record_path,'output_path',string(output_dir), ...
+    'runtime',runtime,'channels',channels, ...
+    'shared',struct('data',struct(), ...
+        'results',struct('record',record_average), ...
+        'output_files',struct('record',output_files)), ...
+    'execution',struct('status',"completed",'completed_at',datetime('now')));
+end
+
+function control=normalize_control(control)
+defaults=struct('mode',"dual",'record_path',"",'cycle_results',struct([]), ...
+    'result_dirs',strings(0,1),'cycle_names',strings(0,1), ...
+    'reference_roi_file',"",'source_results_path',"", ...
+    'output_dir_name',"",'request',struct(),'run_frequency',true, ...
+    'frequency',struct('min_freq_hz',0.5,'max_freq_hz',100, ...
+        'wavelet_voices_per_octave',12,'wavelet_name',"amor"), ...
+    'discovery_max_depth',4,'discovery_max_mat_files',500, ...
+    'voltage_polarity',-1,'calcium_polarity',1, ...
+    'calcium_smoothing_window',40);
+names=fieldnames(defaults);for idx=1:numel(names),name=names{idx};if ~isfield(control,name)||isempty(control.(name)),control.(name)=defaults.(name);end,end
+control.mode=lower(string(control.mode));
+if ~ismember(control.mode,["ap","dual"]),error('AAA:Record:InvalidMode','mode must be ap or dual.');end
+control.record_path=string(control.record_path);
+if ~isfolder(control.record_path),error('AAA:Record:InvalidPath','record_path must be an existing folder.');end
+if strlength(string(control.output_dir_name))==0
+    if control.mode=="ap",control.output_dir_name="AP_analysis3_rec_average";else,control.output_dir_name="Dual_analysis3_rec_average";end
+end
+control.output_dir_name=char(string(control.output_dir_name));
+end
+
+function [dirs,names,report]=resolve_sources(control)
+dirs=string(control.result_dirs(:));
+if ischar(control.cycle_names)
+    names=string(cellstr(control.cycle_names));
+else
+    names=string(control.cycle_names(:));
+end
+if ~isempty(dirs)
+    if numel(dirs)~=numel(names),error('AAA:Record:InvalidSources','Explicit result_dirs and cycle_names must have equal length.');end
+    report=struct('method',"explicit_result_dirs",'manual_source_priority',false, ...
+        'included_cycles',names,'result_dirs',dirs,'excluded_cycles',strings(0,1));
+    return;
+end
+[dirs,names]=sources_from_results(control.cycle_results);
+if ~isempty(dirs)
+    report=struct('method',"current_batch_receipts",'manual_source_priority',false, ...
+        'included_cycles',names,'result_dirs',dirs,'excluded_cycles',strings(0,1));
+    return;
+end
+
+entries=aaa.helpers.common.discover_record_cycles(control.record_path,[],true);
+[~,~,~,plan]=aaa.schema.resolve_sections(control.mode,"analysis_only",struct());
+options=struct('discovery_max_depth',control.discovery_max_depth, ...
+    'discovery_max_mat_files',control.discovery_max_mat_files);
+dirs=strings(0,1);names=strings(0,1);excluded=strings(0,1);details=cell(numel(entries),1);
+manual_root=string(control.source_results_path);manual=strlength(manual_root)>0;
+for idx=1:numel(entries)
+    root=string(entries(idx).cycle_path);if manual,root=manual_root;end
+    target=struct('cycle_name',entries(idx).cycle_name,'label',entries(idx).label);
+    [path_value,item_report]=aaa.helpers.common.resolve_reuse_source( ...
+        control.mode,root,plan,target,options);
+    details{idx}=item_report;
+    if strlength(path_value)>0
+        dirs(end+1,1)=path_value;names(end+1,1)=string(entries(idx).cycle_name); %#ok<AGROW>
+    else
+        excluded(end+1,1)=string(entries(idx).cycle_name); %#ok<AGROW>
+    end
+end
+if isempty(dirs),error('AAA:Record:NoCycleResults','No compatible Cycle result folders were found for Record analysis.');end
+report=struct('method',choose(manual,"manual_source_scan","automatic_cycle_scan"), ...
+    'manual_source_priority',manual,'manual_source_path',manual_root, ...
+    'included_cycles',names,'result_dirs',dirs,'excluded_cycles',excluded, ...
+    'details',details);
+end
+
+function [dirs,names]=sources_from_results(results)
+dirs=strings(0,1);names=strings(0,1);if ~isstruct(results),return;end
+accepted=["completed","skipped","skipped_existing_result", ...
+    "skipped_existing_analysis_only_result","existing_result_detected"];
+for idx=1:numel(results)
+    if ~isfield(results(idx),'status')||~ismember(string(results(idx).status),accepted),continue;end
+    path_value="";if isfield(results(idx),'save_path'),path_value=string(results(idx).save_path);elseif isfield(results(idx),'output_path'),path_value=string(results(idx).output_path);end
+    if strlength(path_value)==0||~isfolder(path_value),continue;end
+    cycle="Cycle"+idx;if isfield(results(idx),'cycle_name')&&strlength(string(results(idx).cycle_name))>0,cycle=string(results(idx).cycle_name);end
+    dirs(end+1,1)=path_value;names(end+1,1)=cycle; %#ok<AGROW>
+end
+end
+
+function roles=choose_roles(mode)
+if mode=="ap",roles="voltage";else,roles=["voltage";"calcium"];end
+end
+function target=copy_if_present(target,source,names)
+for idx=1:numel(names),name=names{idx};if isfield(source,name),target.(name)=source.(name);end,end
+end
+function file=write_manifest(control,record_average,output_files,output_dir)
+file="";if isempty(fieldnames(control.request))||~isfield(control.request,'workflow')||~isfield(control.request.workflow,'write_manifest')||~control.request.workflow.write_manifest,return;end
+manifest=struct('schema_version',"1.0.0",'status',"completed", ...
+    'mode',control.mode,'scope',"record_average", ...
+    'input_path',control.record_path,'output_path',string(output_dir), ...
+    'created_at',datetime("now"),'completed_at',datetime("now"), ...
+    'included_cycles',record_average.info.cycle_names, ...
+    'result_dirs',record_average.info.result_dirs, ...
+    'roles',record_average.info.roles,'stim_type',record_average.info.stim_type, ...
+    'saved_frame_rates',record_average.info.saved_frame_rates, ...
+    'source_movie_files',record_average.info.source_movie_files, ...
+    'source_part_count',record_average.info.source_part_count, ...
+    'frame_rate_rule',record_average.info.frame_rate_rule, ...
+    'output_files',string(output_files(:)),'request',control.request); %#ok<NASGU>
+file=string(fullfile(output_dir,'analysis_manifest.mat'));save(file,'manifest','-v7.3');
+end
+function emit(runtime,control,state,message,output)
+event=struct('timestamp',datetime("now"),'type',"section",'mode',control.mode, ...
+    'scope',"record",'section',"record_average",'state',string(state), ...
+    'message',string(message),'input_path',control.record_path,'output_path',string(output));
+try
+    if isfield(runtime,'emit')&&isa(runtime.emit,'function_handle'),runtime.emit(event);elseif isfield(runtime,'event_callback')&&isa(runtime.event_callback,'function_handle'),runtime.event_callback(event);end
+catch
+end
+end
+function emit_phase(runtime,control,phase,state,message,role)
+event=struct('timestamp',datetime("now"),'type',"phase",'mode',control.mode, ...
+    'scope',"record",'section',"record_average",'phase',string(phase), ...
+    'role',string(role),'state',string(state),'message',string(message), ...
+    'input_path',control.record_path,'output_path',"");
+try
+    if isfield(runtime,'emit')&&isa(runtime.emit,'function_handle'),runtime.emit(event);elseif isfield(runtime,'event_callback')&&isa(runtime.event_callback,'function_handle'),runtime.event_callback(event);end
+catch
+end
+end
+function value=choose(condition,a,b),if condition,value=a;else,value=b;end,end
